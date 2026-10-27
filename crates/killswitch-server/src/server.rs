@@ -57,6 +57,7 @@ pub struct ServerState {
     pub start_time: Instant,
     pub active_mode: Arc<RwLock<OrchestratorMode>>,
     pub last_trigger_cause: Arc<RwLock<Option<(String, String, String)>>>,
+    pub peers_enabled: Arc<std::sync::atomic::AtomicBool>,
     pub config: ServerConfig,
 }
 
@@ -82,6 +83,7 @@ impl ServerState {
             start_time: Instant::now(),
             active_mode: Arc::new(RwLock::new(OrchestratorMode::Autonomous)),
             last_trigger_cause: Arc::new(RwLock::new(None)),
+            peers_enabled: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             config: ServerConfig::default(),
         }
     }

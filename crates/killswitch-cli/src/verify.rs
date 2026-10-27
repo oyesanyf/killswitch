@@ -21,7 +21,7 @@ use killswitch_core::service::default_service_manager;
 use killswitch_orchestrator::engine::{KillSwitchOrchestrator, OrchestratorConfig};
 use killswitch_server::routes::build_router;
 use killswitch_server::server::ServerState;
-use killswitch_server::types::StatusResponse;
+use killswitch_server::types::{PeersStatusResponse, StatusResponse};
 use killswitch_telemetry::correlator::EventCorrelator;
 use killswitch_telemetry::octopus::ArmRingRegistry;
 use killswitch_telemetry::otel_lineage::{
@@ -448,6 +448,30 @@ impl SubsystemVerifier {
         .map_err(|e| anyhow::anyhow!("{}", e))?;
         if bench_resp.status() != StatusCode::OK {
             bail!("GET /api/edr-bench/tasks failed with status {}", bench_resp.status());
+        }
+
+        // Verify GET /peers/status (Connected Peers telemetry & disable toggle)
+        let peers_get_req = Request::builder()
+            .uri("/peers/status")
+            .method("GET")
+            .body(Body::empty())?;
+        let peers_get_resp = build_router(Arc::new(ServerState::with_defaults(
+            Arc::new(HostContainmentManager::new_default(Some(temp_dir.path()))?),
+        )))
+        .oneshot(peers_get_req)
+        .await
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
+        if peers_get_resp.status() != StatusCode::OK {
+            bail!("GET /peers/status failed with status {}", peers_get_resp.status());
+        }
+        let peers_bytes = axum::body::to_bytes(peers_get_resp.into_body(), usize::MAX)
+            .await
+            .map_err(|e| anyhow::anyhow!("Peers status read failure: {}", e))?;
+        let peers_status: PeersStatusResponse = serde_json::from_slice(&peers_bytes)?;
+        if !peers_status.peers_enabled {
+            bail!("Expected peers_enabled == true by default");
+        }
+        if false {
         }
 
         Ok(())

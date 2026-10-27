@@ -67,6 +67,16 @@ pub async fn get_status(
     let (platform_os, isolation_engine) = current_platform_isolation_engine();
     let stored_cause = state.last_trigger_cause.read().await.clone();
 
+    let peers_enabled = state
+        .peers_enabled
+        .load(std::sync::atomic::Ordering::SeqCst);
+    let (connected_peers_count, connected_peer_endpoints) = if !peers_enabled {
+        let _ = killswitch_core::wfp::terminate_all_non_loopback_tcp_sockets();
+        (0usize, Vec::new())
+    } else {
+        killswitch_core::wfp::count_active_non_loopback_tcp_peers()
+    };
+
     let (trigger_cause, trigger_source, trigger_details) = if status.isolated {
         if let Some((c, s, d)) = stored_cause {
             (c, s, d)
@@ -122,6 +132,9 @@ pub async fn get_status(
         trigger_details,
         platform_os: platform_os.to_string(),
         isolation_engine: isolation_engine.to_string(),
+        peers_enabled,
+        connected_peers_count,
+        connected_peer_endpoints,
     }))
 }
 
@@ -911,4 +924,97 @@ pub async fn post_edr_bench_evaluate(
         "final_rule": final_rule,
         "report": report,
     })))
+}
+
+// =============================================================================
+// 7. Connected Peers Inspection & 1-Click Disable/Enable Control
+// =============================================================================
+
+/// GET /peers/status (and /api/peers/status)
+pub async fn get_peers_status(
+    State(state): State<Arc<ServerState>>,
+) -> Result<Json<PeersStatusResponse>, ServerError> {
+    let peers_enabled = state
+        .peers_enabled
+        .load(std::sync::atomic::Ordering::SeqCst);
+    let (count, endpoints) = if !peers_enabled {
+        (0usize, Vec::new())
+    } else {
+        killswitch_core::wfp::count_active_non_loopback_tcp_peers()
+    };
+
+    let msg = if peers_enabled {
+        format!("Connected peers enabled ({} active external peer connections).", count)
+    } else {
+        "Connected peers are DISABLED (0 active external peer connections permitted).".to_string()
+    };
+
+    Ok(Json(PeersStatusResponse {
+        success: true,
+        peers_enabled,
+        connected_peers_count: count,
+        connected_peer_endpoints: endpoints,
+        terminated_connections: 0,
+        message: msg,
+    }))
+}
+
+/// POST /peers/control (and /api/peers/control)
+pub async fn post_peers_control(
+    State(state): State<Arc<ServerState>>,
+    Json(req): Json<PeersControlRequest>,
+) -> Result<Json<PeersStatusResponse>, ServerError> {
+    let current = state
+        .peers_enabled
+        .load(std::sync::atomic::Ordering::SeqCst);
+
+    let target_enabled = if let Some(en) = req.enabled {
+        en
+    } else {
+        match req.action.as_deref().unwrap_or("toggle").to_ascii_lowercase().as_str() {
+            "disable" | "disconnect" | "off" => false,
+            "enable" | "connect" | "on" => true,
+            _ => !current,
+        }
+    };
+
+    state
+        .peers_enabled
+        .store(target_enabled, std::sync::atomic::Ordering::SeqCst);
+
+    if !target_enabled {
+        let terminated = killswitch_core::wfp::terminate_all_non_loopback_tcp_sockets();
+        info!(
+            "🔌 [PEERS-CONTROL] Disabled connected peers and terminated {} active external peer sockets",
+            terminated
+        );
+        Ok(Json(PeersStatusResponse {
+            success: true,
+            peers_enabled: false,
+            connected_peers_count: 0,
+            connected_peer_endpoints: Vec::new(),
+            terminated_connections: terminated,
+            message: format!(
+                "🔌 Connected Peers DISABLED: Terminated {} active external peer connections. 0 peers connected (WebUI loopback preserved).",
+                terminated
+            ),
+        }))
+    } else {
+        let (count, endpoints) = killswitch_core::wfp::count_active_non_loopback_tcp_peers();
+        info!(
+            "🟢 [PEERS-CONTROL] Re-enabled connected peers ({} active external peer connections)",
+            count
+        );
+        Ok(Json(PeersStatusResponse {
+            success: true,
+            peers_enabled: true,
+            connected_peers_count: count,
+            connected_peer_endpoints: endpoints,
+            terminated_connections: 0,
+            message: format!(
+                "🟢 Connected Peers ENABLED: {} active external peer connection(s) detected.",
+                count
+            ),
+        }))
+    }
 }

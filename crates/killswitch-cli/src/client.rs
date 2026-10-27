@@ -102,7 +102,11 @@ impl KillSwitchClient {
         } else {
             "No active KillSwitch trigger.".to_string()
         };
+        let (connected_peers_count, connected_peer_endpoints) = killswitch_core::wfp::count_active_non_loopback_tcp_peers();
         Ok(StatusResponse {
+            peers_enabled: !status.network_isolated,
+            connected_peers_count,
+            connected_peer_endpoints,
             isolated: status.isolated,
             containment_level: format!("{:?}", status.containment_level).to_lowercase(),
             isolated_at: status.isolated_at.map(|t| t.to_rfc3339()),

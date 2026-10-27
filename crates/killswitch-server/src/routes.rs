@@ -42,6 +42,11 @@ pub fn build_router(state: Arc<ServerState>) -> Router {
         .route("/api/edr-bench/evaluate", post(handlers::post_edr_bench_evaluate))
         .route("/edr-bench/evaluate", post(handlers::post_edr_bench_evaluate))
         .route("/api/killswitch-bench/evaluate", post(handlers::post_edr_bench_evaluate))
+        // 7. Connected Peers Inspection & 1-Click Disable/Enable Control
+        .route("/peers/status", get(handlers::get_peers_status))
+        .route("/api/peers/status", get(handlers::get_peers_status))
+        .route("/peers/control", post(handlers::post_peers_control))
+        .route("/api/peers/control", post(handlers::post_peers_control))
         // Middleware Layers (applied bottom-up)
         .layer(middleware::cors_layer())
         .layer(middleware::body_limit_layer(state.config.max_body_bytes))

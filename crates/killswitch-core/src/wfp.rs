@@ -1721,6 +1721,105 @@ pub fn terminate_all_non_loopback_tcp_sockets() -> usize {
     }
 }
 
+/// Inspects the OS TCP connection table (`GetTcpTable` on Windows, `/proc/net/tcp` on Linux)
+/// and returns `(active_non_loopback_peer_connections_count, remote_peer_endpoints_sample)`.
+pub fn count_active_non_loopback_tcp_peers() -> (usize, Vec<String>) {
+    #[cfg(windows)]
+    {
+        use windows::core::{PCSTR, PCWSTR};
+        use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+
+        let dll_name: Vec<u16> = "iphlpapi.dll\0".encode_utf16().collect();
+        let Ok(h_mod) = (unsafe { LoadLibraryW(PCWSTR(dll_name.as_ptr())) }) else {
+            return (0, Vec::new());
+        };
+        let Some(p_get) = (unsafe { GetProcAddress(h_mod, PCSTR(b"GetTcpTable\0".as_ptr())) }) else {
+            return (0, Vec::new());
+        };
+        let fn_get: FnGetTcpTable = unsafe { std::mem::transmute((p_get as usize) as *const ()) };
+
+        let mut size: u32 = 0;
+        let first_status = unsafe { fn_get(std::ptr::null_mut(), &mut size, 0) };
+        if first_status != ERROR_INSUFFICIENT_BUFFER || size < 4 {
+            return (0, Vec::new());
+        }
+
+        let mut buf = vec![0u8; size as usize + 512];
+        let mut actual_size = buf.len() as u32;
+        let status = unsafe { fn_get(buf.as_mut_ptr(), &mut actual_size, 0) };
+        if status != ERROR_SUCCESS || actual_size < 4 {
+            return (0, Vec::new());
+        }
+
+        let num_entries = u32::from_ne_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
+        let row_size = std::mem::size_of::<MibTcpRow>();
+        let max_entries = (buf.len().saturating_sub(4)) / row_size;
+        let count = num_entries.min(max_entries);
+        let rows_ptr = unsafe { buf.as_ptr().add(4) as *const MibTcpRow };
+
+        let active_ctrl_ports = discover_active_control_ports();
+        let mut active_count = 0usize;
+        let mut peers = Vec::new();
+
+        for i in 0..count {
+            let row = unsafe { *rows_ptr.add(i) };
+            let local_octets = row.dw_local_addr.to_ne_bytes();
+            let remote_octets = row.dw_remote_addr.to_ne_bytes();
+            let local_port = u16::from_be((row.dw_local_port & 0xFFFF) as u16);
+            let remote_port = u16::from_be((row.dw_remote_port & 0xFFFF) as u16);
+
+            let is_loopback = local_octets[0] == 127
+                || remote_octets[0] == 127
+                || remote_octets == [0, 0, 0, 0];
+            let is_control_port =
+                active_ctrl_ports.contains(&local_port) || active_ctrl_ports.contains(&remote_port);
+            let is_active_state = matches!(row.dw_state, 3 | 4 | 5 | 8);
+
+            if is_active_state && !is_loopback && !is_control_port {
+                active_count += 1;
+                if peers.len() < 20 {
+                    let ep = format!(
+                        "{}.{}.{}.{}:{}",
+                        remote_octets[0],
+                        remote_octets[1],
+                        remote_octets[2],
+                        remote_octets[3],
+                        remote_port
+                    );
+                    if !peers.contains(&ep) {
+                        peers.push(ep);
+                    }
+                }
+            }
+        }
+        (active_count, peers)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let mut active_count = 0usize;
+        let mut peers = Vec::new();
+        if let Ok(raw) = std::fs::read_to_string("/proc/net/tcp") {
+            for line in raw.lines().skip(1) {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 4 && parts[3] == "01" {
+                    let rem = parts[2];
+                    if !rem.starts_with("0100007F:") && !rem.starts_with("00000000:") {
+                        active_count += 1;
+                        if peers.len() < 20 {
+                            peers.push(rem.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        (active_count, peers)
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        (0, Vec::new())
+    }
+}
+
 /// Terminates active TCP connections destined for specific remote IP addresses.
 pub fn terminate_active_tcp_sockets_for_ips(ips: &[IpAddr]) -> usize {
     #[cfg(windows)]

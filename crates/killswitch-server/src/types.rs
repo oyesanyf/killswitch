@@ -36,6 +36,16 @@ pub struct StatusResponse {
     pub platform_os: String,
     #[serde(default)]
     pub isolation_engine: String,
+    #[serde(default = "default_peers_enabled")]
+    pub peers_enabled: bool,
+    #[serde(default)]
+    pub connected_peers_count: usize,
+    #[serde(default)]
+    pub connected_peer_endpoints: Vec<String>,
+}
+
+fn default_peers_enabled() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -333,4 +343,29 @@ pub struct EdrBenchEvaluateRequest {
     #[serde(default)]
     pub engage_if_promoted: Option<bool>,
 }
+
+// =============================================================================
+// Connected Peers Control DTOs
+// =============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PeersControlRequest {
+    /// Explicit boolean (`true` = enable peers, `false` = disable & disconnect peers)
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    /// Optional action string (`"disable"`, `"enable"`, `"toggle"`, `"disconnect"`)
+    #[serde(default)]
+    pub action: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeersStatusResponse {
+    pub success: bool,
+    pub peers_enabled: bool,
+    pub connected_peers_count: usize,
+    pub connected_peer_endpoints: Vec<String>,
+    pub terminated_connections: usize,
+    pub message: String,
+}
+
 

@@ -477,11 +477,13 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
     <div class="brand-title">
       <h1 id="dashboard-heading" tabindex="-1">🛡️ KillSwitch — Personal &amp; Endpoint Protection</h1>
       <span id="isolation-badge" class="badge ok">🟢 INTERNET CONNECTED</span>
+      <span id="peers-badge" class="badge ok">🌐 Connected Peers: 0</span>
       <span id="os-badge" class="badge">OS: Detecting...</span>
       <span id="mode-badge" class="badge">Auto-Protection: ON</span>
     </div>
     <div class="btn-row">
       <button type="button" class="primary" onclick="refreshAll(true, this)">🔄 Refresh Status</button>
+      <button id="btn-header-peers" type="button" class="danger" onclick="togglePeers(null, this)">🔌 Disable Peers</button>
       <button id="btn-mode-auto" type="button" aria-pressed="true" onclick="toggleMode('autonomous', this)">🤖 Automatic Protection ON</button>
       <button id="btn-mode-manual" type="button" aria-pressed="false" onclick="toggleMode('manual', this)">👤 Ask Me First (Manual)</button>
     </div>
@@ -526,15 +528,24 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
           <span>🩺 Check Computer &amp; App Health</span>
           <span class="btn-sub">Scans running programs on your computer to verify system apps are safe and healthy.</span>
         </button>
+
+        <button id="btn-hero-peers" type="button" class="big-btn danger" onclick="togglePeers(null, this)">
+          <span id="btn-hero-peers-title">🔌 Disable Connected Peers (0 Active)</span>
+          <span id="btn-hero-peers-sub" class="btn-sub">Instantly disconnects all external peer connections while keeping your local control dashboard open.</span>
+        </button>
       </div>
 
       <div id="card1-status" class="toast">Ready. Click any button above to control your internet protection.</div>
 
-      <!-- Simple 4-box Summary -->
+      <!-- Simple 5-box Summary -->
       <div class="kv-grid">
         <div class="kv-box">
           <div class="kv-label">Internet Status</div>
           <div id="st-net" class="kv-val">Connected (Normal)</div>
+        </div>
+        <div class="kv-box">
+          <div class="kv-label">Connected Peers</div>
+          <div id="st-peers" class="kv-val">0 Peers (Enabled)</div>
         </div>
         <div class="kv-box">
           <div class="kv-label">Protection Level</div>
@@ -931,7 +942,83 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       document.getElementById('st-ports').textContent = (s.allowlisted_ports || []).join(', ');
       document.getElementById('st-hash').textContent = (s.state_hash_blake3 || '').slice(0, 24) + '…';
       document.getElementById('st-reason').textContent = (s.reason || 'Normal') + (s.isolated_by ? ' (' + s.isolated_by + ')' : '');
+
+      updatePeersUi(s.peers_enabled !== false, Number(s.connected_peers_count || 0), s.connected_peer_endpoints || []);
       return s;
+    }
+
+    function updatePeersUi(peersEnabled, peersCount, endpoints) {
+      window.__peersEnabled = peersEnabled;
+      const peersBadge = document.getElementById('peers-badge');
+      const stPeers = document.getElementById('st-peers');
+      const hdrBtn = document.getElementById('btn-header-peers');
+      const heroBtn = document.getElementById('btn-hero-peers');
+      const heroTitle = document.getElementById('btn-hero-peers-title');
+      const heroSub = document.getElementById('btn-hero-peers-sub');
+
+      if (peersEnabled) {
+        if (peersBadge) {
+          peersBadge.textContent = '🌐 Connected Peers: ' + peersCount;
+          peersBadge.className = 'badge ok';
+        }
+        if (stPeers) {
+          stPeers.textContent = peersCount + ' Connected (Enabled)';
+          stPeers.title = (endpoints || []).join(', ');
+        }
+        if (hdrBtn) {
+          hdrBtn.textContent = '🔌 Disable Peers (' + peersCount + ')';
+          hdrBtn.className = 'danger';
+        }
+        if (heroBtn) {
+          heroBtn.className = 'big-btn danger';
+        }
+        if (heroTitle) {
+          heroTitle.textContent = '🔌 Disable Connected Peers (' + peersCount + ' Active)';
+        }
+        if (heroSub) {
+          heroSub.textContent = 'Click to immediately disconnect all ' + peersCount + ' external peer connection(s) while keeping this dashboard open.';
+        }
+      } else {
+        if (peersBadge) {
+          peersBadge.textContent = '🔌 Peers Disabled (0 Connected)';
+          peersBadge.className = 'badge danger';
+        }
+        if (stPeers) {
+          stPeers.textContent = '0 Connected (Disabled)';
+          stPeers.title = 'External peer connections are disabled';
+        }
+        if (hdrBtn) {
+          hdrBtn.textContent = '🟢 Enable Peers';
+          hdrBtn.className = 'ok';
+        }
+        if (heroBtn) {
+          heroBtn.className = 'big-btn ok';
+        }
+        if (heroTitle) {
+          heroTitle.textContent = '🟢 Enable Connected Peers (Currently Disabled)';
+        }
+        if (heroSub) {
+          heroSub.textContent = 'External peer connections are currently disabled (0 connected). Click to allow peer connections again.';
+        }
+      }
+    }
+
+    async function togglePeers(forceEnabled, btn) {
+      const targetEnabled = typeof forceEnabled === 'boolean' ? forceEnabled : !(window.__peersEnabled !== false);
+      const busyMsg = targetEnabled ? '🟢 Enabling Peers...' : '🔌 Disconnecting Peers...';
+      return withButtonFeedback(btn, busyMsg, async () => {
+        try {
+          const res = await api('/peers/control', {
+            method: 'POST',
+            body: JSON.stringify({ enabled: targetEnabled })
+          });
+          updatePeersUi(res.peers_enabled, Number(res.connected_peers_count || 0), res.connected_peer_endpoints || []);
+          await refreshStatus();
+          setCardStatus('card1-status', res.message, res.peers_enabled ? 'ok' : 'danger');
+        } catch (e) {
+          setCardStatus('card1-status', '❌ Could not update peer connections: ' + e.message, 'danger');
+        }
+      });
     }
 
     async function refreshGraph(showFeedback, btn) {
