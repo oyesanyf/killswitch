@@ -272,7 +272,7 @@ impl KillSwitchClient {
         info!("✅ Emergency host disarm executed successfully in process.");
         Ok(DisarmResponse {
             success: true,
-            message: "Direct native host disarm & network restoration executed in-process".to_string(),
+            message: "Direct in-process emergency restore & native host network restoration executed".to_string(),
             status: fallback_status,
         })
     }
