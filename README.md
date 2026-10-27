@@ -141,3 +141,26 @@ To guarantee that KillSwitch **never blindly isolates a computer on a false alar
   - Evaluates a `candidate_yara_rule` or `preset` (`"overbroad_blind"` or `"surgical_verified"`) through Gate 1 (`FAIL_TO_PASS`) and Gate 2 (`PASS_TO_PASS`), optionally running compiler-in-the-loop refinement (`"auto_refine": true`).
 
 
+---
+
+## 🌐 Live Connected Peers Telemetry & 1-Click Peer Disconnection
+
+KillSwitch inspects the live OS TCP socket table directly in-process (`iphlpapi.dll` `GetTcpTable` on Windows; `/proc/net/tcp` on Linux) to track active external peer connections while excluding `127.0.0.1` loopback and active control ports:
+- **WebUI Live Peers Badge & Toggle**: Displays `🌐 Connected Peers: <count>` (`#peers-badge`) and a 1-click **`🔌 Disable Connected Peers`** button (`#btn-header-peers` & `#btn-hero-peers`) that immediately severs all established non-loopback TCP sockets (`SetTcpEntry` `MIB_TCP_STATE_DELETE_TCB`) while keeping the local WebUI open.
+- **REST API Endpoints**:
+  - `GET /peers/status` (and `/api/peers/status`): Returns `peers_enabled`, `connected_peers_count`, and `connected_peer_endpoints`.
+  - `POST /peers/control` (and `/api/peers/control`): Accepts `{ "enabled": false | true }` or `{ "action": "disable" | "enable" | "toggle" }` to disconnect or re-enable external peer connections on demand.
+
+---
+
+## 🔐 Native TPM 2.0 Hardware Security, PCR 0..7 Attestation & Ledger Sealing
+
+To prevent an attacker or rootkit with local administrator access from tampering with or rolling back `killchain_state.json` on disk, `killswitch-core::tpm` anchors the BLAKE3 state ledger to hardware security primitives without spawning external processes:
+- **Windows (`tbs.dll` + `crypt32.dll`)**:
+  - Dynamically invokes `Tbsi_GetDeviceInfo`, `Tbsi_Context_Create`, and `Tbsip_Submit_Command` in `tbs.dll` to detect TPM 2.0 hardware (`TrustZone / fTPM`, `SPB`, `FIFO/MMIO`, or discrete TPM) and submit raw `TPM2_PCR_Read` (`0x0000017E`) commands for PCRs `0..7` in the SHA-256 bank (`0x000B`).
+  - Seals the active BLAKE3 state ledger root hash (`state_hash_blake3`) and monotonic sequence number into `killchain_state.tpm.seal` using `CryptProtectData` / `CryptUnprotectData` (`CRYPTPROTECT_UI_FORBIDDEN`) bound to the hardware PCR 0..7 digest and a keyed BLAKE3 envelope MAC.
+- **Linux (`/dev/tpmrm0` & `/sys/class/tpm/tpm0`)**:
+  - Queries `/sys/class/tpm/tpm0` and submits `TPM2_PCR_Read` commands over the kernel TPM Resource Manager (`/dev/tpmrm0`) when accessible, sealing the state anchor with keyed BLAKE3 XOF encryption.
+- **REST API Endpoints**:
+  - `GET /tpm/status` (and `/api/tpm/status`): Returns live TPM 2.0 hardware presence, version, interface type, PCR 0..7 SHA-256 quote digest, and ledger seal verification status.
+  - `POST /tpm/seal` (and `/api/tpm/seal`): Forces a live hardware TPM 2.0 probe and re-seals the active BLAKE3 ledger root hash on demand.
