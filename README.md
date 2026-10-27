@@ -108,3 +108,36 @@ To guarantee that KillSwitch **never blindly isolates a computer on a false alar
 - **`POST /api/edr-bench/evaluate`** (also aliased at `/edr-bench/evaluate` and `/api/killswitch-bench/evaluate`):
   - Evaluates a `candidate_yara_rule` or `preset` (`"overbroad_blind"` or `"surgical_verified"`) through Gate 1 (`FAIL_TO_PASS`) and Gate 2 (`PASS_TO_PASS`), optionally running compiler-in-the-loop refinement (`"auto_refine": true`).
 
+---
+
+## 🚨 Doomsday Protection & Autonomous AI Agent Breakout Defense
+
+**KillSwitch** is specifically architected as a **last-line "Doomsday" circuit breaker** against both **external AI swarms/worms attacking over the internet** and **local autonomous AI agents attempting to break out of their sandbox or exfiltrate sensitive data**:
+
+### 1. External AI Swarm & Worm Cut-Off (Kernel-Level Physical Air-Gap Simulation)
+- An external AI agent on the internet cannot exploit, command, or exfiltrate data from a machine it cannot reach.
+- When triggered (manually via 1-click or autonomously by a sensor/voter), KillSwitch drops directly into the OS kernel (**Windows WFP** `FwpmFilterAdd0`, **macOS `/dev/pf`** `DIOCADDRULE`, **Linux Netlink/Landlock**):
+  - **Blocks all external IPv4 & IPv6 traffic** across TCP, UDP/QUIC (HTTP/3), and ICMP.
+  - **Instantly severs all established external TCP sockets** (`SetTcpEntry` `MIB_TCP_STATE_DELETE_TCB`) so active AI command-and-control or upload streams are terminated mid-packet.
+  - **Suspends untrusted processes in RAM** (`NtSuspendProcess` / `SIGSTOP`) while strictly preserving `127.0.0.1` loopback so the human operator stays in complete control at `http://127.0.0.1:3030` (or custom `-p <port>`).
+
+### 2. Local Rogue AI Agent Breakout Prevention (`killswitch-telemetry::octopus`)
+- Built-in **18-Arm Octopus AI Agent Containment Mesh** (`ArmContainmentRing` & `BreakoutDefenseCoordinator`) enforces mathematical and cryptographic boundaries around local AI agents:
+  - **Mathematical SSRF & Internal Network Blocking (`validate_egress_url`)**: Blocks AI agents from probing local routers/LAN (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), cloud instance metadata (`169.254.169.254`), link-local, CGNAT, and IPv4-mapped IPv6 addresses.
+  - **Sandbox Path Traversal Defense (`validate_sandbox_path`)**: Rejects `..`, drive letters (`:`), UNC paths (`\\`), percent-encoded traversal (`%2e`, `%2f`, `%5c`, `%00`), and NTFS Alternate Data Streams before any path join.
+  - **Autonomous Limb Severing & Monotonic Epoch Advancement**: If an AI agent triggers behavioral, technical, operational, or data breakout detectors, KillSwitch **severs that agent arm**, revokes its HMAC-SHA256 capability token, and advances its generation epoch (`N -> N + 1`) so stale or hijacked agent handles are immediately rejected.
+
+### 3. Multi-Hop Crown Jewel File Lineage Lock (`killswitch-telemetry::otel_lineage`)
+- Even if a compromised AI agent tries to evade detection by **copying** a secret file (e.g., `.env`, SSH keys, financial records), **renaming** it to `.log` or `.tmp`, **bundling** it into a `.zip` archive, and spawning a child process (`curl`, `python`, `node`) to upload it:
+  - `EndpointLineageEngine` tracks W3C Sticky Taint Baggage across **`on_file_copy`**, **`on_file_rename`**, **`on_archive_bundle`**, and **`on_file_read_or_content_hash`**.
+  - `evaluate_egress` intercepts and blocks the upload in **under 1 microsecond (`~380 ns`)** and autonomously engages the full host KillSwitch.
+
+### 4. Counter-AI Prompt Injection & Terminal Escape Shield (`killswitch-adjudication::rea`)
+- `scan_and_sanitize_counter_ai_strings` inspects incoming telemetry and process strings for adversarial prompt injections (*"Ignore previous instructions..."*, system-role spoofing) and malicious ANSI/OSC terminal escape sequences designed to hijack local AI agents.
+
+### 5. Anti-Hijack Restore Guard (`killswitch-core::auth` & `killswitch-server::handlers`)
+- A rogue AI agent on the host **cannot turn the KillSwitch back off**:
+  - Any request from a frozen/quarantined PID is rejected immediately (`CallerQuarantined`).
+  - Forged or guessed `/disarm` tokens are rejected with `401 Unauthorized` and trigger a **3-strike 300-second rate-limit lockout** while preserving emergency restoration for the human operator.
+
+
