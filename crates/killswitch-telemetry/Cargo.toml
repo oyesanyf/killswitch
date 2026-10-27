@@ -32,8 +32,6 @@ url = { workspace = true }
 
 # OpenTelemetry & OpenLineage Integration
 opentelemetry = { workspace = true }
-opentelemetry_sdk = { workspace = true }
-opentelemetry-stdout = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true }

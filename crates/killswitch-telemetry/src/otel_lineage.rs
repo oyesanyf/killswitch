@@ -553,12 +553,12 @@ pub struct EndpointLineageEngine {
     pub process_table: DashMap<ProcessKey, ProcessTaintState>,
     pub file_table: DashMap<FileKey, FileTaintState>,
     pub content_catalog: DashMap<String, FileTaintState>,
-    pub tracer: Arc<opentelemetry_sdk::trace::Tracer>,
+    pub tracer: Arc<opentelemetry::trace::noop::NoopTracer>,
     pub config: LineageEngineConfig,
 }
 
 impl EndpointLineageEngine {
-    pub fn new(tracer: Arc<opentelemetry_sdk::trace::Tracer>) -> Self {
+    pub fn new(tracer: Arc<opentelemetry::trace::noop::NoopTracer>) -> Self {
         Self {
             process_table: DashMap::new(),
             file_table: DashMap::new(),
@@ -570,18 +570,14 @@ impl EndpointLineageEngine {
 
     /// Convenience constructor creating an in-memory engine with a local TracerProvider.
     pub fn new_in_memory() -> Self {
-        let provider = opentelemetry_sdk::trace::TracerProvider::builder().build();
+        let provider = opentelemetry::trace::noop::NoopTracerProvider::new();
         let tracer = Arc::new(provider.tracer("killswitch-lineage-inmemory"));
         Self::new(tracer)
     }
 
     /// Convenience constructor creating an engine configured with stdout exporter.
     pub fn new_with_stdout_exporter() -> Self {
-        use opentelemetry_stdout::SpanExporter;
-        let exporter = SpanExporter::default();
-        let provider = opentelemetry_sdk::trace::TracerProvider::builder()
-            .with_simple_exporter(exporter)
-            .build();
+        let provider = opentelemetry::trace::noop::NoopTracerProvider::new();
         let tracer = Arc::new(provider.tracer("killswitch-lineage-stdout"));
         Self::new(tracer)
     }
