@@ -1,7 +1,7 @@
 //! # `killswitch-core`
 //!
 //! Native Zero-OS-Tool containment engine, process freeze, active tarpit,
-//! 4-tier hybrid operator authentication, and BLAKE3-chained state ledger.
+//! 4-tier hybrid operator authentication, TPM 2.0 hardware sealing, and BLAKE3-chained state ledger.
 
 pub mod auth;
 pub mod freeze;
@@ -11,6 +11,7 @@ pub mod pf;
 pub mod service;
 pub mod state_ledger;
 pub mod tarpit;
+pub mod tpm;
 pub mod wfp;
 
 pub use auth::{FrozenPidsProvider, OperatorAuthManager};
@@ -37,6 +38,10 @@ pub use service::{
 pub use service::WindowsServiceManager;
 pub use state_ledger::{StateLedger, StateLedgerSnapshot, GENESIS_HASH};
 pub use tarpit::ActiveProcessTarpit;
+pub use tpm::{
+    probe_hardware_tpm, resolve_tpm_seal_path, seal_ledger_anchor, verify_tpm_and_ledger_anchor,
+    HardwareTpmProbe, TpmSealedAnchorEnvelope, TpmStatusReport,
+};
 pub use wfp::{
     apply_bfe_registry_quarantine_rules, apply_native_bfe_registry_rule,
     disarm_windows_network_quarantine, engage_windows_network_quarantine,

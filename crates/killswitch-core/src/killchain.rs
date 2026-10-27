@@ -149,6 +149,19 @@ impl KillChainHostManager {
         ledger.snapshot().network_receipts.clone()
     }
 
+    /// Returns the live TPM 2.0 hardware status and verifies the sealed BLAKE3 ledger anchor.
+    pub fn tpm_status_report(&self) -> crate::tpm::TpmStatusReport {
+        let ledger = self.ledger.read();
+        ledger.tpm_status_report()
+    }
+
+    /// Forces a live hardware TPM 2.0 probe and re-seals the active BLAKE3 ledger root hash.
+    pub fn re_seal_tpm_anchor(&self) -> crate::tpm::TpmStatusReport {
+        let _ = crate::tpm::refresh_hardware_tpm_probe();
+        let ledger = self.ledger.read();
+        ledger.re_seal_tpm_anchor()
+    }
+
     /// Queries active process isolation states.
     pub fn get_process_records(&self) -> Vec<ProcessIsolationState> {
         let ledger = self.ledger.read();

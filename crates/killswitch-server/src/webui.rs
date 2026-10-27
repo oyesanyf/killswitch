@@ -478,12 +478,14 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       <h1 id="dashboard-heading" tabindex="-1">🛡️ KillSwitch — Personal &amp; Endpoint Protection</h1>
       <span id="isolation-badge" class="badge ok">🟢 INTERNET CONNECTED</span>
       <span id="peers-badge" class="badge ok">🌐 Connected Peers: 0</span>
+      <span id="tpm-badge" class="badge ok">🔐 TPM 2.0: SEALED &amp; VERIFIED</span>
       <span id="os-badge" class="badge">OS: Detecting...</span>
       <span id="mode-badge" class="badge">Auto-Protection: ON</span>
     </div>
     <div class="btn-row">
       <button type="button" class="primary" onclick="refreshAll(true, this)">🔄 Refresh Status</button>
       <button id="btn-header-peers" type="button" class="danger" onclick="togglePeers(null, this)">🔌 Disable Peers</button>
+      <button id="btn-header-tpm" type="button" class="ok" onclick="reSealTpmAnchor(this)">🔐 Re-Seal TPM 2.0</button>
       <button id="btn-mode-auto" type="button" aria-pressed="true" onclick="toggleMode('autonomous', this)">🤖 Automatic Protection ON</button>
       <button id="btn-mode-manual" type="button" aria-pressed="false" onclick="toggleMode('manual', this)">👤 Ask Me First (Manual)</button>
     </div>
@@ -546,6 +548,10 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
         <div class="kv-box">
           <div class="kv-label">Connected Peers</div>
           <div id="st-peers" class="kv-val">0 Peers (Enabled)</div>
+        </div>
+        <div class="kv-box">
+          <div class="kv-label">TPM 2.0 Hardware Seal</div>
+          <div id="st-tpm" class="kv-val">TPM 2.0 (Sealed &amp; Verified)</div>
         </div>
         <div class="kv-box">
           <div class="kv-label">Protection Level</div>
@@ -944,7 +950,42 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       document.getElementById('st-reason').textContent = (s.reason || 'Normal') + (s.isolated_by ? ' (' + s.isolated_by + ')' : '');
 
       updatePeersUi(s.peers_enabled !== false, Number(s.connected_peers_count || 0), s.connected_peer_endpoints || []);
+      updateTpmUi(s);
       return s;
+    }
+
+    function updateTpmUi(s) {
+      const tpmBadge = document.getElementById('tpm-badge');
+      const stTpm = document.getElementById('st-tpm');
+      const ver = s.tpm_version || 'TPM 2.0';
+      const verified = s.tpm_integrity_verified !== false;
+      const pcrShort = (s.tpm_pcr_0_7_sha256 || '').slice(0, 12);
+      const detail = s.tpm_status_detail || (ver + ' Hardware Seal Active');
+      if (tpmBadge) {
+        tpmBadge.textContent = verified
+          ? ('🔐 ' + ver + ': SEALED & VERIFIED')
+          : ('⚠️ ' + ver + ': SEAL MISMATCH');
+        tpmBadge.className = verified ? 'badge ok' : 'badge danger';
+        tpmBadge.title = detail + (pcrShort ? ' | PCR 0..7: ' + s.tpm_pcr_0_7_sha256 : '');
+      }
+      if (stTpm) {
+        stTpm.textContent = verified
+          ? (ver + ' (PCR ' + (pcrShort || 'Verified') + '…)')
+          : '⚠️ Unverified / Tampered';
+        stTpm.title = detail;
+      }
+    }
+
+    async function reSealTpmAnchor(btn) {
+      await withButtonFeedback(btn, '🔐 Sealing TPM 2.0…', async () => {
+        try {
+          const res = await api('/tpm/seal', { method: 'POST', body: '{}' });
+          await refreshStatus();
+          setCardStatus('card1-status', '🔐 TPM 2.0 Hardware Seal Verified: ' + (res.status_detail || 'Ledger anchor sealed to PCR 0..7'), res.tpm_integrity_verified ? 'ok' : 'danger');
+        } catch (err) {
+          setCardStatus('card1-status', 'TPM Seal Error: ' + err.message, 'danger');
+        }
+      });
     }
 
     function updatePeersUi(peersEnabled, peersCount, endpoints) {

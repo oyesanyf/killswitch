@@ -342,6 +342,25 @@ impl StateLedger {
         Ok(())
     }
 
+    /// Returns the live TPM 2.0 hardware status and verifies the sealed BLAKE3 ledger anchor.
+    pub fn tpm_status_report(&self) -> crate::tpm::TpmStatusReport {
+        crate::tpm::verify_tpm_and_ledger_anchor(
+            &self.file_path,
+            &self.snapshot.current_hash,
+            self.snapshot.sequence_number,
+        )
+    }
+
+    /// Re-seals the active BLAKE3 ledger root hash into the TPM 2.0 / DPAPI seal envelope and returns the updated report.
+    pub fn re_seal_tpm_anchor(&self) -> crate::tpm::TpmStatusReport {
+        let _ = crate::tpm::seal_ledger_anchor(
+            &self.file_path,
+            &self.snapshot.current_hash,
+            self.snapshot.sequence_number,
+        );
+        self.tpm_status_report()
+    }
+
     /// Verifies the cryptographic integrity of the historical event chain.
     pub fn verify_integrity(&self) -> Result<()> {
         // 1. Verify snapshot hash

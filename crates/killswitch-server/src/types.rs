@@ -42,6 +42,24 @@ pub struct StatusResponse {
     pub connected_peers_count: usize,
     #[serde(default)]
     pub connected_peer_endpoints: Vec<String>,
+    #[serde(default)]
+    pub tpm_present: bool,
+    #[serde(default)]
+    pub tpm_version: String,
+    #[serde(default)]
+    pub tpm_provider: String,
+    #[serde(default)]
+    pub tpm_interface_type: String,
+    #[serde(default)]
+    pub tpm_sealed: bool,
+    #[serde(default)]
+    pub tpm_integrity_verified: bool,
+    #[serde(default)]
+    pub tpm_pcr_0_7_sha256: String,
+    #[serde(default)]
+    pub tpm_anchored_ledger_hash: String,
+    #[serde(default)]
+    pub tpm_status_detail: String,
 }
 
 fn default_peers_enabled() -> bool {
@@ -366,6 +384,23 @@ pub struct PeersStatusResponse {
     pub connected_peer_endpoints: Vec<String>,
     pub terminated_connections: usize,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TpmStatusResponse {
+    pub success: bool,
+    pub tpm_present: bool,
+    pub tpm_version: String,
+    pub tpm_provider: String,
+    pub tpm_interface_type: String,
+    pub tpm_sealed: bool,
+    pub tpm_integrity_verified: bool,
+    pub pcr_0_7_sha256: String,
+    pub pcr_update_counter: u32,
+    pub anchored_ledger_hash: String,
+    pub anchored_sequence_number: u64,
+    pub last_sealed_at: Option<String>,
+    pub status_detail: String,
 }
 
 

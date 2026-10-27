@@ -111,6 +111,7 @@ pub async fn get_status(
         )
     };
 
+    let tpm = state.containment_manager.tpm_status_report();
     Ok(Json(StatusResponse {
         isolated: status.isolated,
         containment_level: format!("{:?}", status.containment_level).to_lowercase(),
@@ -135,6 +136,15 @@ pub async fn get_status(
         peers_enabled,
         connected_peers_count,
         connected_peer_endpoints,
+        tpm_present: tpm.tpm_present,
+        tpm_version: tpm.tpm_version,
+        tpm_provider: tpm.tpm_provider,
+        tpm_interface_type: tpm.tpm_interface_type,
+        tpm_sealed: tpm.tpm_sealed,
+        tpm_integrity_verified: tpm.tpm_integrity_verified,
+        tpm_pcr_0_7_sha256: tpm.pcr_0_7_sha256,
+        tpm_anchored_ledger_hash: tpm.anchored_ledger_hash,
+        tpm_status_detail: tpm.status_detail,
     }))
 }
 
@@ -252,6 +262,7 @@ pub async fn post_engage(
     let cause_cat = if req.operator.contains("dlp") || req.reason.to_ascii_lowercase().contains("dlp") {
         "Autonomous DLP CrownJewel Exfiltration Block (100% Lineage Voter)".to_string()
     } else {
+        let _ = state.containment_manager.re_seal_tpm_anchor();
         "Manual Operator Console / CLI Containment".to_string()
     };
     let cause_details = format!(
@@ -335,6 +346,7 @@ pub async fn post_disarm(
     }
 
     *state.last_trigger_cause.write().await = None;
+    let _ = state.containment_manager.re_seal_tpm_anchor();
 
     Ok(Json(DisarmResponse {
         success: true,
@@ -1017,4 +1029,57 @@ pub async fn post_peers_control(
             ),
         }))
     }
+}
+
+
+// =============================================================================
+// 8. Native TPM 2.0 Hardware Security & PCR Attestation
+// =============================================================================
+
+/// GET /tpm/status (and /api/tpm/status)
+pub async fn get_tpm_status(
+    State(state): State<Arc<ServerState>>,
+) -> Result<Json<TpmStatusResponse>, ServerError> {
+    let report = state.containment_manager.tpm_status_report();
+    Ok(Json(TpmStatusResponse {
+        success: true,
+        tpm_present: report.tpm_present,
+        tpm_version: report.tpm_version,
+        tpm_provider: report.tpm_provider,
+        tpm_interface_type: report.tpm_interface_type,
+        tpm_sealed: report.tpm_sealed,
+        tpm_integrity_verified: report.tpm_integrity_verified,
+        pcr_0_7_sha256: report.pcr_0_7_sha256,
+        pcr_update_counter: report.pcr_update_counter,
+        anchored_ledger_hash: report.anchored_ledger_hash,
+        anchored_sequence_number: report.anchored_sequence_number,
+        last_sealed_at: report.last_sealed_at,
+        status_detail: report.status_detail,
+    }))
+}
+
+/// POST /tpm/seal (and /api/tpm/seal)
+pub async fn post_tpm_seal(
+    State(state): State<Arc<ServerState>>,
+) -> Result<Json<TpmStatusResponse>, ServerError> {
+    let report = state.containment_manager.re_seal_tpm_anchor();
+    info!(
+        "🔐 [TPM-2.0] Re-sealed BLAKE3 state ledger anchor (seq #{}) — Verified: {}",
+        report.anchored_sequence_number, report.tpm_integrity_verified
+    );
+    Ok(Json(TpmStatusResponse {
+        success: report.tpm_integrity_verified,
+        tpm_present: report.tpm_present,
+        tpm_version: report.tpm_version,
+        tpm_provider: report.tpm_provider,
+        tpm_interface_type: report.tpm_interface_type,
+        tpm_sealed: report.tpm_sealed,
+        tpm_integrity_verified: report.tpm_integrity_verified,
+        pcr_0_7_sha256: report.pcr_0_7_sha256,
+        pcr_update_counter: report.pcr_update_counter,
+        anchored_ledger_hash: report.anchored_ledger_hash,
+        anchored_sequence_number: report.anchored_sequence_number,
+        last_sealed_at: report.last_sealed_at,
+        status_detail: report.status_detail,
+    }))
 }

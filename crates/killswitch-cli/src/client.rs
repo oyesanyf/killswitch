@@ -103,7 +103,17 @@ impl KillSwitchClient {
             "No active KillSwitch trigger.".to_string()
         };
         let (connected_peers_count, connected_peer_endpoints) = killswitch_core::wfp::count_active_non_loopback_tcp_peers();
+        let tpm = mgr.tpm_status_report();
         Ok(StatusResponse {
+            tpm_present: tpm.tpm_present,
+            tpm_version: tpm.tpm_version,
+            tpm_provider: tpm.tpm_provider,
+            tpm_interface_type: tpm.tpm_interface_type,
+            tpm_sealed: tpm.tpm_sealed,
+            tpm_integrity_verified: tpm.tpm_integrity_verified,
+            tpm_pcr_0_7_sha256: tpm.pcr_0_7_sha256,
+            tpm_anchored_ledger_hash: tpm.anchored_ledger_hash,
+            tpm_status_detail: tpm.status_detail,
             peers_enabled: !status.network_isolated,
             connected_peers_count,
             connected_peer_endpoints,

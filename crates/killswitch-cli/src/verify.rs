@@ -21,7 +21,7 @@ use killswitch_core::service::default_service_manager;
 use killswitch_orchestrator::engine::{KillSwitchOrchestrator, OrchestratorConfig};
 use killswitch_server::routes::build_router;
 use killswitch_server::server::ServerState;
-use killswitch_server::types::{PeersStatusResponse, StatusResponse};
+use killswitch_server::types::{PeersStatusResponse, StatusResponse, TpmStatusResponse};
 use killswitch_telemetry::correlator::EventCorrelator;
 use killswitch_telemetry::octopus::ArmRingRegistry;
 use killswitch_telemetry::otel_lineage::{
@@ -470,6 +470,27 @@ impl SubsystemVerifier {
         let peers_status: PeersStatusResponse = serde_json::from_slice(&peers_bytes)?;
         if !peers_status.peers_enabled {
             bail!("Expected peers_enabled == true by default");
+        }
+        // Verify GET /tpm/status & POST /tpm/seal (TPM 2.0 Hardware Security & PCR Attestation)
+        let tpm_seal_req = Request::builder()
+            .uri("/tpm/seal")
+            .method("POST")
+            .body(Body::empty())?;
+        let tpm_seal_resp = build_router(Arc::new(ServerState::with_defaults(
+            Arc::new(HostContainmentManager::new_default(Some(temp_dir.path()))?),
+        )))
+        .oneshot(tpm_seal_req)
+        .await
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
+        if tpm_seal_resp.status() != StatusCode::OK {
+            bail!("POST /tpm/seal failed with status {}", tpm_seal_resp.status());
+        }
+        let tpm_bytes = axum::body::to_bytes(tpm_seal_resp.into_body(), usize::MAX)
+            .await
+            .map_err(|e| anyhow::anyhow!("TPM status read failure: {}", e))?;
+        let tpm_status: TpmStatusResponse = serde_json::from_slice(&tpm_bytes)?;
+        if !tpm_status.tpm_sealed || !tpm_status.tpm_integrity_verified {
+            bail!("Expected TPM 2.0 anchor to be sealed and verified: {}", tpm_status.status_detail);
         }
         if false {
         }

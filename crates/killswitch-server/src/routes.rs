@@ -47,6 +47,11 @@ pub fn build_router(state: Arc<ServerState>) -> Router {
         .route("/api/peers/status", get(handlers::get_peers_status))
         .route("/peers/control", post(handlers::post_peers_control))
         .route("/api/peers/control", post(handlers::post_peers_control))
+        // 8. Native TPM 2.0 Hardware Security & PCR Attestation
+        .route("/tpm/status", get(handlers::get_tpm_status))
+        .route("/api/tpm/status", get(handlers::get_tpm_status))
+        .route("/tpm/seal", post(handlers::post_tpm_seal))
+        .route("/api/tpm/seal", post(handlers::post_tpm_seal))
         // Middleware Layers (applied bottom-up)
         .layer(middleware::cors_layer())
         .layer(middleware::body_limit_layer(state.config.max_body_bytes))
