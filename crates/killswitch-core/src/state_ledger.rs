@@ -339,6 +339,12 @@ impl StateLedger {
             let _ = std::fs::remove_file(&backup_path);
         }
 
+        let _ = crate::tpm::seal_ledger_anchor(
+            &self.file_path,
+            &self.snapshot.current_hash,
+            self.snapshot.sequence_number,
+        );
+
         Ok(())
     }
 
