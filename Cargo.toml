@@ -1,0 +1,125 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/*",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "Apache-2.0 OR MIT"
+authors = ["KillSwitch Security Team"]
+repository = "https://github.com/killswitch/killswitch"
+
+[workspace.dependencies]
+# Internal workspace crates
+killswitch-types = { path = "crates/killswitch-types" }
+killswitch-core = { path = "crates/killswitch-core" }
+killswitch-adjudication = { path = "crates/killswitch-adjudication" }
+killswitch-telemetry = { path = "crates/killswitch-telemetry" }
+killswitch-orchestrator = { path = "crates/killswitch-orchestrator" }
+killswitch-server = { path = "crates/killswitch-server" }
+killswitch-cli = { path = "crates/killswitch-cli" }
+
+
+# OpenTelemetry & OpenLineage Integration
+opentelemetry = { version = "0.27", features = ["trace"] }
+opentelemetry_sdk = { version = "0.27", features = ["trace", "rt-tokio"] }
+opentelemetry-stdout = { version = "0.27", features = ["trace"] }
+url = "2.5"
+
+# Async runtime & futures
+tokio = { version = "1.43", features = ["full"] }
+tokio-stream = "0.1"
+tokio-util = "0.7"
+futures = "0.3"
+async-trait = "0.1"
+
+# Serialization & configuration
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# Cryptography & constant-time security
+blake3 = "1.5"
+sha2 = "0.10"
+hmac = "0.12"
+subtle = "2.6"
+hex = "0.4"
+rand = "0.8"
+uuid = { version = "1.11", features = ["v4", "serde"] }
+
+# System inspection & concurrency
+sysinfo = "0.30"
+dashmap = "6.1"
+parking_lot = "0.12"
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling & logging
+thiserror = "2.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "registry", "fmt"] }
+tracing-appender = "0.2"
+
+# CLI & HTTP Server
+clap = { version = "4.5", features = ["derive", "env"] }
+axum = { version = "0.7", features = ["macros"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.5", features = ["fs", "cors", "trace"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+
+# Utilities & testing
+regex = "1.11"
+tempfile = "3.14"
+
+# Windows-specific system crates
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_Security",
+    "Win32_Security_WinTrust",
+    "Win32_Security_Cryptography",
+    "Win32_System_LibraryLoader",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Pipes",
+    "Win32_System_Memory",
+    "Win32_System_IO",
+    "Win32_System_Services",
+    "Win32_System_Registry",
+    "Win32_System_JobObjects",
+    "Win32_NetworkManagement_NetManagement",
+] }
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Threading",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_Storage_FileSystem",
+] }
+winreg = "0.52"
+
+# Linux-specific syscall crates
+libc = "0.2"
+
+# Compiler Profiles
+[profile.dev]
+opt-level = 0
+debug = true
+split-debuginfo = "unpacked"
+overflow-checks = true
+
+[profile.test]
+opt-level = 1
+debug = true
+overflow-checks = true
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true
+overflow-checks = true

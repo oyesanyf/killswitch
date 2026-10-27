@@ -1,0 +1,282 @@
+//! In-memory and integration tests for `killswitch-server`.
+
+use std::sync::Arc;
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
+use tower::ServiceExt;
+
+async fn body_to_bytes(body: axum::body::Body) -> axum::body::Bytes {
+    axum::body::to_bytes(body, usize::MAX).await.unwrap()
+}
+
+use killswitch_core::killchain::HostContainmentManager;
+use killswitch_server::routes::build_router;
+use killswitch_server::server::ServerState;
+use killswitch_server::types::*;
+
+fn setup_test_server_state() -> Arc<ServerState> {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let containment = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
+    Arc::new(ServerState::with_defaults(containment))
+}
+
+#[tokio::test]
+async fn test_server_status_and_history_endpoints() {
+    let state = setup_test_server_state();
+    let app = build_router(state);
+
+    // 1. GET /status
+    let req = Request::builder()
+        .uri("/status")
+        .method("GET")
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body_bytes = body_to_bytes(resp.into_body()).await;
+    let status_res: StatusResponse = serde_json::from_slice(&body_bytes).unwrap();
+    assert!(!status_res.isolated);
+    assert_eq!(status_res.active_mode, "autonomous");
+
+    // 2. GET /history
+    let req = Request::builder()
+        .uri("/history")
+        .method("GET")
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body_bytes = body_to_bytes(resp.into_body()).await;
+    let hist_res: HistoryResponse = serde_json::from_slice(&body_bytes).unwrap();
+    assert!(hist_res.chain_valid);
+}
+
+#[tokio::test]
+async fn test_server_engage_and_disarm_lifecycle() {
+    let state = setup_test_server_state();
+    let app = build_router(state);
+
+    // 1. POST /engage
+    let engage_body = serde_json::json!({
+        "operator": "test_admin",
+        "reason": "Test isolation verification",
+        "token": "CONFIRM ISOLATE",
+        "level": "network_quarantine"
+    });
+
+    let req = Request::builder()
+        .uri("/engage")
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .body(Body::from(serde_json::to_vec(&engage_body).unwrap()))
+        .unwrap();
+
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Verify status is isolated
+    let req = Request::builder()
+        .uri("/status")
+        .method("GET")
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = app.clone().oneshot(req).await.unwrap();
+    let body_bytes = body_to_bytes(resp.into_body()).await;
+    let status_res: StatusResponse = serde_json::from_slice(&body_bytes).unwrap();
+    assert!(status_res.isolated);
+
+    // 2. POST /disarm
+    let disarm_body = serde_json::json!({
+        "operator": "test_admin",
+        "reason": "Threat neutralized",
+        "token": "CONFIRM RESTORE"
+    });
+
+    let req = Request::builder()
+        .uri("/disarm")
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .body(Body::from(serde_json::to_vec(&disarm_body).unwrap()))
+        .unwrap();
+
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Verify status is disarmed
+    let req = Request::builder()
+        .uri("/status")
+        .method("GET")
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    let body_bytes = body_to_bytes(resp.into_body()).await;
+    let status_res: StatusResponse = serde_json::from_slice(&body_bytes).unwrap();
+    assert!(!status_res.isolated);
+}
+
+#[tokio::test]
+async fn test_server_orchestrator_step_and_state() {
+    let state = setup_test_server_state();
+    let app = build_router(state);
+
+    // 1. GET /graph/state
+    let req = Request::builder()
+        .uri("/graph/state")
+        .method("GET")
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body_bytes = body_to_bytes(resp.into_body()).await;
+    let state_res: GraphStateResponse = serde_json::from_slice(&body_bytes).unwrap();
+    assert!(state_res.trace_chain_valid);
+
+    // 2. POST /graph/step
+    let step_body = serde_json::json!({
+        "step_input": {"test": "probe"},
+        "force_node": null
+    });
+
+    let req = Request::builder()
+        .uri("/graph/step")
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .body(Body::from(serde_json::to_vec(&step_body).unwrap()))
+        .unwrap();
+
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body_bytes = body_to_bytes(resp.into_body()).await;
+    let step_res: GraphStepResponse = serde_json::from_slice(&body_bytes).unwrap();
+    assert_eq!(step_res.executed_node, "IngestingSignals");
+
+    // 3. POST /mode
+    let mode_body = serde_json::json!({
+        "mode": "manual",
+        "operator": "test_lead"
+    });
+
+    let req = Request::builder()
+        .uri("/mode")
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .body(Body::from(serde_json::to_vec(&mode_body).unwrap()))
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body_bytes = body_to_bytes(resp.into_body()).await;
+    let mode_res: ModeResponse = serde_json::from_slice(&body_bytes).unwrap();
+    assert_eq!(mode_res.current_mode, "manual");
+}
+
+#[tokio::test]
+async fn test_server_dlp_lineage_seed_and_evaluate() {
+    let state = setup_test_server_state();
+    let app = build_router(state.clone());
+
+    // 1. POST /lineage/seed
+    let seed_body = serde_json::json!({
+        "path": "C:\\secrets\\intel.docx",
+        "sha256": "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+        "classification": "CrownJewel",
+        "policy": "Quarantine",
+        "inode_or_id": 999
+    });
+
+    let req = Request::builder()
+        .uri("/lineage/seed")
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .body(Body::from(serde_json::to_vec(&seed_body).unwrap()))
+        .unwrap();
+
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Manually register process reading file to taint it
+    let file_key = killswitch_telemetry::otel_lineage::FileKey::from_path_or_synthetic("C:\\secrets\\intel.docx");
+    let proc_key = killswitch_telemetry::otel_lineage::ProcessKey::new(8812, 1000, "curl.exe");
+    state.lineage_engine.on_process_create(None, proc_key, "curl.exe");
+    state.lineage_engine.on_file_read(proc_key, file_key);
+
+    // 2. POST /lineage/evaluate
+    let eval_body = serde_json::json!({
+        "pid": 8812,
+        "destination_url": "https://external-drop.example.com/exfil"
+    });
+
+    let req = Request::builder()
+        .uri("/lineage/evaluate")
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .body(Body::from(serde_json::to_vec(&eval_body).unwrap()))
+        .unwrap();
+
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body_bytes = body_to_bytes(resp.into_body()).await;
+    let eval_res: LineageEvaluateResponse = serde_json::from_slice(&body_bytes).unwrap();
+    assert!(eval_res.is_block);
+    assert_eq!(eval_res.verdict, "Block");
+    assert_eq!(eval_res.classification.unwrap(), "CrownJewel");
+    assert_eq!(eval_res.policy.unwrap(), "Quarantine");
+
+    // 3. GET /lineage/status
+    let req = Request::builder()
+        .uri("/lineage/status")
+        .method("GET")
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body_bytes = body_to_bytes(resp.into_body()).await;
+    let lin_res: LineageStatusResponse = serde_json::from_slice(&body_bytes).unwrap();
+    assert!(lin_res.tainted_processes_count >= 1);
+}
+
+fn scan_dir_recursive(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                scan_dir_recursive(&path, files);
+            } else if path.extension().map_or(false, |ext| ext == "rs") {
+                files.push(path);
+            }
+        }
+    }
+}
+
+#[test]
+fn test_zero_os_subprocess_spawning_in_server() {
+    let server_src = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    scan_dir_recursive(&server_src, &mut files);
+
+    for path in &files {
+        let content = std::fs::read_to_string(path).unwrap();
+        assert!(!content.contains("Command::new(\"netsh"), "Forbidden netsh command in {:?}", path);
+        assert!(!content.contains("Command::new(\"iptables"), "Forbidden iptables command in {:?}", path);
+        assert!(!content.contains("Command::new(\"nft"), "Forbidden nft command in {:?}", path);
+        assert!(!content.contains("Command::new(\"taskkill"), "Forbidden taskkill command in {:?}", path);
+        assert!(!content.contains("Command::new(\"kill"), "Forbidden kill command in {:?}", path);
+        assert!(!content.contains("Command::new(\"powershell"), "Forbidden powershell command in {:?}", path);
+        assert!(!content.contains("Command::new(\"cmd"), "Forbidden cmd command in {:?}", path);
+        assert!(!content.contains("Command::new(\"sc.exe"), "Forbidden sc.exe command in {:?}", path);
+    }
+    assert!(!files.is_empty(), "Must scan at least one .rs file in killswitch-server");
+}

@@ -1,0 +1,47 @@
+[package]
+name = "killswitch-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Local Axum HTTP/JSON control and telemetry API server for Rust KillSwitch"
+
+[dependencies]
+# Internal workspace crates
+killswitch-types = { workspace = true }
+killswitch-core = { workspace = true }
+killswitch-adjudication = { workspace = true }
+killswitch-telemetry = { workspace = true }
+
+# Web framework & async runtime
+axum = { workspace = true, features = ["macros"] }
+tower = { workspace = true, features = ["util"] }
+tower-http = { workspace = true, features = ["cors", "trace"] }
+tokio = { workspace = true, features = ["full"] }
+async-trait = { workspace = true }
+
+# Serialization & validation
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+# Logging & telemetry
+tracing = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+
+# Cryptography & security
+blake3 = { workspace = true }
+subtle = { workspace = true }
+uuid = { workspace = true, features = ["v4", "serde"] }
+
+# Concurrency & utilities
+parking_lot = { workspace = true }
+dashmap = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+sysinfo = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }

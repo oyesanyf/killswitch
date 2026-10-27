@@ -1,0 +1,7 @@
+target/
+database/
+crates/killswitch-core/database/
+active_port.txt
+*.old.exe
+*.log
+.agents/
