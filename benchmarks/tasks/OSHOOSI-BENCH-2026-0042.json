@@ -1,0 +1,35 @@
+{
+  "instance_id": "OSHOOSI-BENCH-2026-0042",
+  "cve_or_threat_id": "CVE-2026-Linux-eBPF-Breakout",
+  "target_architecture": "LinuxEbpfCore",
+  "telemetry_context": {
+    "primary_artifact_path": "benchmarks/artifacts/threats/ebpf_container_escape.elf",
+    "magika_inferred_mime": "application/x-executable",
+    "ebpf_syscall_trace_path": "benchmarks/artifacts/traces/sys_bpf_unpriv_attempt.json",
+    "pmu_recoil_score": 0.942
+  },
+  "fail_to_pass": [
+    {
+      "assertion_id": "assert_ebpf_container_escape_detected",
+      "sample_path": "benchmarks/artifacts/threats/ebpf_container_escape.elf",
+      "sha256": "0c64adb893239cf82bfc63723dd2ef0c8e271fc60cad2dae8eeb89a436da5703",
+      "expected_verdict": {
+        "YaraMatch": {
+          "required_rule_tag": "container_escape"
+        }
+      }
+    }
+  ],
+  "pass_to_pass": [
+    {
+      "baseline_id": "usr_bin_signed_baseline",
+      "corpus_directory": "benchmarks/artifacts/golden_baseline/usr_bin_signed",
+      "max_allowed_false_positives": 0
+    }
+  ],
+  "resource_bounds": {
+    "max_compile_time_ms": 150,
+    "max_scan_latency_us": 50000,
+    "max_arena_memory_bytes": 16777216
+  }
+}

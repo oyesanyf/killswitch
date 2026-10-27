@@ -35,6 +35,13 @@ pub fn build_router(state: Arc<ServerState>) -> Router {
         .route("/lineage/status", get(handlers::get_lineage_status))
         .route("/lineage/seed", post(handlers::post_lineage_seed))
         .route("/lineage/evaluate", post(handlers::post_lineage_evaluate))
+        // 6. SWE-Bench Two-Gate (`FAIL_TO_PASS` + `PASS_TO_PASS`) Anti-Blind-KillSwitch Harness
+        .route("/api/edr-bench/tasks", get(handlers::get_edr_bench_tasks))
+        .route("/edr-bench/tasks", get(handlers::get_edr_bench_tasks))
+        .route("/api/killswitch-bench/tasks", get(handlers::get_edr_bench_tasks))
+        .route("/api/edr-bench/evaluate", post(handlers::post_edr_bench_evaluate))
+        .route("/edr-bench/evaluate", post(handlers::post_edr_bench_evaluate))
+        .route("/api/killswitch-bench/evaluate", post(handlers::post_edr_bench_evaluate))
         // Middleware Layers (applied bottom-up)
         .layer(middleware::cors_layer())
         .layer(middleware::body_limit_layer(state.config.max_body_bytes))

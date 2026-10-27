@@ -241,9 +241,36 @@ impl SubsystemVerifier {
         );
         let res = adjudicator.adjudicate_threat_candidate(&candidate, None).await;
         match res {
-            killswitch_types::adjudication::AdjudicationResult::Vetoed { .. } => Ok(()),
+            killswitch_types::adjudication::AdjudicationResult::Vetoed { .. } => {}
             other => bail!("Expected Vetoed result for critical PID 4, got {:?}", other),
         }
+
+        // Verify SWE-Bench Two-Gate (FAIL_TO_PASS + PASS_TO_PASS) Anti-Blind-KillSwitch Gate
+        let broad_rule = killswitch_adjudication::EdrBenchHarness::canonical_overbroad_blind_rule();
+        let blocked_report = adjudicator.evaluate_swe_bench_gate(None, broad_rule, false)?;
+        if !blocked_report.fail_to_pass_succeeded
+            || blocked_report.pass_to_pass_succeeded
+            || !blocked_report.blind_killswitch_prevented
+        {
+            bail!(
+                "SWE-Bench PASS_TO_PASS gate failed to block overbroad blind rule: {:?}",
+                blocked_report
+            );
+        }
+
+        let refined_report = adjudicator.evaluate_swe_bench_gate(None, broad_rule, true)?;
+        if !refined_report.fail_to_pass_succeeded
+            || !refined_report.pass_to_pass_succeeded
+            || refined_report.false_positive_count != 0
+            || !refined_report.promoted_to_production
+        {
+            bail!(
+                "SWE-Bench compiler feedback loop failed to refine rule to 0 FP: {:?}",
+                refined_report
+            );
+        }
+
+        Ok(())
     }
 
     async fn verify_phase_3_telemetry_and_dlp() -> Result<()> {
@@ -367,6 +394,21 @@ impl SubsystemVerifier {
         let ui_html = String::from_utf8_lossy(&ui_bytes);
         if !ui_html.to_ascii_lowercase().contains("killswitch") {
             bail!("WebUI HTML missing expected dashboard header");
+        }
+
+        // Verify GET /api/edr-bench/tasks (SWE-bench Two-Gate API)
+        let bench_req = Request::builder()
+            .uri("/api/edr-bench/tasks")
+            .method("GET")
+            .body(Body::empty())?;
+        let bench_resp = build_router(Arc::new(ServerState::with_defaults(
+            Arc::new(HostContainmentManager::new_default(Some(temp_dir.path()))?),
+        )))
+        .oneshot(bench_req)
+        .await
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
+        if bench_resp.status() != StatusCode::OK {
+            bail!("GET /api/edr-bench/tasks failed with status {}", bench_resp.status());
         }
 
         Ok(())

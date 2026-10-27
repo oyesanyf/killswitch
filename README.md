@@ -86,3 +86,25 @@ Run as **Administrator** (Windows) or `sudo` (macOS/Linux) so kernel firewall fi
 # Disarm KillSwitch & restore internet connectivity
 .\target\release\killswitch.exe restore
 ```
+
+---
+
+## 🛡️ SWE-Bench Two-Gate (`FAIL_TO_PASS` & `PASS_TO_PASS`) Anti-Blind-KillSwitch Harness
+
+To guarantee that KillSwitch **never blindly isolates a computer on a false alarm**, `killswitch-adjudication::edr_bench` adapts the **SWE-bench** two-gate verification paradigm directly into the autonomous containment pipeline:
+
+1. **Gate 1 (`FAIL_TO_PASS` — Threat Precision Gate)**:
+   - Every candidate detection rule or autonomous containment trigger must accurately detect the target threat binary (`benchmarks/artifacts/threats/ebpf_container_escape.elf`, verified via SHA-256) with the required rule tag/verdict within strict `HarnessBounds` (`max_compile_time_ms: 150`, `max_scan_latency_us: 50000`, `max_arena_memory_bytes: 16 MB`).
+2. **Gate 2 (`PASS_TO_PASS` — Benign Baseline Continuity / Anti-Blind-KillSwitch Gate)**:
+   - The candidate rule is scanned against the golden signed system/developer binary baseline (`benchmarks/artifacts/golden_baseline/usr_bin_signed/ls_benign.elf`, `ssh_benign.elf`).
+   - Requires **0 false positives (`max_allowed_false_positives: 0`)**.
+   - Overly broad rules (for example, matching any ELF `{ 7F 45 4C 46 }` header) pass `FAIL_TO_PASS` but **fail `PASS_TO_PASS`**, immediately vetoing blind KillSwitch isolation (`blind_killswitch_prevented: true`).
+3. **Compiler-in-the-Loop Feedback Refinement & Cryptographic BFT Promotion**:
+   - `evaluate_with_compiler_feedback_loop()` automatically refines overly broad rules into surgical multi-token rules that pass both `FAIL_TO_PASS` and `PASS_TO_PASS` (`0` false positives) and issues a constant-time verified `BLAKE3` + `SHA-256` BFT Promotion Receipt.
+
+### REST API Endpoints
+- **`GET /api/edr-bench/tasks`** (also aliased at `/edr-bench/tasks` and `/api/killswitch-bench/tasks`):
+  - Returns the active SWE-bench / EDR-Bench task definitions (`OSHOOSI-BENCH-2026-0042` and `KILLSWITCH-BENCH-2026-0001`) along with canonical broad vs. verified multi-token rules.
+- **`POST /api/edr-bench/evaluate`** (also aliased at `/edr-bench/evaluate` and `/api/killswitch-bench/evaluate`):
+  - Evaluates a `candidate_yara_rule` or `preset` (`"overbroad_blind"` or `"surgical_verified"`) through Gate 1 (`FAIL_TO_PASS`) and Gate 2 (`PASS_TO_PASS`), optionally running compiler-in-the-loop refinement (`"auto_refine": true`).
+

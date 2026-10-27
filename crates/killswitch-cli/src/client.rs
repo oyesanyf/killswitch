@@ -202,6 +202,8 @@ impl KillSwitchClient {
             token: token.map(|t| t.to_string()),
             level: level.map(|l| l.to_string()),
             caller_pid: Some(std::process::id()),
+            candidate_rule: None,
+            task_instance_id: None,
         };
 
         if let Ok(resp) = self.client.post(&url).json(&req).send().await {
@@ -232,6 +234,8 @@ impl KillSwitchClient {
             success: true,
             message: "Direct native host containment engaged in-process (WFP + BFE + TCP Reset active)".to_string(),
             status,
+            blind_killswitch_prevented: false,
+            swe_bench_report: None,
         })
     }
 

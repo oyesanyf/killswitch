@@ -15,6 +15,7 @@
 pub mod adjudicator;
 pub mod byzantine;
 pub mod consensus;
+pub mod edr_bench;
 pub mod immunity;
 pub mod inventory;
 pub mod rea;
@@ -23,6 +24,11 @@ pub mod win_trust;
 
 // Public re-exports
 pub use adjudicator::ZeroFalsePositiveAdjudicator;
+pub use edr_bench::{
+    load_all_bench_tasks, resolve_fixture_path, BenignBaselineAssertion, BenchmarkReport,
+    EdrBenchHarness, EdrBenchTask, ExpectedVerdict, GateIterationTrace, HarnessBounds, TargetArch,
+    TelemetryContext, ThreatAssertion, MAX_RULE_SOURCE_BYTES,
+};
 pub use byzantine::{
     build_kill_switch_fraud_proof, veto_peer_kill_switch_candidate, PEER_SLASHED_STAKE,
 };

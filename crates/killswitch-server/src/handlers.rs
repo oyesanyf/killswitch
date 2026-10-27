@@ -8,6 +8,7 @@ use axum::Json;
 use chrono::Utc;
 use tracing::info;
 
+use killswitch_adjudication::{load_all_bench_tasks, EdrBenchHarness};
 use killswitch_types::status::OperatorCredentials;
 use killswitch_core::killchain::execute_host_disarm_unauthenticated;
 use killswitch_telemetry::otel_lineage::{
@@ -176,6 +177,44 @@ pub async fn post_engage(
         }
     }
 
+    // SWE-Bench Two-Gate (`FAIL_TO_PASS` + `PASS_TO_PASS`) Anti-Blind-KillSwitch Check:
+    // If an autonomous rule or detector submits a candidate_rule, it MUST pass both
+    // Gate 1 (`FAIL_TO_PASS` threat match) and Gate 2 (`PASS_TO_PASS` 0 false positives on benign baseline)
+    // before KillSwitch is permitted to isolate the host.
+    let mut swe_bench_json = None;
+    if let Some(ref rule_src) = req.candidate_rule {
+        let tasks = load_all_bench_tasks();
+        if let Some(task) = req
+            .task_instance_id
+            .as_deref()
+            .and_then(|id| tasks.iter().find(|t| t.instance_id == id))
+            .or_else(|| tasks.first())
+        {
+            let harness = EdrBenchHarness::new();
+            let report = harness
+                .evaluate_candidate_rule(task, rule_src)
+                .map_err(|e| ServerError::Internal(e.to_string()))?;
+            let report_val = serde_json::to_value(&report).ok();
+
+            if !report.promoted_to_production {
+                let current_status = state.containment_manager.get_status();
+                let veto_msg = format!(
+                    "🛑 SWE-Bench Anti-Blind-KillSwitch Gate VETOED isolation: {}",
+                    report.gate_verdict_summary
+                );
+                info!("{}", veto_msg);
+                return Ok(Json(EngageResponse {
+                    success: false,
+                    message: veto_msg,
+                    status: current_status,
+                    blind_killswitch_prevented: true,
+                    swe_bench_report: report_val,
+                }));
+            }
+            swe_bench_json = report_val;
+        }
+    }
+
     let level = match req.level.as_deref().unwrap_or("hermetic_isolation") {
         "network_quarantine" => ContainmentLevel::NetworkQuarantine,
         "process_freeze" => ContainmentLevel::ProcessFreeze,
@@ -225,6 +264,8 @@ pub async fn post_engage(
         success: true,
         message: msg,
         status: new_status,
+        blind_killswitch_prevented: false,
+        swe_bench_report: swe_bench_json,
     }))
 }
 
@@ -753,4 +794,113 @@ pub async fn post_lineage_evaluate(
             }))
         }
     }
+}
+
+// =============================================================================
+// 6. SWE-Bench Two-Gate (`FAIL_TO_PASS` + `PASS_TO_PASS`) Anti-Blind-KillSwitch API
+// =============================================================================
+
+/// GET /api/edr-bench/tasks (and /edr-bench/tasks)
+pub async fn get_edr_bench_tasks() -> Result<Json<serde_json::Value>, ServerError> {
+    let tasks = load_all_bench_tasks();
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "paradigm": "SWE-bench Two-Gate (FAIL_TO_PASS Threat Precision + PASS_TO_PASS Zero-FP Benign Baseline)",
+        "anti_blind_killswitch_active": true,
+        "count": tasks.len(),
+        "tasks": tasks,
+        "canonical_examples": {
+            "overbroad_blind_rule": EdrBenchHarness::canonical_overbroad_blind_rule(),
+            "verified_surgical_rule": EdrBenchHarness::canonical_verified_surgical_rule(),
+        }
+    })))
+}
+
+/// POST /api/edr-bench/evaluate (and /edr-bench/evaluate)
+pub async fn post_edr_bench_evaluate(
+    State(state): State<Arc<ServerState>>,
+    Json(req): Json<EdrBenchEvaluateRequest>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let tasks = load_all_bench_tasks();
+    let task = req
+        .instance_id
+        .as_deref()
+        .and_then(|id| tasks.iter().find(|t| t.instance_id == id))
+        .or_else(|| tasks.first())
+        .ok_or_else(|| ServerError::Validation("No SWE-bench / EDR-Bench tasks available".to_string()))?;
+
+    let candidate_rule = if let Some(ref custom) = req.candidate_yara_rule {
+        if !custom.trim().is_empty() {
+            custom.clone()
+        } else {
+            EdrBenchHarness::canonical_verified_surgical_rule().to_string()
+        }
+    } else {
+        match req.preset.as_deref().unwrap_or("surgical_verified") {
+            "overbroad_blind" | "broad" | "bad" => {
+                EdrBenchHarness::canonical_overbroad_blind_rule().to_string()
+            }
+            _ => EdrBenchHarness::canonical_verified_surgical_rule().to_string(),
+        }
+    };
+
+    let auto_refine = req.auto_refine.unwrap_or(false);
+    let max_iters = req.max_iterations.unwrap_or(3).clamp(1, 5);
+    let harness = EdrBenchHarness::new();
+
+    let (report, final_rule, iterations) = if auto_refine {
+        harness
+            .evaluate_with_compiler_feedback_loop(task, &candidate_rule, max_iters)
+            .map_err(|e| ServerError::Internal(e.to_string()))?
+    } else {
+        let rep = harness
+            .evaluate_candidate_rule(task, &candidate_rule)
+            .map_err(|e| ServerError::Internal(e.to_string()))?;
+        (rep, candidate_rule.clone(), 1)
+    };
+
+    let mut killswitch_engaged = false;
+    if req.engage_if_promoted.unwrap_or(false) && report.promoted_to_production {
+        let reason = format!(
+            "SWE-Bench 2-Gate Verified ({}) — FAIL_TO_PASS=PASS, PASS_TO_PASS=0 FP (Receipt: {})",
+            task.instance_id,
+            report.bft_promotion_receipt.as_deref().unwrap_or("verified")
+        );
+        let _ = state
+            .containment_manager
+            .engage_isolation(
+                "swe_bench_verified_gate",
+                &reason,
+                ContainmentLevel::HermeticIsolation,
+                None,
+            )
+            .await;
+        *state.last_trigger_cause.write().await = Some((
+            "SWE-Bench 2-Gate Verified Threat (FAIL_TO_PASS + PASS_TO_PASS 0 FP)".to_string(),
+            format!("Task {} ({})", task.instance_id, task.cve_or_threat_id),
+            report.gate_verdict_summary.clone(),
+        ));
+        killswitch_engaged = true;
+    }
+
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "paradigm": "SWE-bench Two-Gate (FAIL_TO_PASS + PASS_TO_PASS)",
+        "task_instance_id": task.instance_id,
+        "cve_or_threat_id": task.cve_or_threat_id,
+        "iterations_used": iterations,
+        "auto_refine_enabled": auto_refine,
+        "fail_to_pass_succeeded": report.fail_to_pass_succeeded,
+        "pass_to_pass_succeeded": report.pass_to_pass_succeeded,
+        "false_positive_count": report.false_positive_count,
+        "false_positive_files": report.false_positive_files,
+        "promoted_to_production": report.promoted_to_production,
+        "killswitch_engagement_allowed": report.killswitch_engagement_allowed,
+        "blind_killswitch_prevented": report.blind_killswitch_prevented,
+        "killswitch_engaged": killswitch_engaged,
+        "gate_verdict_summary": report.gate_verdict_summary,
+        "bft_promotion_receipt": report.bft_promotion_receipt,
+        "final_rule": final_rule,
+        "report": report,
+    })))
 }

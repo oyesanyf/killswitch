@@ -66,6 +66,12 @@ pub struct EngageRequest {
     pub token: Option<String>,
     pub level: Option<String>,
     pub caller_pid: Option<u32>,
+    /// Optional candidate YARA / detection rule that MUST pass SWE-bench `FAIL_TO_PASS` and
+    /// `PASS_TO_PASS` (0 false positives on benign baseline) before engaging the KillSwitch.
+    #[serde(default)]
+    pub candidate_rule: Option<String>,
+    #[serde(default)]
+    pub task_instance_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,6 +79,10 @@ pub struct EngageResponse {
     pub success: bool,
     pub message: String,
     pub status: KillChainStatus,
+    #[serde(default)]
+    pub blind_killswitch_prevented: bool,
+    #[serde(default)]
+    pub swe_bench_report: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -300,3 +310,27 @@ pub struct LineageEvaluateResponse {
     #[serde(default)]
     pub trigger_cause: Option<String>,
 }
+
+// =============================================================================
+// SWE-Bench Two-Gate (`FAIL_TO_PASS` + `PASS_TO_PASS`) EDR-Bench DTOs
+// =============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EdrBenchEvaluateRequest {
+    #[serde(default)]
+    pub instance_id: Option<String>,
+    /// Candidate YARA / containment rule or preset (`"overbroad_blind"`, `"surgical_verified"`).
+    #[serde(default)]
+    pub candidate_yara_rule: Option<String>,
+    #[serde(default)]
+    pub preset: Option<String>,
+    /// Whether to run the compiler-in-the-loop feedback loop to refine false-positive rules.
+    #[serde(default)]
+    pub auto_refine: Option<bool>,
+    #[serde(default)]
+    pub max_iterations: Option<usize>,
+    /// If true and the rule passes BOTH `FAIL_TO_PASS` and `PASS_TO_PASS` (0 FPs), engage KillSwitch.
+    #[serde(default)]
+    pub engage_if_promoted: Option<bool>,
+}
+

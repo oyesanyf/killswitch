@@ -648,6 +648,46 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       </section>
     </div>
 
+    <!-- SWE-BENCH TWO-GATE (FAIL_TO_PASS + PASS_TO_PASS) ANTI-BLIND-KILLSWITCH CARD -->
+    <section class="card" role="region" aria-label="SWE-Bench Two-Gate Anti-Blind-KillSwitch Verification">
+      <h2>
+        <span>🛡️ Anti-Blind-KillSwitch Guard (SWE-Bench 2-Gate Verification: FAIL_TO_PASS &amp; PASS_TO_PASS)</span>
+        <span id="bench-gate-badge" class="badge ok">2-Gate Guard Active (0 FP Required)</span>
+      </h2>
+      <p class="card-desc">
+        Why doesn't KillSwitch blindly disconnect your internet on a false alarm? Before any autonomous rule is allowed to trigger the KillSwitch, it must pass <strong>two SWE-bench gates</strong>:
+        <strong>Gate 1 (<code>FAIL_TO_PASS</code>)</strong> proves it catches the real threat, and <strong>Gate 2 (<code>PASS_TO_PASS</code>)</strong> proves it causes <strong>0 false positives</strong> on normal signed system programs (<code>ls_benign.elf</code>, <code>ssh_benign.elf</code>).
+      </p>
+
+      <div class="btn-row">
+        <button type="button" class="danger" onclick="runSweBenchGate('overbroad_blind', false, this)">🛑 1. Test Bad/Broad Rule (See PASS_TO_PASS Block Blind KillSwitch)</button>
+        <button type="button" class="ok" onclick="runSweBenchGate('overbroad_blind', true, this)">✨ 2. Auto-Refine Rule (Compiler Loop Fixes Rule to 0 False Positives)</button>
+        <button type="button" class="primary" onclick="runSweBenchGate('surgical_verified', false, this)">✅ 3. Test Verified Multi-Token Rule (Passes Both Gates)</button>
+        <button type="button" onclick="refreshEdrBenchTasks(true, this)">📋 Load Tasks (/api/edr-bench/tasks)</button>
+      </div>
+
+      <div class="kv-grid">
+        <div class="kv-box">
+          <div class="kv-label">Gate 1: FAIL_TO_PASS (Catches Threat)</div>
+          <div id="bench-f2p" class="kv-val">Ready to Test</div>
+        </div>
+        <div class="kv-box">
+          <div class="kv-label">Gate 2: PASS_TO_PASS (0 False Positives)</div>
+          <div id="bench-p2p" class="kv-val">Ready to Test (0 FP Max)</div>
+        </div>
+        <div class="kv-box">
+          <div class="kv-label">KillSwitch Allowed?</div>
+          <div id="bench-allowed" class="kv-val">Protected by 2-Gate Guard</div>
+        </div>
+        <div class="kv-box">
+          <div class="kv-label">SWE-Bench Tasks Loaded</div>
+          <div id="bench-task-count" class="kv-val">2 Tasks Active</div>
+        </div>
+      </div>
+
+      <div id="bench-status" class="toast">Click "🛑 1. Test Bad/Broad Rule" above to see how Gate 2 (PASS_TO_PASS) stops a bad rule from blindly triggering the KillSwitch!</div>
+    </section>
+
     <!-- COLLAPSIBLE ADVANCED TECHNICAL SECTION FOR ENGINEERS -->
     <details class="advanced-panel">
       <summary>🔧 Show Advanced Technical Controls (LangGraph Orchestrator, 18-Arm Mesh, Custom Isolation Options &amp; Cryptographic Hashes)</summary>
@@ -1032,7 +1072,8 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
             refreshGraph(false),
             refreshLineage(false),
             refreshOctopus(false),
-            refreshServiceAndHistory(false)
+            refreshServiceAndHistory(false),
+            refreshEdrBenchTasks(false)
           ]);
           if (showFeedback) {
             setCardStatus(
@@ -1338,6 +1379,76 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
           setCardStatus('card5-status', '✅ Service action "' + action + '" finished (' + res.resulting_status.state + ').', 'ok');
         } catch (e) {
           setCardStatus('card5-status', '❌ Service error: ' + e.message, 'danger');
+        }
+      });
+    }
+
+    async function refreshEdrBenchTasks(showFeedback, btn) {
+      return withButtonFeedback(btn, '📋 Loading Tasks...', async () => {
+        try {
+          const data = await api('/api/edr-bench/tasks');
+          const tasks = data.tasks || [];
+          const ids = tasks.map(t => t.instance_id).join(', ');
+          const el = document.getElementById('bench-task-count');
+          if (el) {
+            el.textContent = tasks.length + ' Tasks (' + ids + ')';
+          }
+          if (showFeedback) {
+            setCardStatus(
+              'bench-status',
+              '📋 Loaded ' + tasks.length + ' SWE-Bench Tasks from /api/edr-bench/tasks: ' + ids + ' — Paradigm: ' + data.paradigm,
+              'ok'
+            );
+          }
+          return data;
+        } catch (e) {
+          if (showFeedback) {
+            setCardStatus('bench-status', '❌ Failed to load tasks: ' + e.message, 'danger');
+          }
+        }
+      });
+    }
+
+    async function runSweBenchGate(preset, autoRefine, btn) {
+      return withButtonFeedback(btn, '🛡️ Running 2-Gate Check...', async () => {
+        try {
+          const res = await api('/api/edr-bench/evaluate', {
+            method: 'POST',
+            body: JSON.stringify({
+              preset: preset,
+              auto_refine: autoRefine,
+              max_iterations: 3,
+              engage_if_promoted: false
+            })
+          });
+
+          const f2pEl = document.getElementById('bench-f2p');
+          const p2pEl = document.getElementById('bench-p2p');
+          const allowEl = document.getElementById('bench-allowed');
+          const badgeEl = document.getElementById('bench-gate-badge');
+
+          f2pEl.textContent = res.fail_to_pass_succeeded ? '✅ PASS (Caught Threat)' : '❌ FAIL (Missed Threat)';
+          p2pEl.textContent = res.pass_to_pass_succeeded
+            ? '✅ PASS (0 False Positives)'
+            : '🛑 FAIL (' + res.false_positive_count + ' False Positives: ' + (res.false_positive_files || []).join(', ') + ')';
+
+          if (res.promoted_to_production) {
+            allowEl.textContent = '✅ YES (Verified Safe — ' + res.iterations_used + ' iter)';
+            badgeEl.textContent = '✅ Both Gates Passed (0 FP)';
+            badgeEl.className = 'badge ok';
+            setCardStatus(
+              'bench-status',
+              res.gate_verdict_summary + '\nCryptographic Receipt: ' + (res.bft_promotion_receipt || '').slice(0, 64) + '…',
+              'ok'
+            );
+          } else {
+            allowEl.textContent = '🛑 VETOED (Blind KillSwitch Prevented!)';
+            badgeEl.textContent = '🛑 Blind KillSwitch Blocked by PASS_TO_PASS';
+            badgeEl.className = 'badge danger';
+            setCardStatus('bench-status', res.gate_verdict_summary, 'danger');
+          }
+        } catch (e) {
+          setCardStatus('bench-status', '❌ SWE-Bench evaluation error: ' + e.message, 'danger');
         }
       });
     }

@@ -17,6 +17,7 @@ use killswitch_types::adjudication::{
 
 use crate::byzantine::build_kill_switch_fraud_proof;
 use crate::consensus::MultiVoterConsensusEngine;
+use crate::edr_bench::{load_all_bench_tasks, BenchmarkReport, EdrBenchHarness};
 use crate::immunity::inspect_process_lineage;
 use crate::inventory::is_protected_local_binary_hash;
 use crate::rea::AutonomousReaEngine;
@@ -256,6 +257,30 @@ impl ZeroFalsePositiveAdjudicator {
         self.consensus_engine
             .adjudicate(candidate, context)
             .await
+    }
+
+    /// Evaluates a candidate YARA / containment rule through the SWE-Bench Two-Gate
+    /// (`FAIL_TO_PASS` + `PASS_TO_PASS`) harness before allowing autonomous KillSwitch activation.
+    pub fn evaluate_swe_bench_gate(
+        &self,
+        instance_id: Option<&str>,
+        candidate_rule: &str,
+        auto_refine: bool,
+    ) -> anyhow::Result<BenchmarkReport> {
+        let tasks = load_all_bench_tasks();
+        let task = instance_id
+            .and_then(|id| tasks.iter().find(|t| t.instance_id == id))
+            .or_else(|| tasks.first())
+            .ok_or_else(|| anyhow::anyhow!("No SWE-Bench / EDR-Bench tasks found"))?;
+
+        let harness = EdrBenchHarness::new();
+        if auto_refine {
+            let (report, _, _) =
+                harness.evaluate_with_compiler_feedback_loop(task, candidate_rule, 3)?;
+            Ok(report)
+        } else {
+            harness.evaluate_candidate_rule(task, candidate_rule)
+        }
     }
 }
 
