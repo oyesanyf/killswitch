@@ -58,6 +58,7 @@ pub struct ServerState {
     pub active_mode: Arc<RwLock<OrchestratorMode>>,
     pub last_trigger_cause: Arc<RwLock<Option<(String, String, String)>>>,
     pub peers_enabled: Arc<std::sync::atomic::AtomicBool>,
+    pub fprime_supervisor: Arc<killswitch_core::fprime::FPrimeSupervisor>,
     pub config: ServerConfig,
 }
 
@@ -84,6 +85,7 @@ impl ServerState {
             active_mode: Arc::new(RwLock::new(OrchestratorMode::Autonomous)),
             last_trigger_cause: Arc::new(RwLock::new(None)),
             peers_enabled: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            fprime_supervisor: Arc::new(killswitch_core::fprime::FPrimeSupervisor::new()),
             config: ServerConfig::default(),
         }
     }

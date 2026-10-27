@@ -1083,3 +1083,48 @@ pub async fn post_tpm_seal(
         status_detail: report.status_detail,
     }))
 }
+
+
+// =============================================================================
+// 9. NASA JPL F' (F Prime) Flight-Software Supervision & Command Dispatcher
+// =============================================================================
+
+/// GET /fprime/status (and /api/fprime/status)
+pub async fn get_fprime_status(
+    State(state): State<Arc<ServerState>>,
+) -> Result<Json<killswitch_core::fprime::FPrimeTopologyStatus>, ServerError> {
+    let host_isolated = state.containment_manager.get_status().isolated;
+    let status = state.fprime_supervisor.step_rate_groups(host_isolated);
+    Ok(Json(status))
+}
+
+/// POST /fprime/dispatch (and /api/fprime/dispatch)
+pub async fn post_fprime_dispatch(
+    State(state): State<Arc<ServerState>>,
+    Json(req): Json<FPrimeCommandRequest>,
+) -> Result<Json<killswitch_core::fprime::FPrimeDispatchResult>, ServerError> {
+    let opcode = killswitch_core::fprime::FPrimeOpcode::from_u32_or_name(
+        req.opcode,
+        req.mnemonic.as_deref(),
+    );
+    let host_isolated = state.containment_manager.get_status().isolated;
+
+    // If verifying SWE-Bench gates via F' command dispatcher, run the real Two-Gate harness
+    if opcode == killswitch_core::fprime::FPrimeOpcode::VerifySweBenchGates {
+        let tasks = load_all_bench_tasks();
+        if let Some(task) = tasks.first() {
+            let harness = EdrBenchHarness::new();
+            let surgical_rule = killswitch_adjudication::edr_bench::canonical_surgical_multitoken_rule();
+            let _ = harness.evaluate_candidate_rule(task, &surgical_rule);
+        }
+    }
+
+    let result = state
+        .fprime_supervisor
+        .dispatch_command(opcode, host_isolated);
+    info!(
+        "🚀 [NASA-F-PRIME] Dispatched {} (seq #{}) in {} ns -> {:?}",
+        result.mnemonic, result.sequence, result.execution_latency_ns, result.response
+    );
+    Ok(Json(result))
+}

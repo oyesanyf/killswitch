@@ -404,3 +404,17 @@ pub struct TpmStatusResponse {
 }
 
 
+
+// =============================================================================
+// NASA JPL F' (F Prime) Flight-Software Command & Telemetry DTOs
+// =============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FPrimeCommandRequest {
+    /// Optional numeric opcode (`0x0100`..`0x0105`).
+    #[serde(default)]
+    pub opcode: Option<u32>,
+    /// Optional mnemonic (`"CMD_NO_OP"`, `"CMD_PING_ALL_COMPONENTS"`, `"CMD_VERIFY_SWEBENCH_GATES"`, `"CMD_ENGAGE_SAFE_MODE"`, `"CMD_EXIT_SAFE_MODE"`).
+    #[serde(default)]
+    pub mnemonic: Option<String>,
+}

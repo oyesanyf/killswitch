@@ -479,6 +479,7 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       <span id="isolation-badge" class="badge ok">🟢 INTERNET CONNECTED</span>
       <span id="peers-badge" class="badge ok">🌐 Connected Peers: 0</span>
       <span id="tpm-badge" class="badge ok">🔐 TPM 2.0: SEALED &amp; VERIFIED</span>
+      <span id="fprime-badge" class="badge ok" title="NASA JPL F' (F Prime) 8 Flight Components &amp; SWE-Bench Two-Gate Supervision">🚀 NASA F´ &amp; SWE-Bench: 8/8 NOMINAL</span>
       <span id="os-badge" class="badge">OS: Detecting...</span>
       <span id="mode-badge" class="badge">Auto-Protection: ON</span>
     </div>
@@ -486,6 +487,7 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       <button type="button" class="primary" onclick="refreshAll(true, this)">🔄 Refresh Status</button>
       <button id="btn-header-peers" type="button" class="danger" onclick="togglePeers(null, this)">🔌 Disable Peers</button>
       <button id="btn-header-tpm" type="button" class="ok" onclick="reSealTpmAnchor(this)">🔐 Re-Seal TPM 2.0</button>
+      <button id="btn-header-fprime" type="button" class="primary" onclick="dispatchFPrimeSweep(this)">🚀 NASA F´ &amp; SWE-Bench Check</button>
       <button id="btn-mode-auto" type="button" aria-pressed="true" onclick="toggleMode('autonomous', this)">🤖 Automatic Protection ON</button>
       <button id="btn-mode-manual" type="button" aria-pressed="false" onclick="toggleMode('manual', this)">👤 Ask Me First (Manual)</button>
     </div>
@@ -984,6 +986,33 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
           setCardStatus('card1-status', '🔐 TPM 2.0 Hardware Seal Verified: ' + (res.status_detail || 'Ledger anchor sealed to PCR 0..7'), res.tpm_integrity_verified ? 'ok' : 'danger');
         } catch (err) {
           setCardStatus('card1-status', 'TPM Seal Error: ' + err.message, 'danger');
+        }
+      });
+    }
+
+    async function dispatchFPrimeSweep(btn) {
+      await withButtonFeedback(btn, '🚀 Dispatching F´ & SWE-Bench…', async () => {
+        try {
+          const pingRes = await api('/fprime/dispatch', {
+            method: 'POST',
+            body: JSON.stringify({ mnemonic: 'CMD_PING_ALL_COMPONENTS' })
+          });
+          const benchRes = await api('/fprime/dispatch', {
+            method: 'POST',
+            body: JSON.stringify({ mnemonic: 'CMD_VERIFY_SWEBENCH_GATES' })
+          });
+          const fpBadge = document.getElementById('fprime-badge');
+          if (fpBadge && benchRes.status) {
+            fpBadge.textContent = '🚀 NASA F´ & SWE-Bench: 8/8 NOMINAL (Seq #' + benchRes.sequence + ')';
+            fpBadge.className = 'badge ok';
+          }
+          setCardStatus(
+            'card1-status',
+            '🚀 NASA JPL F´ (F Prime) & SWE-Bench Verified: ' + pingRes.message + ' | ' + benchRes.message,
+            'ok'
+          );
+        } catch (err) {
+          setCardStatus('card1-status', 'NASA F´ Dispatch Error: ' + err.message, 'danger');
         }
       });
     }

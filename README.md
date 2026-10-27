@@ -164,3 +164,17 @@ To prevent an attacker or rootkit with local administrator access from tampering
 - **REST API Endpoints**:
   - `GET /tpm/status` (and `/api/tpm/status`): Returns live TPM 2.0 hardware presence, version, interface type, PCR 0..7 SHA-256 quote digest, and ledger seal verification status.
   - `POST /tpm/seal` (and `/api/tpm/seal`): Forces a live hardware TPM 2.0 probe and re-seals the active BLAKE3 ledger root hash on demand.
+
+
+---
+
+## 🚀 NASA JPL F´ (F Prime) Flight-Software Component & Rate-Group Supervision
+
+`killswitch-core::fprime` implements **NASA JPL's F´ (F Prime) Flight-Software Architecture** (used on Mars Ingenuity and spacecraft fault-protection systems) and **JPL Power of Ten** safety invariants:
+- **8 Typed Flight Components (`Active`, `Queued`, `Passive`)**:
+  - `Svc::RateGroupDriver` (`Passive`), `Svc::CommandDispatcher` (`Active`), `Svc::Health` (`Queued`), `Svc::TlmChan` (`Passive`), `Svc::ActiveLogger` (`Active`), `Drv::KernelQuarantineDriver` (`Active`), `Svc::W3cTaintLineageFilter` (`Queued`), and `Svc::SweBenchTwoGateVerifier` (`Passive`).
+- **3 Harmonic Deterministic Rate Groups**:
+  - `RG_1000HZ_CONTAINMENT_BUS` (`1000 Hz`, `< 1 ms` WCET budget), `RG_100HZ_DLP_LINEAGE_BUS` (`100 Hz`, `< 10 µs` WCET budget), and `RG_10HZ_HEALTH_TPM_WATCHDOG` (`10 Hz` ping-pong health & TPM seal verification).
+- **REST API Endpoints**:
+  - `GET /fprime/status` (and `/api/fprime/status`): Returns live NASA F´ topology status, rate group tick counters, component `PingReturn` health states, `Svc::TlmChan` channels, and bounded `Svc::ActiveLogger` event records.
+  - `POST /fprime/dispatch` (and `/api/fprime/dispatch`): Dispatches typed opcodes (`CMD_NO_OP`, `CMD_PING_ALL_COMPONENTS`, `CMD_VERIFY_SWEBENCH_GATES`, `CMD_ENGAGE_SAFE_MODE`, `CMD_EXIT_SAFE_MODE`) through `Svc::CommandDispatcher`.

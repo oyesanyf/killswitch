@@ -4,6 +4,7 @@
 //! 4-tier hybrid operator authentication, TPM 2.0 hardware sealing, and BLAKE3-chained state ledger.
 
 pub mod auth;
+pub mod fprime;
 pub mod freeze;
 pub mod killchain;
 pub mod landlock;
@@ -15,6 +16,7 @@ pub mod tpm;
 pub mod wfp;
 
 pub use auth::{FrozenPidsProvider, OperatorAuthManager};
+pub use fprime::{FPrimeDispatchResult, FPrimeOpcode, FPrimeSupervisor, FPrimeTopologyStatus};
 pub use freeze::NativeProcessFreezer;
 pub use killchain::{
     default_network_isolator, execute_host_disarm_unauthenticated, is_critical_system_pid,

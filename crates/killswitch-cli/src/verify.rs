@@ -492,6 +492,28 @@ impl SubsystemVerifier {
         if !tpm_status.tpm_sealed || !tpm_status.tpm_integrity_verified {
             bail!("Expected TPM 2.0 anchor to be sealed and verified: {}", tpm_status.status_detail);
         }
+        // Verify GET /fprime/status (NASA JPL F' Flight-Software Component & Rate-Group Supervision)
+        let fprime_req = Request::builder()
+            .uri("/fprime/status")
+            .method("GET")
+            .body(Body::empty())?;
+        let fprime_resp = build_router(Arc::new(ServerState::with_defaults(
+            Arc::new(HostContainmentManager::new_default(Some(temp_dir.path()))?),
+        )))
+        .oneshot(fprime_req)
+        .await
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
+        if fprime_resp.status() != StatusCode::OK {
+            bail!("GET /fprime/status failed with status {}", fprime_resp.status());
+        }
+        let fprime_bytes = axum::body::to_bytes(fprime_resp.into_body(), usize::MAX)
+            .await
+            .map_err(|e| anyhow::anyhow!("FPrime status read failure: {}", e))?;
+        let fprime_status: killswitch_core::fprime::FPrimeTopologyStatus =
+            serde_json::from_slice(&fprime_bytes)?;
+        if !fprime_status.all_components_healthy || !fprime_status.swebench_two_gate_verified {
+            bail!("Expected NASA F' components and SWE-Bench Two-Gate to be healthy");
+        }
         if false {
         }
 
