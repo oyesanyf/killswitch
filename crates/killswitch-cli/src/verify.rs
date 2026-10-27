@@ -245,6 +245,23 @@ impl SubsystemVerifier {
             other => bail!("Expected Vetoed result for critical PID 4, got {:?}", other),
         }
 
+        for app in &[
+            "explorer.exe",
+            "svchost.exe",
+            "ls",
+            "ssh",
+            "chrome.exe",
+            "msedge.exe",
+            "firefox.exe",
+            "code.exe",
+            "devenv.exe",
+        ] {
+            let v = killswitch_adjudication::inspect_process_lineage(4242, Some(app));
+            if !v.is_immune() {
+                bail!("Expected protected application '{}' to be immune", app);
+            }
+        }
+
         // Verify SWE-Bench Two-Gate (FAIL_TO_PASS + PASS_TO_PASS) Anti-Blind-KillSwitch Gate
         let broad_rule = killswitch_adjudication::EdrBenchHarness::canonical_overbroad_blind_rule();
         let blocked_report = adjudicator.evaluate_swe_bench_gate(None, broad_rule, false)?;
@@ -287,13 +304,35 @@ impl SubsystemVerifier {
             DlpPolicy::Quarantine,
         );
 
-        // Process create & read
+        // Process create & read + Multi-hop Copy -> Rename -> Archive -> Content-Hash Upload Check
         let proc_key = ProcessKey::new(7700, 1000, "suspicious.exe");
         engine.on_process_create(None, proc_key, "suspicious.exe");
-        engine.on_file_read(proc_key, file_key);
+        let copy_key = FileKey::new("C:\\Temp\\copied_research.docx", 701);
+        engine.on_file_copy(Some(proc_key), file_key, copy_key, "C:\\Temp\\copied_research.docx");
+        let renamed_key = FileKey::new("C:\\Temp\\disguised_stage.log", 702);
+        engine.on_file_rename(Some(proc_key), copy_key, renamed_key, "C:\\Temp\\disguised_stage.log");
+        let archive_key = FileKey::new("C:\\Temp\\bundle.tmp", 703);
+        engine.on_archive_bundle(
+            proc_key,
+            &[renamed_key],
+            archive_key,
+            "C:\\Temp\\bundle.tmp",
+            "99887766554433221100aabbccddeeff99887766554433221100aabbccddeeff",
+        );
 
-        // Evaluate egress
-        let verdict = engine.evaluate_egress(proc_key, "https://exfil.remote-site.com");
+        // Evaluate egress & verify hot-path latency < 10us (10,000 ns)
+        let egress_start = Instant::now();
+        let mut verdict = EgressVerdict::Allow;
+        for _ in 0..100 {
+            verdict = engine.evaluate_egress(proc_key, "https://exfil.remote-site.com");
+        }
+        let avg_egress_ns = egress_start.elapsed().as_nanos() as u64 / 100;
+        if avg_egress_ns >= 10_000 {
+            bail!(
+                "Hot-path DLP evaluate_egress latency {} ns exceeded 10us (10,000 ns) SLA",
+                avg_egress_ns
+            );
+        }
         match verdict {
             EgressVerdict::Block { classification, .. } => {
                 if classification != DlpClassification::CrownJewel {

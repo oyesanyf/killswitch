@@ -300,6 +300,14 @@ pub async fn post_disarm(
             let _ = execute_host_disarm_unauthenticated();
             s
         }
+        Err(killswitch_types::errors::KillSwitchError::AuthenticationFailed(msg)) => {
+            return Err(ServerError::Core(
+                killswitch_types::errors::KillSwitchError::AuthenticationFailed(msg),
+            ));
+        }
+        Err(killswitch_types::errors::KillSwitchError::CallerQuarantined { pid }) => {
+            return Err(ServerError::CallerQuarantined(pid));
+        }
         Err(_) => {
             let _ = state
                 .containment_manager

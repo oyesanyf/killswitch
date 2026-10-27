@@ -36,6 +36,8 @@ pub struct KillChainHostManager {
     ledger: Arc<RwLock<StateLedger>>,
     watchdog_abort_tx: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
     engagement_lock: tokio::sync::Mutex<()>,
+    /// Reusable lightweight process-only scanner avoiding 100ms+ `System::new_all()` overhead.
+    process_scanner: Mutex<System>,
 }
 
 /// Fallback / simulated network isolator for non-Windows and non-Linux targets.
@@ -110,6 +112,7 @@ impl KillChainHostManager {
             ledger,
             watchdog_abort_tx: Mutex::new(None),
             engagement_lock: tokio::sync::Mutex::new(()),
+            process_scanner: Mutex::new(System::new()),
         }
     }
 
@@ -186,12 +189,18 @@ impl KillChainHostManager {
         let mut network_receipts = Vec::new();
         let active_network_rules = Vec::new();
 
+        let mut preserved_ports = crate::wfp::discover_active_control_ports();
+        for &p in &[DEFAULT_CONTROL_PORT, 53, 67, 68, 546, 547] {
+            if !preserved_ports.contains(&p) {
+                preserved_ports.push(p);
+            }
+        }
+
         // Stage 2: Network Quarantine (if level requires network isolation)
         if matches!(
             level,
             ContainmentLevel::NetworkQuarantine | ContainmentLevel::HermeticIsolation
         ) {
-            let preserved_ports = vec![DEFAULT_CONTROL_PORT, 53, 67, 68, 546, 547];
             match self
                 .network_isolator
                 .engage_quarantine(&preserved_ports, operator, reason)
@@ -202,8 +211,10 @@ impl KillChainHostManager {
                         receipt.session_id
                     );
                     network_isolated = true;
-                    // Reset active TCP connections to external hosts
-                    let _ = self.network_isolator.reset_tcp_connections(None);
+                    // Only call reset_tcp_connections if the isolator did not already terminate connections
+                    if receipt.terminated_tcp_connections_count == 0 {
+                        let _ = self.network_isolator.reset_tcp_connections(None);
+                    }
                     network_receipts.push(receipt);
                 }
                 Err(err) => {
@@ -221,9 +232,6 @@ impl KillChainHostManager {
             level,
             ContainmentLevel::ProcessFreeze | ContainmentLevel::HermeticIsolation
         ) {
-            let mut sys = System::new_all();
-            sys.refresh_processes();
-
             let high_risk_markers = [
                 "untrusted_payload",
                 "suspicious_exfil",
@@ -231,24 +239,37 @@ impl KillChainHostManager {
                 "test_malware",
             ];
 
-            for (pid_raw, proc) in sys.processes() {
-                let pid = pid_raw.as_u32();
-                let name = proc.name();
-
-                if self.process_freezer.is_immune(pid, name) || is_critical_system_pid(pid, name) {
-                    continue;
-                }
-
-                let name_lc = name.to_ascii_lowercase();
-                let cmd_lc = proc.cmd().join(" ").to_ascii_lowercase();
-                let is_suspicious = high_risk_markers
+            let candidate_pids: Vec<u32> = {
+                let mut sys = self.process_scanner.lock();
+                sys.refresh_processes_specifics(sysinfo::ProcessRefreshKind::new());
+                sys.processes()
                     .iter()
-                    .any(|m| name_lc.contains(m) || cmd_lc.contains(m));
+                    .filter_map(|(pid_raw, proc)| {
+                        let pid = pid_raw.as_u32();
+                        let name = proc.name();
+                        if self.process_freezer.is_immune(pid, name)
+                            || is_critical_system_pid(pid, name)
+                        {
+                            return None;
+                        }
+                        let name_lc = name.to_ascii_lowercase();
+                        let name_hit = high_risk_markers.iter().any(|m| name_lc.contains(m));
+                        let cmd_hit = if !name_hit && !proc.cmd().is_empty() {
+                            let cmd_lc = proc.cmd().join(" ").to_ascii_lowercase();
+                            high_risk_markers.iter().any(|m| cmd_lc.contains(m))
+                        } else {
+                            false
+                        };
+                        if name_hit || cmd_hit {
+                            Some(pid)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            };
 
-                if !is_suspicious {
-                    continue;
-                }
-
+            for pid in candidate_pids {
                 match self.process_freezer.freeze_process(pid) {
                     Ok(state) => {
                         frozen_pids.push(pid);
@@ -276,7 +297,7 @@ impl KillChainHostManager {
             processes_frozen_count: frozen_pids.len(),
             processes_tarpitted_count: 0,
             kernel_lockdown_active: level == ContainmentLevel::HermeticIsolation,
-            allowlisted_ports: vec![DEFAULT_CONTROL_PORT, 53, 67, 68, 546, 547],
+            allowlisted_ports: preserved_ports,
             quarantined_interfaces: Vec::new(),
             frozen_pids,
             tarpitted_pids: Vec::new(),
@@ -767,10 +788,6 @@ impl OperatorAuthenticator for KillChainHostManager {
 
 impl HealthProbeRunner for KillChainHostManager {
     fn run_probe(&self) -> Result<KillChainHealthProbeReport> {
-        let mut sys = System::new_all();
-        sys.refresh_processes();
-
-        let total_processes_scanned = sys.processes().len();
         let status = self.get_status();
         let frozen_pids = status.frozen_pids.clone();
 
@@ -786,57 +803,66 @@ impl HealthProbeRunner for KillChainHostManager {
             "test_malware",
         ];
 
-        for (pid_raw, proc) in sys.processes() {
-            let pid = pid_raw.as_u32();
-            let name = proc.name();
-            let name_lc = name.to_ascii_lowercase();
-            let cmd_lc = proc.cmd().join(" ").to_ascii_lowercase();
+        let total_processes_scanned = {
+            let mut sys = self.process_scanner.lock();
+            sys.refresh_processes_specifics(sysinfo::ProcessRefreshKind::new());
 
-            if is_critical_system_pid(pid, name) {
-                critical_os_anchors_verified += 1;
-                continue;
-            }
+            for (pid_raw, proc) in sys.processes() {
+                let pid = pid_raw.as_u32();
+                let name = proc.name();
 
-            if !frozen_pids.contains(&pid) {
-                // Check malware signatures in unfrozen processes
-                let is_malware = high_risk_markers
-                    .iter()
-                    .any(|m| name_lc.contains(m) || cmd_lc.contains(m));
-                if is_malware {
-                    suspicious_unfrozen_processes.push(format!("{}:{}", pid, name));
-                    anomalies.push(HealthProbeAnomaly {
-                        anomaly_id: format!("anom-{}", uuid::Uuid::new_v4()),
-                        kind: ProbeAnomalyKind::UnfrozenSuspiciousProcess,
-                        offending_pid: Some(pid),
-                        process_name: Some(name.to_string()),
-                        command_line: Some(cmd_lc),
-                        description: format!(
-                            "High-risk process '{}:{}' executing unfrozen during isolation",
-                            pid, name
-                        ),
-                    });
+                if is_critical_system_pid(pid, name) {
+                    critical_os_anchors_verified += 1;
+                    continue;
                 }
 
-                // Check orphaned children spawned from quarantined parents
-                if let Some(parent_pid) = proc.parent() {
-                    let p_u32 = parent_pid.as_u32();
-                    if frozen_pids.contains(&p_u32) && !is_critical_system_pid(pid, name) {
-                        orphaned_malicious_children.push(pid);
+                if !frozen_pids.contains(&pid) {
+                    let name_lc = name.to_ascii_lowercase();
+                    let name_hit = high_risk_markers.iter().any(|m| name_lc.contains(m));
+                    let cmd_lc = if name_hit || !proc.cmd().is_empty() {
+                        proc.cmd().join(" ").to_ascii_lowercase()
+                    } else {
+                        String::new()
+                    };
+                    let is_malware =
+                        name_hit || high_risk_markers.iter().any(|m| cmd_lc.contains(m));
+                    if is_malware {
+                        suspicious_unfrozen_processes.push(format!("{}:{}", pid, name));
                         anomalies.push(HealthProbeAnomaly {
                             anomaly_id: format!("anom-{}", uuid::Uuid::new_v4()),
-                            kind: ProbeAnomalyKind::OrphanedMaliciousChild,
+                            kind: ProbeAnomalyKind::UnfrozenSuspiciousProcess,
                             offending_pid: Some(pid),
                             process_name: Some(name.to_string()),
-                            command_line: None,
+                            command_line: Some(cmd_lc),
                             description: format!(
-                                "Orphaned child PID {} spawned from quarantined parent PID {}",
-                                pid, p_u32
+                                "High-risk process '{}:{}' executing unfrozen during isolation",
+                                pid, name
                             ),
                         });
                     }
+
+                    // Check orphaned children spawned from quarantined parents
+                    if let Some(parent_pid) = proc.parent() {
+                        let p_u32 = parent_pid.as_u32();
+                        if frozen_pids.contains(&p_u32) && !is_critical_system_pid(pid, name) {
+                            orphaned_malicious_children.push(pid);
+                            anomalies.push(HealthProbeAnomaly {
+                                anomaly_id: format!("anom-{}", uuid::Uuid::new_v4()),
+                                kind: ProbeAnomalyKind::OrphanedMaliciousChild,
+                                offending_pid: Some(pid),
+                                process_name: Some(name.to_string()),
+                                command_line: None,
+                                description: format!(
+                                    "Orphaned child PID {} spawned from quarantined parent PID {}",
+                                    pid, p_u32
+                                ),
+                            });
+                        }
+                    }
                 }
             }
-        }
+            sys.processes().len()
+        };
 
         let process_tree_integrity_ok = total_processes_scanned > 0
             && critical_os_anchors_verified > 0
@@ -1020,6 +1046,57 @@ pub fn is_critical_system_pid(pid: u32, name: &str) -> bool {
             | "sh"
             | "zsh"
             | "fish"
+            | "ls"
+            | "ssh"
+            | "scp"
+            | "sftp"
+            | "rsync"
+            // Browsers (Never falsely suspended or quarantined)
+            | "chrome.exe"
+            | "chrome"
+            | "msedge.exe"
+            | "msedge"
+            | "firefox.exe"
+            | "firefox"
+            | "brave.exe"
+            | "brave"
+            | "safari"
+            | "opera.exe"
+            | "vivaldi.exe"
+            | "arc.exe"
+            // IDEs & Developer Toolchains
+            | "cursor.exe"
+            | "cursor"
+            | "windsurf.exe"
+            | "devenv.exe"
+            | "rider64.exe"
+            | "idea64.exe"
+            | "pycharm64.exe"
+            | "clion64.exe"
+            | "goland64.exe"
+            | "webstorm64.exe"
+            | "rustrover64.exe"
+            | "rust-analyzer.exe"
+            | "rust-analyzer"
+            | "go.exe"
+            | "go"
+            | "dotnet.exe"
+            | "dotnet"
+            | "java.exe"
+            | "java"
+            | "javac.exe"
+            | "javac"
+            | "msbuild.exe"
+            | "cl.exe"
+            | "link.exe"
+            | "gcc"
+            | "g++"
+            | "clang"
+            | "clang++"
+            | "lld"
+            | "make"
+            | "cmake"
+            | "ninja"
             // macOS Critical System Daemons, UI & Developer Tools
             | "launchd"
             | "windowserver"

@@ -8,9 +8,20 @@
 
 use killswitch_core::killchain::is_critical_system_pid;
 use killswitch_types::adjudication::VetoReason;
+use parking_lot::Mutex;
 use std::collections::HashSet;
-use sysinfo::{Pid, System};
+use std::sync::OnceLock;
+use sysinfo::{Pid, ProcessRefreshKind, RefreshKind, System};
 use tracing::warn;
+
+fn shared_ancestry_scanner() -> &'static Mutex<System> {
+    static SCANNER: OnceLock<Mutex<System>> = OnceLock::new();
+    SCANNER.get_or_init(|| {
+        Mutex::new(System::new_with_specifics(
+            RefreshKind::new().with_processes(ProcessRefreshKind::new()),
+        ))
+    })
+}
 
 /// Maximum depth for process ancestry traversal.
 pub const MAX_ANCESTRY_DEPTH: usize = 5;
@@ -57,9 +68,9 @@ pub fn inspect_process_lineage(target_pid: u32, proc_name: Option<&str>) -> Line
         };
     }
 
-    // 2. Ancestry Traversal using sysinfo
-    let mut sys = System::new();
-    sys.refresh_processes();
+    // 2. Ancestry Traversal using reusable process-only scanner
+    let mut sys = shared_ancestry_scanner().lock();
+    sys.refresh_processes_specifics(ProcessRefreshKind::new());
 
     let mut current_pid = target_pid;
     let mut visited = HashSet::new();
@@ -109,8 +120,8 @@ pub fn inspect_process_lineage(target_pid: u32, proc_name: Option<&str>) -> Line
 /// Inspect process ancestry returning the full lineage list of `(PID, process_name)`.
 pub fn get_process_ancestry_chain(target_pid: u32) -> Vec<(u32, String)> {
     let mut chain = Vec::new();
-    let mut sys = System::new();
-    sys.refresh_processes();
+    let mut sys = shared_ancestry_scanner().lock();
+    sys.refresh_processes_specifics(ProcessRefreshKind::new());
 
     let mut current_pid = target_pid;
     let mut visited = HashSet::new();
@@ -161,5 +172,33 @@ mod tests {
         let chain = get_process_ancestry_chain(cur_pid);
         // Ancestry chain should resolve cleanly without hanging
         assert!(chain.len() <= MAX_ANCESTRY_DEPTH);
+    }
+
+    #[test]
+    fn test_signed_os_binaries_browsers_and_ides_never_quarantined() {
+        let protected = [
+            "explorer.exe",
+            "svchost.exe",
+            "ls",
+            "ssh",
+            "chrome.exe",
+            "msedge.exe",
+            "firefox.exe",
+            "safari",
+            "code.exe",
+            "cursor.exe",
+            "devenv.exe",
+            "idea64.exe",
+            "rust-analyzer.exe",
+        ];
+        for app in protected {
+            let verdict = inspect_process_lineage(4242, Some(app));
+            assert!(
+                verdict.is_immune(),
+                "Expected '{}' to be protected by 5-layer ancestry immunity",
+                app
+            );
+            assert_eq!(verdict.to_veto_reason(), Some(VetoReason::CriticalSystemPid));
+        }
     }
 }
