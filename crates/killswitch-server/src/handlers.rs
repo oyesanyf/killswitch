@@ -1114,8 +1114,8 @@ pub async fn post_fprime_dispatch(
         let tasks = load_all_bench_tasks();
         if let Some(task) = tasks.first() {
             let harness = EdrBenchHarness::new();
-            let surgical_rule = killswitch_adjudication::edr_bench::canonical_surgical_multitoken_rule();
-            let _ = harness.evaluate_candidate_rule(task, &surgical_rule);
+            let surgical_rule = EdrBenchHarness::canonical_verified_surgical_rule();
+            let _ = harness.evaluate_candidate_rule(task, surgical_rule);
         }
     }
 
