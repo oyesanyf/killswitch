@@ -805,6 +805,72 @@ fn query_kernel_tcp_table_by_pid() -> HashMap<u32, Vec<(u16, String, u16, String
                 ));
             }
         }
+        #[repr(C)]
+        #[derive(Clone, Copy)]
+        struct MibUdpRowOwnerPid {
+            dw_local_addr: u32,
+            dw_local_port: u32,
+            dw_owning_pid: u32,
+        }
+
+        #[link(name = "iphlpapi")]
+        extern "system" {
+            fn GetExtendedUdpTable(
+                p_udp_table: *mut u8,
+                pdw_size: *mut u32,
+                b_order: i32,
+                ul_af: u32,
+                table_class: i32,
+                reserved: u32,
+            ) -> u32;
+        }
+
+        const UDP_TABLE_OWNER_PID: i32 = 1;
+        let mut udp_size: u32 = 0;
+        let udp_res = GetExtendedUdpTable(
+            std::ptr::null_mut(),
+            &mut udp_size,
+            0,
+            AF_INET,
+            UDP_TABLE_OWNER_PID,
+            0,
+        );
+        if udp_res == ERROR_INSUFFICIENT_BUFFER && udp_size > 0 {
+            let mut udp_buf = vec![0u8; udp_size as usize];
+            if GetExtendedUdpTable(
+                udp_buf.as_mut_ptr(),
+                &mut udp_size,
+                0,
+                AF_INET,
+                UDP_TABLE_OWNER_PID,
+                0,
+            ) == 0
+            {
+                let udp_entries = std::ptr::read_unaligned(udp_buf.as_ptr() as *const u32) as usize;
+                let udp_rows_ptr = udp_buf.as_ptr().add(4) as *const MibUdpRowOwnerPid;
+                let max_udp = (udp_buf.len().saturating_sub(4)) / std::mem::size_of::<MibUdpRowOwnerPid>();
+                for i in 0..udp_entries.min(max_udp) {
+                    let urow = std::ptr::read_unaligned(udp_rows_ptr.add(i));
+                    let local_ip = Ipv4Addr::from(u32::from_be(urow.dw_local_addr));
+                    if local_ip.is_loopback() {
+                        continue;
+                    }
+                    let local_port = u16::from_be((urow.dw_local_port & 0xFFFF) as u16);
+                    let dir = if local_port == 53 || local_port == 5353 || local_port < 49152 {
+                        "INCOMING/UDP"
+                    } else {
+                        "OUTGOING/UDP"
+                    };
+                    map.entry(urow.dw_owning_pid).or_default().push((
+                        local_port,
+                        local_ip.to_string(),
+                        53,
+                        dir.to_string(),
+                        "UDP_ACTIVE".to_string(),
+                    ));
+                }
+            }
+        }
     }
     map
 }

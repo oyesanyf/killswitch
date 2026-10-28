@@ -567,6 +567,32 @@ impl BreakoutDefenseCoordinator {
             }
         }
 
+        // Zero-Day / Memory Corruption / Syscall & Shellcode Exploit Primitives
+        let exploit_primitives = [
+            "virtualalloc",
+            "createremotethread",
+            "ntallocatevirtualmemory",
+            "writeprocessmemory",
+            "mprotect",
+            "prot_exec",
+            "memfd_create",
+            "execveat",
+            "ptrace",
+            "io_uring",
+            "rop_chain",
+            "shellcode",
+            "amsiutils",
+            "etweventwrite",
+        ];
+        for &prim in &exploit_primitives {
+            if lower.contains(prim) {
+                detected_vectors.push(format!(
+                    "Zero-Day Memory / Syscall Exploit Primitive Detected: '{}'",
+                    prim
+                ));
+            }
+        }
+
         let is_clean = detected_vectors.is_empty();
         TechnicalBreakoutVerdict {
             is_clean,
@@ -723,7 +749,7 @@ impl BreakoutDefenseCoordinator {
         // Mathematical Shannon Entropy & Subdomain Label Analysis (Zero Hardcoded Domain Lists)
         for token in lower.split_whitespace() {
             let clean_tok = token
-                .trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '.' && c != '-' && c != '/' && c != ':');
+                .trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '.' && c != '-' && c != '/' && c != ':' && c != '+' && c != '=');
             let (host, _, _) = crate::rl_traffic::RlTrafficLearner::parse_host_and_port(clean_tok);
             if host.contains('.') && host.len() > 28 {
                 let max_label = host.split('.').map(|l| l.len()).max().unwrap_or(0);
@@ -734,6 +760,39 @@ impl BreakoutDefenseCoordinator {
                         host, max_label, label_entropy
                     ));
                 }
+            }
+            // Signature-Free Zero-Day Exploit / Obfuscated Shellcode Blob Detection:
+            // Any contiguous non-URL payload token >= 48 chars with high Shannon entropy (H >= 4.55 bits/byte)
+            if !clean_tok.contains('.') && clean_tok.len() >= 48 {
+                let blob_entropy = crate::phaselock::compute_shannon_entropy(clean_tok);
+                if blob_entropy >= 4.55 {
+                    detected_deviations.push(format!(
+                        "Zero-Day High-Entropy Obfuscated Exploit / Shellcode Blob (len={}, H={:.2} bits/byte)",
+                        clean_tok.len(),
+                        blob_entropy
+                    ));
+                }
+            }
+        }
+
+        // Raw UDP / DNS Tunneling Utilities & Covert Transport Channels
+        let dns_and_tunnel_markers = [
+            "resolve-dnsname",
+            "dnsclient",
+            "iodine",
+            "dnscat",
+            "chisel",
+            "ligolo",
+            "sock_raw",
+            "sock_dgram",
+            "udp://",
+        ];
+        for &marker in &dns_and_tunnel_markers {
+            if lower.contains(marker) {
+                detected_deviations.push(format!(
+                    "[OUTGOING] Covert UDP / DNS Tunneling or Raw Socket Channel: '{}'",
+                    marker
+                ));
             }
         }
 
