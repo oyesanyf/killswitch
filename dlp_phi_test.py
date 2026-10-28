@@ -124,8 +124,22 @@ def run_phi_dlp_test():
         print("    Make sure killswitch.exe is running first!")
         sys.exit(1)
 
-    # 2. Verify that legitimate PHI transactions to authorized HIPAA/EHR endpoints are ALLOWED
-    print(f"\n--- STEP 2: TESTING LEGITIMATE PHI TRANSACTION TO {AUTHORIZED_HIPAA_URL} ---")
+    # 2. Dynamically train the Online RL Traffic Policy on recurring legitimate PHI traffic (zero hardcoding!)
+    print(f"\n--- STEP 2: ONLINE RL TRAFFIC LEARNING FOR {AUTHORIZED_HIPAA_URL} ---")
+    for _ in range(3):
+        rl_step = api_post(
+            base_url,
+            "/rl/learn",
+            {
+                "destination_url": AUTHORIZED_HIPAA_URL,
+                "process_name": "python_phi_uploader.exe",
+                "payload_taint_level": 1.0,
+                "ai_breakout_signal": 0.0,
+                "is_legitimate_transaction": True,
+            },
+        )
+    print(f"[+] RL Learned Familiarity   : {rl_step.get('learned_familiarity', 0.0):.2f} -> {rl_step.get('explanation')}")
+
     hipaa_res = api_post(
         base_url,
         "/lineage/evaluate",
@@ -135,10 +149,10 @@ def run_phi_dlp_test():
         },
     )
     if not hipaa_res.get("is_block", False):
-        print(f"[+] DLP EGRESS VERDICT       : {hipaa_res.get('verdict')} (Authorized HIPAA/EHR Endpoint Permitted!)")
+        print(f"[+] DLP EGRESS VERDICT       : {hipaa_res.get('verdict')} (RL-Learned Legitimate PHI Endpoint Permitted!)")
         print(f"[+] Reason                   : {hipaa_res.get('reason')}")
     else:
-        print(f"[-] Unexpected Block on Authorized Endpoint: {hipaa_res}")
+        print(f"[-] Unexpected Block on RL-Learned Endpoint: {hipaa_res}")
 
     # 3. Evaluate egress to https://dlptest.com/http-post/ via KillSwitch DLP Engine
     print(f"\n--- STEP 3: ATTEMPTING UNAUTHORIZED PHI UPLOAD TO {DLP_TEST_URL} ---")

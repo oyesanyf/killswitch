@@ -1128,3 +1128,124 @@ pub async fn post_fprime_dispatch(
     );
     Ok(Json(result))
 }
+
+// =============================================================================
+// 10. Dynamic OS-Query + Reinforcement Learning (RL) Traffic Policy & AI Breakout
+// =============================================================================
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RlLearnRequest {
+    pub destination_url: String,
+    pub process_name: Option<String>,
+    pub payload_taint_level: Option<f64>,
+    pub ai_breakout_signal: Option<f64>,
+    pub is_legitimate_transaction: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct OctopusBreakoutRequest {
+    pub action: String,
+    pub resource: String,
+    pub payload: String,
+    pub destination_url: Option<String>,
+}
+
+/// GET /rl/status
+pub async fn get_rl_status(
+    State(state): State<Arc<ServerState>>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let live_os_rows = state.lineage_engine.rl_traffic.poll_and_learn_live_os_traffic();
+    let learned_destinations = state.lineage_engine.rl_traffic.list_learned_destinations();
+    let snapshot = state.lineage_engine.rl_traffic.snapshot();
+
+    Ok(Json(serde_json::json!({
+        "environment_backend": killswitch_telemetry::RL_ENVIRONMENT_BACKEND_LABEL,
+        "total_episodes": snapshot.total_episodes,
+        "total_os_polls": snapshot.total_os_polls,
+        "epsilon": snapshot.epsilon,
+        "live_os_socket_rows": live_os_rows,
+        "learned_destinations": learned_destinations,
+        "weights": snapshot.weights,
+    })))
+}
+
+/// POST /rl/learn
+pub async fn post_rl_learn(
+    State(state): State<Arc<ServerState>>,
+    Json(req): Json<RlLearnRequest>,
+) -> Result<Json<killswitch_telemetry::RlTrafficDecision>, ServerError> {
+    let decision = state.lineage_engine.rl_traffic.record_feedback_and_learn(
+        &req.destination_url,
+        req.process_name.as_deref(),
+        req.payload_taint_level.unwrap_or(1.0),
+        req.ai_breakout_signal.unwrap_or(0.0),
+        req.is_legitimate_transaction,
+    );
+    info!(
+        "🧠 [RL-TRAFFIC] Online TD(0) update for '{}' (legit={}) -> {:?} (familiarity={:.2})",
+        req.destination_url, req.is_legitimate_transaction, decision.action, decision.learned_familiarity
+    );
+    Ok(Json(decision))
+}
+
+/// GET /rl/benchmark
+pub async fn get_rl_benchmark() -> Result<Json<killswitch_telemetry::RlEmpiricalBenchmarkReport>, ServerError> {
+    let report = killswitch_telemetry::run_empirical_rl_benchmark(10, 40);
+    Ok(Json(report))
+}
+
+/// POST /octopus/breakout
+pub async fn post_octopus_breakout(
+    State(state): State<Arc<ServerState>>,
+    Json(req): Json<OctopusBreakoutRequest>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let coord = killswitch_telemetry::BreakoutDefenseCoordinator::new();
+    let eval = coord.evaluate_action(&req.action, &req.resource, &req.payload);
+
+    let dest_url = req
+        .destination_url
+        .as_deref()
+        .unwrap_or("https://unknown-external-sink.org/upload");
+
+    let rl_decision = if !eval.is_clean {
+        state.lineage_engine.rl_traffic.record_feedback_and_learn(
+            dest_url,
+            Some(&req.action),
+            1.0,
+            eval.breakout_risk_score,
+            false,
+        )
+    } else {
+        state.lineage_engine.rl_traffic.evaluate_traffic(
+            dest_url,
+            Some(&req.action),
+            0.2,
+            eval.breakout_risk_score,
+        )
+    };
+
+    let mut auto_killswitch_triggered = false;
+    if !eval.is_clean && *state.active_mode.read().await == OrchestratorMode::Autonomous {
+        let _ = state
+            .containment_manager
+            .engage_isolation(
+                "ai_breakout_gate",
+                &eval.summary,
+                ContainmentLevel::HermeticIsolation,
+                None,
+            )
+            .await;
+        *state.last_trigger_cause.write().await = Some((
+            eval.frontier_framework_classification.clone(),
+            format!("{} -> {}", req.action, req.resource),
+            eval.summary.clone(),
+        ));
+        auto_killswitch_triggered = true;
+    }
+
+    Ok(Json(serde_json::json!({
+        "breakout_evaluation": eval,
+        "rl_decision": rl_decision,
+        "autonomous_killswitch_triggered": auto_killswitch_triggered,
+    })))
+}

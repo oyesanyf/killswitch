@@ -555,6 +555,7 @@ pub struct EndpointLineageEngine {
     pub content_catalog: DashMap<String, FileTaintState>,
     pub tracer: Arc<opentelemetry::trace::noop::NoopTracer>,
     pub config: LineageEngineConfig,
+    pub rl_traffic: Arc<crate::rl_traffic::RlTrafficLearner>,
 }
 
 impl EndpointLineageEngine {
@@ -565,6 +566,9 @@ impl EndpointLineageEngine {
             content_catalog: DashMap::new(),
             tracer,
             config: LineageEngineConfig::default(),
+            rl_traffic: Arc::new(crate::rl_traffic::RlTrafficLearner::new_with_persistence(
+                "rl_traffic_policy.json",
+            )),
         }
     }
 
@@ -963,55 +967,23 @@ impl EndpointLineageEngine {
         }
     }
 
-    /// Checks whether `destination_url` is an authorized HIPAA / BAA / internal healthcare transaction endpoint
-    /// so legitimate PHI/EDI claims and EHR transactions are never falsely blocked.
+    /// Evaluates via the online Reinforcement Learning (RL) Traffic Policy whether `destination_url`
+    /// has been dynamically learned as a legitimate recurring transaction endpoint (zero hardcoded domain lists).
     #[inline]
-    pub fn is_authorized_phi_or_trusted_destination(destination_url: &str) -> bool {
-        let trimmed = destination_url.trim();
-        let after_scheme = trimmed
-            .strip_prefix("https://")
-            .or_else(|| trimmed.strip_prefix("http://"))
-            .unwrap_or(trimmed);
-        let host_port = after_scheme.split('/').next().unwrap_or(after_scheme);
-        let host = host_port.split(':').next().unwrap_or(host_port);
-
-        if host.eq_ignore_ascii_case("127.0.0.1")
-            || host.eq_ignore_ascii_case("localhost")
-            || host.eq_ignore_ascii_case("[::1]")
-        {
-            return true;
-        }
-
-        const TRUSTED_HIPAA_SUFFIXES: &[&str] = &[
-            "cms.gov",
-            "medicare.gov",
-            "availity.com",
-            "changehealthcare.com",
-            "epic.com",
-            "cerner.com",
-            "fhir.org",
-            "hl7.org",
-            "hipaa-partner.org",
-            "hospital.internal",
-        ];
-
-        for &suffix in TRUSTED_HIPAA_SUFFIXES {
-            if host.eq_ignore_ascii_case(suffix)
-                || (host.len() > suffix.len()
-                    && host.as_bytes()[host.len() - suffix.len() - 1] == b'.'
-                    && host[host.len() - suffix.len()..].eq_ignore_ascii_case(suffix))
-            {
-                return true;
-            }
-        }
-        false
+    pub fn is_rl_learned_legitimate_destination(
+        &self,
+        destination_url: &str,
+        _process_name: Option<&str>,
+        _taint_scalar: f64,
+    ) -> bool {
+        self.rl_traffic.is_fast_learned_legitimate(destination_url)
     }
 
     /// Fast inline outbound egress verification (< 10 microseconds, ~400ns typical).
     /// Avoids cloning process vectors/hashsets on the hot path.
     #[inline]
     pub fn evaluate_egress(&self, proc_key: ProcessKey, destination_url: &str) -> EgressVerdict {
-        if Self::is_authorized_phi_or_trusted_destination(destination_url) {
+        if self.is_rl_learned_legitimate_destination(destination_url, None, 1.0) {
             return EgressVerdict::Allow;
         }
         // Ultra-fast lock-free DashMap read: extract only minimal scalar/small fields without cloning

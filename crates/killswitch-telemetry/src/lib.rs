@@ -12,6 +12,7 @@ pub mod honeytokens;
 pub mod octopus;
 pub mod otel_lineage;
 pub mod phaselock;
+pub mod rl_traffic;
 pub mod watchdog;
 
 // Re-exports for clean ergonomics
@@ -37,5 +38,11 @@ pub use otel_lineage::{
 pub use phaselock::{
     compute_shannon_entropy, compute_syscall_phase_metric, PerPidPhaseLockMonitor,
     PhaseLockManager, PhaseSpaceConfig, PhaseSpaceVerdict,
+};
+pub use rl_traffic::{
+    query_live_os_process_sockets, run_empirical_rl_benchmark, ConfidenceInterval95,
+    LearnedDestinationProfile, OsQueryProcessSocketRow, PolicyEvaluationMetrics,
+    RlEmpiricalBenchmarkReport, RlPolicyPersistenceSnapshot, RlTrafficAction, RlTrafficDecision,
+    RlTrafficLearner, TrafficFeatureVector, RL_ENVIRONMENT_BACKEND_LABEL,
 };
 pub use watchdog::{HardwareWatchdog, MemoryPressureLevel, WatchdogConfig};
