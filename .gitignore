@@ -5,3 +5,7 @@ active_port.txt
 *.old.exe
 *.log
 .agents/
+checkpoint_inc-*.json
+killchain_state.json
+killchain_state.tpm.seal
+sample_patient_phi.txt

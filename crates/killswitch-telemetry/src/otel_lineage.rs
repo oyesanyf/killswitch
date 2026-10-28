@@ -963,10 +963,57 @@ impl EndpointLineageEngine {
         }
     }
 
+    /// Checks whether `destination_url` is an authorized HIPAA / BAA / internal healthcare transaction endpoint
+    /// so legitimate PHI/EDI claims and EHR transactions are never falsely blocked.
+    #[inline]
+    pub fn is_authorized_phi_or_trusted_destination(destination_url: &str) -> bool {
+        let trimmed = destination_url.trim();
+        let after_scheme = trimmed
+            .strip_prefix("https://")
+            .or_else(|| trimmed.strip_prefix("http://"))
+            .unwrap_or(trimmed);
+        let host_port = after_scheme.split('/').next().unwrap_or(after_scheme);
+        let host = host_port.split(':').next().unwrap_or(host_port);
+
+        if host.eq_ignore_ascii_case("127.0.0.1")
+            || host.eq_ignore_ascii_case("localhost")
+            || host.eq_ignore_ascii_case("[::1]")
+        {
+            return true;
+        }
+
+        const TRUSTED_HIPAA_SUFFIXES: &[&str] = &[
+            "cms.gov",
+            "medicare.gov",
+            "availity.com",
+            "changehealthcare.com",
+            "epic.com",
+            "cerner.com",
+            "fhir.org",
+            "hl7.org",
+            "hipaa-partner.org",
+            "hospital.internal",
+        ];
+
+        for &suffix in TRUSTED_HIPAA_SUFFIXES {
+            if host.eq_ignore_ascii_case(suffix)
+                || (host.len() > suffix.len()
+                    && host.as_bytes()[host.len() - suffix.len() - 1] == b'.'
+                    && host[host.len() - suffix.len()..].eq_ignore_ascii_case(suffix))
+            {
+                return true;
+            }
+        }
+        false
+    }
+
     /// Fast inline outbound egress verification (< 10 microseconds, ~400ns typical).
     /// Avoids cloning process vectors/hashsets on the hot path.
     #[inline]
     pub fn evaluate_egress(&self, proc_key: ProcessKey, destination_url: &str) -> EgressVerdict {
+        if Self::is_authorized_phi_or_trusted_destination(destination_url) {
+            return EgressVerdict::Allow;
+        }
         // Ultra-fast lock-free DashMap read: extract only minimal scalar/small fields without cloning
         // ProcessTaintState vectors (`causal_links`, `input_datasets`, `provenance_hops`, `read_history`).
         let (trace_id, classification, policy, is_enforced, distinct_hashes) = {

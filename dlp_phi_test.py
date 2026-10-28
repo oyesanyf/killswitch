@@ -28,6 +28,7 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 DLP_TEST_URL = "https://dlptest.com/http-post/"
+AUTHORIZED_HIPAA_URL = "https://fhir.epic.com/api/FHIR/R4/Patient"
 
 SAMPLE_PHI_CONTENT = """====================================================================
 CONFIDENTIAL PROTECTED HEALTH INFORMATION (HIPAA / PHI TEST RECORD)
@@ -61,7 +62,9 @@ def detect_killswitch_url():
             req = urllib.request.Request(f"{url}/status", headers={"User-Agent": "KillSwitch-DLP-Test"})
             with urllib.request.urlopen(req, timeout=1.5) as resp:
                 if resp.status == 200:
-                    return url
+                    body = json.loads(resp.read().decode("utf-8"))
+                    if "containment_level" in body or "state_hash_blake3" in body:
+                        return url
         except Exception:
             continue
     return "http://127.0.0.1:3031"
@@ -121,8 +124,24 @@ def run_phi_dlp_test():
         print("    Make sure killswitch.exe is running first!")
         sys.exit(1)
 
-    # 2. Evaluate egress to https://dlptest.com/http-post/ via KillSwitch DLP Engine
-    print(f"\n--- STEP 2: ATTEMPTING TO SEND PHI DATA TO {DLP_TEST_URL} ---")
+    # 2. Verify that legitimate PHI transactions to authorized HIPAA/EHR endpoints are ALLOWED
+    print(f"\n--- STEP 2: TESTING LEGITIMATE PHI TRANSACTION TO {AUTHORIZED_HIPAA_URL} ---")
+    hipaa_res = api_post(
+        base_url,
+        "/lineage/evaluate",
+        {
+            "pid": my_pid,
+            "destination_url": AUTHORIZED_HIPAA_URL,
+        },
+    )
+    if not hipaa_res.get("is_block", False):
+        print(f"[+] DLP EGRESS VERDICT       : {hipaa_res.get('verdict')} (Authorized HIPAA/EHR Endpoint Permitted!)")
+        print(f"[+] Reason                   : {hipaa_res.get('reason')}")
+    else:
+        print(f"[-] Unexpected Block on Authorized Endpoint: {hipaa_res}")
+
+    # 3. Evaluate egress to https://dlptest.com/http-post/ via KillSwitch DLP Engine
+    print(f"\n--- STEP 3: ATTEMPTING UNAUTHORIZED PHI UPLOAD TO {DLP_TEST_URL} ---")
     eval_res = api_post(
         base_url,
         "/lineage/evaluate",
@@ -147,8 +166,8 @@ def run_phi_dlp_test():
     else:
         print(f"[-] Unexpected Verdict: {eval_res}")
 
-    # 3. Also test direct socket POST to https://dlptest.com/http-post/ to check OS kernel WFP block
-    print(f"\n--- STEP 3: TESTING RAW KERNEL SOCKET TO {DLP_TEST_URL} ---")
+    # 4. Also test direct socket POST to https://dlptest.com/http-post/ to check OS kernel WFP block
+    print(f"\n--- STEP 4: TESTING RAW KERNEL SOCKET TO {DLP_TEST_URL} ---")
     time.sleep(0.5)
     try:
         form_data = urllib.parse.urlencode({"message": "SAFE_PROBE_ONLY_NO_PHI"}).encode("utf-8")

@@ -65,7 +65,9 @@ def detect_killswitch_url():
             req = urllib.request.Request(f"{url}/status", headers={"User-Agent": "KillSwitch-Python"})
             with urllib.request.urlopen(req, timeout=1.0) as resp:
                 if resp.status == 200:
-                    return url
+                    body = json.loads(resp.read().decode("utf-8"))
+                    if "containment_level" in body or "state_hash_blake3" in body:
+                        return url
         except Exception:
             continue
             
