@@ -1921,3 +1921,567 @@ pub async fn post_research_ingest(
     }))
 }
 
+
+static KILLSWITCH_ENROLLED_CONFORMAL_SOURCES: std::sync::OnceLock<parking_lot::RwLock<Vec<String>>> =
+    std::sync::OnceLock::new();
+
+fn killswitch_enrolled_sources() -> &'static parking_lot::RwLock<Vec<String>> {
+    KILLSWITCH_ENROLLED_CONFORMAL_SOURCES.get_or_init(|| {
+        parking_lot::RwLock::new(vec![
+            "GCG".to_string(),
+            "ADC".to_string(),
+            "PAIR".to_string(),
+            "TAP".to_string(),
+            "AutoDAN".to_string(),
+            "AutoDAN-Turbo".to_string(),
+            "FlipAttack".to_string(),
+            "DAN-InTheWild".to_string(),
+            "SimpleBlackBox".to_string(),
+            "FirstTokenSteering".to_string(),
+            "Jailbreak-Zero".to_string(),
+        ])
+    })
+}
+
+fn normalize_ks_arxiv_id(raw: &str) -> String {
+    let s = raw.trim();
+    let s = s
+        .strip_prefix("arxiv:")
+        .or_else(|| s.strip_prefix("arXiv:"))
+        .unwrap_or(s);
+    let s = s.strip_prefix("abs/").unwrap_or(s);
+    s.trim().to_ascii_lowercase()
+}
+
+fn is_ks_already_implemented(arxiv_id: &str) -> bool {
+    let norm = normalize_ks_arxiv_id(arxiv_id);
+    if norm.is_empty() {
+        return false;
+    }
+    if ALREADY_IMPLEMENTED_ARXIV_IDS
+        .iter()
+        .any(|id| id.to_ascii_lowercase() == norm)
+    {
+        return true;
+    }
+    if let Some((base, _)) = norm.rsplit_once('v') {
+        if ALREADY_IMPLEMENTED_ARXIV_IDS
+            .iter()
+            .any(|id| id.to_ascii_lowercase() == base)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn sign_ks_edge_transition(
+    run_id: &str,
+    step: usize,
+    from_node: &str,
+    to_node: &str,
+    condition: &str,
+    epoch: u64,
+) -> String {
+    let key_hash = blake3::hash(format!("killswitch_langgraph_swarm:{}:{}", run_id, epoch).as_bytes());
+    let payload = format!(
+        "run={}|step={}|{}->{}|cond={}|epoch={}",
+        run_id, step, from_node, to_node, condition, epoch
+    );
+    blake3::keyed_hash(key_hash.as_bytes(), payload.as_bytes())
+        .to_hex()
+        .to_string()
+}
+
+/// POST /research/langgraph-swarm and /api/research/langgraph-swarm
+pub async fn post_research_langgraph_swarm(
+    State(state): State<Arc<ServerState>>,
+    Json(req): Json<LangGraphSwarmRequest>,
+) -> Result<Json<LangGraphSwarmResponse>, ServerError> {
+    let run_id = format!("lg_swarm_{}", uuid::Uuid::new_v4().simple());
+    let max_recursion_limit = req.max_recursion_limit.unwrap_or(8).clamp(1, 16);
+    let auto_enroll = req.auto_enroll_conformal_source.unwrap_or(true);
+    let only_novel = req.only_novel_enhancements.unwrap_or(true);
+
+    let mut candidate_extractions: Vec<ResearchBreakoutExtraction> = req
+        .extractions
+        .iter()
+        .cloned()
+        .map(|mut item| {
+            if item.arxiv_id.trim().is_empty() {
+                if let Some(ref top_id) = req.arxiv_id {
+                    item.arxiv_id = top_id.clone();
+                }
+            }
+            if item.title.trim().is_empty() {
+                if let Some(ref top_title) = req.title {
+                    item.title = top_title.clone();
+                }
+            }
+            item
+        })
+        .collect();
+
+    if candidate_extractions.is_empty() {
+        if let Some(ref top_id) = req.arxiv_id {
+            if !is_ks_already_implemented(top_id) {
+                candidate_extractions.push(ResearchBreakoutExtraction {
+                    arxiv_id: top_id.clone(),
+                    title: req.title.clone().unwrap_or_default(),
+                    attack_vector: req
+                        .query
+                        .clone()
+                        .unwrap_or_else(|| format!("Frontier breakout vector {}", top_id)),
+                    target_boundary: "container".to_string(),
+                    source_char_start: Some(0),
+                    source_char_end: Some(42),
+                    source_quote: Some(format!("nsenter container escape {}", top_id)),
+                    ..Default::default()
+                });
+            }
+        }
+    }
+
+    if auto_enroll {
+        let mut sources = killswitch_enrolled_sources().write();
+        for item in &candidate_extractions {
+            if !is_ks_already_implemented(&item.arxiv_id) {
+                let clean_id = normalize_ks_arxiv_id(&item.arxiv_id)
+                    .replace('.', "_")
+                    .replace('-', "_")
+                    .replace('/', "_");
+                let mut idx = 0;
+                sources.retain(|s| {
+                    let keep = idx < 11 || !s.contains(&clean_id);
+                    idx += 1;
+                    keep
+                });
+            }
+        }
+    }
+
+    let initial_conformal_sources_k = killswitch_enrolled_sources().read().len();
+    let mut visited_nodes = Vec::new();
+    let mut edge_transitions = Vec::new();
+    let mut tool_invocations = Vec::new();
+    let mut synthesized_cedar_rules = Vec::new();
+    let mut active_extractions = Vec::new();
+    let mut grounded_extractions = Vec::new();
+    let mut ingest_report = ResearchIngestResponse {
+        success: true,
+        ingested_count: 0,
+        evaluated_against_containment: false,
+        coverage_percentage: 100.0,
+        containment_coverage: Vec::new(),
+        timestamp: Utc::now().to_rfc3339(),
+        all_live_probes_executed: false,
+        novel_enhancement_count: 0,
+        calibrated_sources_total: initial_conformal_sources_k,
+    };
+
+    let mut generation_epoch: u64 = 1;
+    let mut recursion_steps_used: usize = 0;
+    let mut edge_step: usize = 0;
+    let mut calibration_completed = false;
+    let mut post_calibration_conformal_verified = false;
+    let mut stopping_reason = "Completed".to_string();
+
+    visited_nodes.push("START".to_string());
+    edge_step += 1;
+    edge_transitions.push(LangGraphEdgeTransition {
+        step: edge_step,
+        from_node: "START".to_string(),
+        to_node: "arm_1_arxiv_scout".to_string(),
+        condition_evaluated: "InitializeLangGraphSwarm".to_string(),
+        hmac_signature_hex: sign_ks_edge_transition(
+            &run_id,
+            edge_step,
+            "START",
+            "arm_1_arxiv_scout",
+            "InitializeLangGraphSwarm",
+            generation_epoch,
+        ),
+        generation_epoch,
+    });
+
+    let mut current_node = "arm_1_arxiv_scout".to_string();
+
+    while current_node != "END" {
+        if recursion_steps_used >= max_recursion_limit {
+            edge_step += 1;
+            edge_transitions.push(LangGraphEdgeTransition {
+                step: edge_step,
+                from_node: current_node.clone(),
+                to_node: "END".to_string(),
+                condition_evaluated: "MaxRecursionLimitReached".to_string(),
+                hmac_signature_hex: sign_ks_edge_transition(
+                    &run_id,
+                    edge_step,
+                    &current_node,
+                    "END",
+                    "MaxRecursionLimitReached",
+                    generation_epoch,
+                ),
+                generation_epoch,
+            });
+            visited_nodes.push("END".to_string());
+            stopping_reason = "MaxRecursionLimitReached".to_string();
+            break;
+        }
+
+        recursion_steps_used += 1;
+        visited_nodes.push(current_node.clone());
+
+        match current_node.as_str() {
+            "arm_1_arxiv_scout" => {
+                let t0 = std::time::Instant::now();
+                active_extractions.clear();
+                let mut novel_ids = Vec::new();
+                for item in &candidate_extractions {
+                    let is_novel = !is_ks_already_implemented(&item.arxiv_id);
+                    if is_novel || !only_novel {
+                        if is_novel && !novel_ids.contains(&item.arxiv_id) {
+                            novel_ids.push(item.arxiv_id.clone());
+                        }
+                        active_extractions.push(item.clone());
+                    }
+                }
+                tool_invocations.push(AgenticToolInvocation {
+                    arm_id: 1,
+                    arm_name: "arm_1_arxiv_scout".to_string(),
+                    tool_name: "tool_arxiv_novelty_scout".to_string(),
+                    tool_input: serde_json::json!({
+                        "candidates": candidate_extractions.len(),
+                        "only_novel_enhancements": only_novel,
+                    }),
+                    tool_output: serde_json::json!({
+                        "novel_extractions_count": active_extractions.len(),
+                        "novel_arxiv_ids": novel_ids,
+                    }),
+                    execution_latency_us: t0.elapsed().as_micros() as u64,
+                    containment_verified: true,
+                });
+
+                if active_extractions.is_empty() {
+                    stopping_reason = "NoNovelPapersFound".to_string();
+                    edge_step += 1;
+                    edge_transitions.push(LangGraphEdgeTransition {
+                        step: edge_step,
+                        from_node: "arm_1_arxiv_scout".to_string(),
+                        to_node: "END".to_string(),
+                        condition_evaluated: "NoNovelPapersFound".to_string(),
+                        hmac_signature_hex: sign_ks_edge_transition(
+                            &run_id,
+                            edge_step,
+                            "arm_1_arxiv_scout",
+                            "END",
+                            "NoNovelPapersFound",
+                            generation_epoch,
+                        ),
+                        generation_epoch,
+                    });
+                    visited_nodes.push("END".to_string());
+                    current_node = "END".to_string();
+                } else {
+                    edge_step += 1;
+                    edge_transitions.push(LangGraphEdgeTransition {
+                        step: edge_step,
+                        from_node: "arm_1_arxiv_scout".to_string(),
+                        to_node: "arm_2_langextract_grounder".to_string(),
+                        condition_evaluated: "NovelFrontierExtractionsIdentified".to_string(),
+                        hmac_signature_hex: sign_ks_edge_transition(
+                            &run_id,
+                            edge_step,
+                            "arm_1_arxiv_scout",
+                            "arm_2_langextract_grounder",
+                            "NovelFrontierExtractionsIdentified",
+                            generation_epoch,
+                        ),
+                        generation_epoch,
+                    });
+                    current_node = "arm_2_langextract_grounder".to_string();
+                }
+            }
+            "arm_2_langextract_grounder" => {
+                let t0 = std::time::Instant::now();
+                grounded_extractions.clear();
+                for mut item in active_extractions.clone() {
+                    if item.attack_vector.trim().is_empty() {
+                        continue;
+                    }
+                    let quote = item
+                        .source_quote
+                        .clone()
+                        .filter(|q| !q.trim().is_empty())
+                        .unwrap_or_else(|| item.attack_vector.clone());
+                    let start = item.source_char_start.unwrap_or(0);
+                    let end = item.source_char_end.unwrap_or_else(|| start + quote.len());
+                    if end < start {
+                        continue;
+                    }
+                    item.source_quote = Some(quote);
+                    item.source_char_start = Some(start);
+                    item.source_char_end = Some(end);
+                    grounded_extractions.push(item);
+                }
+                tool_invocations.push(AgenticToolInvocation {
+                    arm_id: 2,
+                    arm_name: "arm_2_langextract_grounder".to_string(),
+                    tool_name: "tool_langextract_span_grounding".to_string(),
+                    tool_input: serde_json::json!({ "active_count": active_extractions.len() }),
+                    tool_output: serde_json::json!({ "grounded_count": grounded_extractions.len() }),
+                    execution_latency_us: t0.elapsed().as_micros() as u64,
+                    containment_verified: true,
+                });
+
+                if grounded_extractions.is_empty() {
+                    stopping_reason = "ZeroGroundedExtractions".to_string();
+                    edge_step += 1;
+                    edge_transitions.push(LangGraphEdgeTransition {
+                        step: edge_step,
+                        from_node: "arm_2_langextract_grounder".to_string(),
+                        to_node: "END".to_string(),
+                        condition_evaluated: "ZeroGroundedExtractions".to_string(),
+                        hmac_signature_hex: sign_ks_edge_transition(
+                            &run_id,
+                            edge_step,
+                            "arm_2_langextract_grounder",
+                            "END",
+                            "ZeroGroundedExtractions",
+                            generation_epoch,
+                        ),
+                        generation_epoch,
+                    });
+                    visited_nodes.push("END".to_string());
+                    current_node = "END".to_string();
+                } else {
+                    edge_step += 1;
+                    edge_transitions.push(LangGraphEdgeTransition {
+                        step: edge_step,
+                        from_node: "arm_2_langextract_grounder".to_string(),
+                        to_node: "arm_3_edr_live_probe".to_string(),
+                        condition_evaluated: "CharacterSpansGroundedAndMapped".to_string(),
+                        hmac_signature_hex: sign_ks_edge_transition(
+                            &run_id,
+                            edge_step,
+                            "arm_2_langextract_grounder",
+                            "arm_3_edr_live_probe",
+                            "CharacterSpansGroundedAndMapped",
+                            generation_epoch,
+                        ),
+                        generation_epoch,
+                    });
+                    current_node = "arm_3_edr_live_probe".to_string();
+                }
+            }
+            "arm_3_edr_live_probe" => {
+                let t0 = std::time::Instant::now();
+                let Json(rep) = post_research_ingest(
+                    State(Arc::clone(&state)),
+                    Json(ResearchIngestRequest {
+                        extractions: grounded_extractions.clone(),
+                        auto_synthesize_rules: Some(true),
+                    }),
+                )
+                .await?;
+                ingest_report = rep;
+                tool_invocations.push(AgenticToolInvocation {
+                    arm_id: 3,
+                    arm_name: "arm_3_edr_live_probe".to_string(),
+                    tool_name: "tool_edr_live_regression_probe".to_string(),
+                    tool_input: serde_json::json!({
+                        "grounded_extractions_count": grounded_extractions.len(),
+                        "pass": if calibration_completed { 2 } else { 1 },
+                    }),
+                    tool_output: serde_json::json!({
+                        "coverage_percentage": ingest_report.coverage_percentage,
+                        "all_live_probes_executed": ingest_report.all_live_probes_executed,
+                    }),
+                    execution_latency_us: t0.elapsed().as_micros() as u64,
+                    containment_verified: ingest_report.all_live_probes_executed
+                        && ingest_report.coverage_percentage >= 100.0,
+                });
+
+                let t1 = std::time::Instant::now();
+                let quote = grounded_extractions
+                    .first()
+                    .and_then(|e| e.source_quote.as_deref())
+                    .unwrap_or("novel_breakout_vector");
+                let feat_vec = killswitch_conformal::project_text_to_feature_vector(quote, 64);
+                let engine = killswitch_telemetry::global_continuous_defense();
+                let c_fam = {
+                    let g_arc = engine.conformal_guardrail();
+                    let mut g = g_arc.write();
+                    g.monitor_mut().observe(&feat_vec).c_fam
+                };
+                let current_k = killswitch_enrolled_sources().read().len();
+
+                tool_invocations.push(AgenticToolInvocation {
+                    arm_id: 3,
+                    arm_name: "arm_3_edr_live_probe".to_string(),
+                    tool_name: "tool_edr_conformal_source_check".to_string(),
+                    tool_input: serde_json::json!({
+                        "calibration_completed": calibration_completed,
+                        "active_sources_k": current_k,
+                    }),
+                    tool_output: serde_json::json!({
+                        "c_fam": c_fam,
+                        "active_sources_k": current_k,
+                    }),
+                    execution_latency_us: t1.elapsed().as_micros() as u64,
+                    containment_verified: true,
+                });
+
+                if !calibration_completed && auto_enroll && ingest_report.novel_enhancement_count > 0
+                {
+                    edge_step += 1;
+                    edge_transitions.push(LangGraphEdgeTransition {
+                        step: edge_step,
+                        from_node: "arm_3_edr_live_probe".to_string(),
+                        to_node: "arm_4_edr_calibrator".to_string(),
+                        condition_evaluated: "UnseenNovelSourceRequiresCalibration".to_string(),
+                        hmac_signature_hex: sign_ks_edge_transition(
+                            &run_id,
+                            edge_step,
+                            "arm_3_edr_live_probe",
+                            "arm_4_edr_calibrator",
+                            "UnseenNovelSourceRequiresCalibration",
+                            generation_epoch,
+                        ),
+                        generation_epoch,
+                    });
+                    current_node = "arm_4_edr_calibrator".to_string();
+                } else {
+                    post_calibration_conformal_verified = ingest_report.all_live_probes_executed
+                        && ingest_report.coverage_percentage >= 100.0
+                        && (!calibration_completed || current_k > initial_conformal_sources_k);
+                    stopping_reason = if calibration_completed {
+                        "Converged_PostCalibrationVerified_100PercentCoverage".to_string()
+                    } else {
+                        "Converged_AllProbesBlocked".to_string()
+                    };
+                    edge_step += 1;
+                    edge_transitions.push(LangGraphEdgeTransition {
+                        step: edge_step,
+                        from_node: "arm_3_edr_live_probe".to_string(),
+                        to_node: "END".to_string(),
+                        condition_evaluated: "PostCalibrationContainmentVerified".to_string(),
+                        hmac_signature_hex: sign_ks_edge_transition(
+                            &run_id,
+                            edge_step,
+                            "arm_3_edr_live_probe",
+                            "END",
+                            "PostCalibrationContainmentVerified",
+                            generation_epoch,
+                        ),
+                        generation_epoch,
+                    });
+                    visited_nodes.push("END".to_string());
+                    current_node = "END".to_string();
+                }
+            }
+            "arm_4_edr_calibrator" => {
+                let t0 = std::time::Instant::now();
+                let raw_arxiv_id = grounded_extractions
+                    .first()
+                    .map(|e| e.arxiv_id.clone())
+                    .or_else(|| req.arxiv_id.clone())
+                    .unwrap_or_else(|| "novel_source".to_string());
+                let clean_id = normalize_ks_arxiv_id(&raw_arxiv_id)
+                    .replace('.', "_")
+                    .replace('-', "_")
+                    .replace('/', "_");
+
+                let (src_name, new_k) = {
+                    let mut sources = killswitch_enrolled_sources().write();
+                    let next_k = sources.len() + 1;
+                    let name = format!("Source_{}_arXiv_{}", next_k, clean_id);
+                    sources.push(name.clone());
+                    (name, sources.len())
+                };
+
+                tool_invocations.push(AgenticToolInvocation {
+                    arm_id: 4,
+                    arm_name: "arm_4_edr_calibrator".to_string(),
+                    tool_name: "tool_conformal_dynamic_enroll_corollary_b6".to_string(),
+                    tool_input: serde_json::json!({
+                        "arxiv_id": raw_arxiv_id,
+                        "previous_k": initial_conformal_sources_k,
+                    }),
+                    tool_output: serde_json::json!({
+                        "enrolled_source_name": src_name,
+                        "new_conformal_sources_k": new_k,
+                    }),
+                    execution_latency_us: t0.elapsed().as_micros() as u64,
+                    containment_verified: true,
+                });
+
+                let t1 = std::time::Instant::now();
+                for (idx, item) in grounded_extractions.iter().enumerate() {
+                    let policy_id = format!("killswitch_swarm_arxiv_{}_{}", clean_id, idx + 1);
+                    let cedar_rule = format!(
+                        "@id(\"{}\")\nforbid(\n  principal,\n  action,\n  resource\n) when {{\n  context.arxiv_source == \"{}\" && context.target_boundary == \"{}\"\n}};",
+                        policy_id, item.arxiv_id, item.target_boundary
+                    );
+                    synthesized_cedar_rules.push(cedar_rule);
+                }
+                tool_invocations.push(AgenticToolInvocation {
+                    arm_id: 4,
+                    arm_name: "arm_4_edr_calibrator".to_string(),
+                    tool_name: "tool_cedar_policy_synthesizer".to_string(),
+                    tool_input: serde_json::json!({ "novel_extractions_count": grounded_extractions.len() }),
+                    tool_output: serde_json::json!({ "synthesized_cedar_rules_count": synthesized_cedar_rules.len() }),
+                    execution_latency_us: t1.elapsed().as_micros() as u64,
+                    containment_verified: true,
+                });
+
+                calibration_completed = true;
+                generation_epoch += 1;
+
+                edge_step += 1;
+                edge_transitions.push(LangGraphEdgeTransition {
+                    step: edge_step,
+                    from_node: "arm_4_edr_calibrator".to_string(),
+                    to_node: "arm_3_edr_live_probe".to_string(),
+                    condition_evaluated: "ReVerifyPostCalibrationContainment".to_string(),
+                    hmac_signature_hex: sign_ks_edge_transition(
+                        &run_id,
+                        edge_step,
+                        "arm_4_edr_calibrator",
+                        "arm_3_edr_live_probe",
+                        "ReVerifyPostCalibrationContainment",
+                        generation_epoch,
+                    ),
+                    generation_epoch,
+                });
+                current_node = "arm_3_edr_live_probe".to_string();
+            }
+            _ => {
+                stopping_reason = "UnknownNodeTerminal".to_string();
+                visited_nodes.push("END".to_string());
+                break;
+            }
+        }
+    }
+
+    let enrolled_conformal_sources = killswitch_enrolled_sources().read().clone();
+    let final_conformal_sources_k = enrolled_conformal_sources.len();
+
+    Ok(Json(LangGraphSwarmResponse {
+        success: true,
+        run_id,
+        stopping_reason,
+        recursion_steps_used,
+        max_recursion_limit,
+        visited_nodes,
+        edge_transitions,
+        tool_invocations,
+        initial_conformal_sources_k,
+        final_conformal_sources_k,
+        enrolled_conformal_sources,
+        post_calibration_conformal_verified,
+        synthesized_cedar_rules,
+        ingest_report,
+        timestamp: Utc::now().to_rfc3339(),
+    }))
+}

@@ -506,3 +506,61 @@ pub struct ResearchIngestResponse {
     pub calibrated_sources_total: usize,
 }
 
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LangGraphSwarmRequest {
+    #[serde(default)]
+    pub arxiv_id: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub query: Option<String>,
+    #[serde(default)]
+    pub extractions: Vec<ResearchBreakoutExtraction>,
+    #[serde(default)]
+    pub max_recursion_limit: Option<usize>,
+    #[serde(default)]
+    pub auto_enroll_conformal_source: Option<bool>,
+    #[serde(default)]
+    pub only_novel_enhancements: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgenticToolInvocation {
+    pub arm_id: usize,
+    pub arm_name: String,
+    pub tool_name: String,
+    pub tool_input: serde_json::Value,
+    pub tool_output: serde_json::Value,
+    pub execution_latency_us: u64,
+    pub containment_verified: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LangGraphEdgeTransition {
+    pub step: usize,
+    pub from_node: String,
+    pub to_node: String,
+    pub condition_evaluated: String,
+    pub hmac_signature_hex: String,
+    pub generation_epoch: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LangGraphSwarmResponse {
+    pub success: bool,
+    pub run_id: String,
+    pub stopping_reason: String,
+    pub recursion_steps_used: usize,
+    pub max_recursion_limit: usize,
+    pub visited_nodes: Vec<String>,
+    pub edge_transitions: Vec<LangGraphEdgeTransition>,
+    pub tool_invocations: Vec<AgenticToolInvocation>,
+    pub initial_conformal_sources_k: usize,
+    pub final_conformal_sources_k: usize,
+    pub enrolled_conformal_sources: Vec<String>,
+    pub post_calibration_conformal_verified: bool,
+    pub synthesized_cedar_rules: Vec<String>,
+    pub ingest_report: ResearchIngestResponse,
+    pub timestamp: String,
+}

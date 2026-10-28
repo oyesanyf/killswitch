@@ -1,6 +1,6 @@
 //! # Axum Router Assembly & Middleware Stacking
 //!
-//! Exposes all 16 dedicated endpoints with layered security middleware.
+//! Exposes all dedicated endpoints with layered security middleware.
 
 use std::sync::Arc;
 use axum::routing::{get, post};
@@ -83,9 +83,11 @@ pub fn build_router(state: Arc<ServerState>) -> Router {
         .route("/api/conformal/status", get(handlers::get_conformal_status))
         .route("/conformal/evaluate", post(handlers::post_conformal_evaluate))
         .route("/api/conformal/evaluate", post(handlers::post_conformal_evaluate))
-        // 14. Research Breakout Ingestion & Verification Feed (Google LangExtract + arXiv)
+        // 14. Research Breakout Ingestion, Verification & 4-Arm Contained LangGraph Swarm
         .route("/research/ingest", post(handlers::post_research_ingest))
         .route("/api/research/ingest", post(handlers::post_research_ingest))
+        .route("/research/langgraph-swarm", post(handlers::post_research_langgraph_swarm))
+        .route("/api/research/langgraph-swarm", post(handlers::post_research_langgraph_swarm))
         // Middleware Layers (applied bottom-up)
         .layer(axum::middleware::from_fn(middleware::rate_limit_middleware))
         .layer(middleware::cors_layer())
