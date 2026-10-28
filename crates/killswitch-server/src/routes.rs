@@ -83,11 +83,17 @@ pub fn build_router(state: Arc<ServerState>) -> Router {
         .route("/api/conformal/status", get(handlers::get_conformal_status))
         .route("/conformal/evaluate", post(handlers::post_conformal_evaluate))
         .route("/api/conformal/evaluate", post(handlers::post_conformal_evaluate))
-        // 14. Research Breakout Ingestion, Verification & 4-Arm Contained LangGraph Swarm
+        // 14. Research Breakout Ingestion, Verification, 4-Arm LangGraph Swarm & User Approval Menu
         .route("/research/ingest", post(handlers::post_research_ingest))
         .route("/api/research/ingest", post(handlers::post_research_ingest))
         .route("/research/langgraph-swarm", post(handlers::post_research_langgraph_swarm))
         .route("/api/research/langgraph-swarm", post(handlers::post_research_langgraph_swarm))
+        .route("/research/candidates", get(handlers::get_research_candidates))
+        .route("/api/research/candidates", get(handlers::get_research_candidates))
+        .route("/research/discover", post(handlers::post_research_discover))
+        .route("/api/research/discover", post(handlers::post_research_discover))
+        .route("/research/approve", post(handlers::post_research_approve))
+        .route("/api/research/approve", post(handlers::post_research_approve))
         // Middleware Layers (applied bottom-up)
         .layer(axum::middleware::from_fn(middleware::rate_limit_middleware))
         .layer(middleware::cors_layer())
