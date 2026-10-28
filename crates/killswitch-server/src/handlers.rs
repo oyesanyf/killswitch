@@ -817,7 +817,7 @@ pub async fn post_lineage_evaluate(
             Ok(Json(LineageEvaluateResponse {
                 verdict: "Allow".to_string(),
                 is_block: false,
-                reason: Some("Clean process lineage — no CrownJewel or Confidential W3C taint baggage present".to_string()),
+                reason: Some(if state.lineage_engine.is_rl_learned_legitimate_destination(&req.destination_url, None, 1.0) { format!("RL Traffic Policy Permitted: Learned legitimate transaction endpoint '{}' (familiarity={:.2}) — CrownJewel PHI allowed", req.destination_url, state.lineage_engine.rl_traffic.lookup_destination_familiarity(&req.destination_url)) } else { "Clean process lineage — no CrownJewel or Confidential W3C taint baggage present".to_string() }),
                 trace_id: None,
                 classification: Some("Public".to_string()),
                 policy: Some("Allow".to_string()),
