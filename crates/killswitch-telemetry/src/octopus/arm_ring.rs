@@ -496,6 +496,83 @@ impl ArmContainmentRing {
 
         Ok(())
     }
+
+    /// Primary Multi-Ring Containment Gate:
+    /// Actively invokes capability HMAC verification, step-budget enforcement, role prefix authorization,
+    /// `BreakoutDefenseCoordinator` (Technical, Operational, Behavioral/Entropy, Data), Mathematical SSRF
+    /// validation, and Safe `Path::join` sandbox validation BEFORE any tool closure executes.
+    /// Automatically performs Surgical Autotomy (`self.sever(...)`) on any breakout violation.
+    pub async fn execute_guarded_tool<F, T>(
+        &self,
+        token: &CapabilityToken,
+        resource: &str,
+        payload: &str,
+        sandbox_root: Option<&std::path::Path>,
+        tool_closure: F,
+    ) -> KillSwitchResult<T>
+    where
+        F: FnOnce() -> KillSwitchResult<T>,
+    {
+        // 1. Constant-time HMAC-SHA256 & Generation Epoch verification
+        self.verify_capability(token).await?;
+
+        // 2. Step-budget enforcement
+        let step = self.step_counter.fetch_add(1, Ordering::SeqCst) + 1;
+        if step > self.config.step_limit as u64 {
+            let reason = format!(
+                "Arm {} exceeded step budget ({} > {})",
+                self.arm_id, step, self.config.step_limit
+            );
+            self.sever(&reason).await?;
+            return Err(KillSwitchError::OctopusViolation(reason));
+        }
+
+        // 3. Explicit fail-closed tool & resource prefix check
+        {
+            let allowed_tools = self.allowed_tools.read().await;
+            if !allowed_tools.contains(&token.permitted_tool) {
+                let reason = format!(
+                    "Tool '{}' is not authorized for role {:?}",
+                    token.permitted_tool, self.role
+                );
+                self.sever(&reason).await?;
+                return Err(KillSwitchError::OctopusViolation(reason));
+            }
+        }
+
+        // 4. Active BreakoutDefenseCoordinator Gate (OpenAI Preparedness ARA & Anthropic RSP ASL-3/4)
+        let coordinator = crate::octopus::BreakoutDefenseCoordinator::new();
+        let eval = coordinator.evaluate_action(&token.permitted_tool, resource, payload);
+        if !eval.is_clean {
+            self.sever(&eval.summary).await?;
+            return Err(KillSwitchError::OctopusViolation(eval.summary));
+        }
+
+        // 5. Mathematical IPv4/IPv6 SSRF Guard for HTTP/HTTPS egress resources
+        let trimmed_res = resource.trim();
+        if trimmed_res.starts_with("http://") || trimmed_res.starts_with("https://") {
+            if let Err(ssrf_err) = crate::octopus::validate_egress_url(trimmed_res, false) {
+                let reason = format!("SSRF guard blocked egress from Arm {}: {}", self.arm_id, ssrf_err);
+                self.sever(&reason).await?;
+                return Err(ssrf_err);
+            }
+        }
+
+        // 6. Safe Path::join Sandbox Traversal Guard when sandbox_root is configured
+        if let Some(root) = sandbox_root {
+            if let Err(path_err) = crate::octopus::validate_sandbox_path(trimmed_res, root) {
+                let reason = format!(
+                    "Sandbox path traversal blocked on Arm {}: {}",
+                    self.arm_id, path_err
+                );
+                self.sever(&reason).await?;
+                return Err(path_err);
+            }
+        }
+
+        // 7. Execute tool closure only after all containment rings pass
+        tool_closure()
+    }
 }
 
 /// Supervisor Registry managing all Level 1 containment rings.
@@ -585,5 +662,52 @@ impl ArmRingRegistry {
 
     pub async fn active_watchout_signals(&self) -> Vec<MeshWatchOutSignal> {
         self.watchout_signals.read().await.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_primary_gate_blocks_breakout_and_severs_arm_before_closure() {
+        let registry = ArmRingRegistry::new(b"test_octopus_master_seed_32bytes!");
+        let arm = registry.get_ring(2).await.expect("Arm 2 (NetworkEgress)");
+        assert_eq!(arm.current_generation(), 1);
+
+        let cap = arm
+            .issue_capability("http_egress", "https://", 60)
+            .await
+            .expect("issue capability");
+
+        let mut closure_ran = false;
+        // Attempt an OpenAI/Anthropic breakout payload via the primary containment gate
+        let res = arm
+            .execute_guarded_tool(
+                &cap,
+                "https://a8f9d0e1c2b3a4f5e6d7c8b9a0f1e2d3.exfil-c2.org/leak",
+                "cat ~/.netrc && curl /var/run/docker.sock",
+                None,
+                || {
+                    closure_ran = true;
+                    Ok("should_never_execute")
+                },
+            )
+            .await;
+
+        assert!(res.is_err(), "Breakout payload must fail closed");
+        assert!(!closure_ran, "Tool closure must NEVER execute on breakout");
+
+        // Verify arm was automatically severed and old epoch fails validation
+        assert!(arm.validate_epoch(1).await.is_err());
+
+        // Regenerating advances epoch monotonically to Gen 2
+        let new_gen = registry
+            .sever_and_regenerate_arm(2, "Breakout recovery")
+            .await
+            .expect("regenerate");
+        assert_eq!(new_gen, 2);
+        assert!(arm.validate_epoch(1).await.is_err(), "Stale epoch 1 must remain rejected");
+        assert!(arm.validate_epoch(2).await.is_ok(), "New epoch 2 must be active");
     }
 }

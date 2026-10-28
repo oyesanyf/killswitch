@@ -206,12 +206,59 @@ impl KillSwitchServer {
         let web_url = format!("http://{}", addr);
         open_browser_cross_platform(&web_url);
 
+        // Spawn continuous Live OS-Query & Autonomous Agent Breakout Sentinel loop
+        let sentinel_state = Arc::clone(&self.state);
+        let sentinel_handle = tokio::spawn(async move {
+            let coord = killswitch_telemetry::BreakoutDefenseCoordinator::new();
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(3));
+            loop {
+                interval.tick().await;
+                let rows = sentinel_state
+                    .lineage_engine
+                    .rl_traffic
+                    .poll_and_learn_live_os_traffic();
+                for row in rows {
+                    let eval = coord.evaluate_action(
+                        &row.process_name,
+                        &row.image_path,
+                        &row.command_line,
+                    );
+                    if !eval.is_clean {
+                        let _ = sentinel_state
+                            .arm_registry
+                            .sever_and_regenerate_arm(2, &eval.summary)
+                            .await;
+                        if *sentinel_state.active_mode.read().await == OrchestratorMode::Autonomous
+                            && !sentinel_state.containment_manager.get_status().isolated
+                        {
+                            let _ = sentinel_state
+                                .containment_manager
+                                .engage_isolation(
+                                    "live_os_ai_breakout_sentinel",
+                                    &eval.summary,
+                                    killswitch_types::ContainmentLevel::HermeticIsolation,
+                                    None,
+                                )
+                                .await;
+                            *sentinel_state.last_trigger_cause.write().await = Some((
+                                eval.frontier_framework_classification.clone(),
+                                format!("PID {} ({})", row.pid, row.process_name),
+                                eval.summary.clone(),
+                            ));
+                        }
+                    }
+                }
+            }
+        });
+
         let app = build_router(Arc::clone(&self.state));
 
         axum::serve(listener, app)
             .with_graceful_shutdown(shutdown_signal)
             .await
             .map_err(|e| ServerError::Internal(format!("Server error: {}", e)))?;
+
+        sentinel_handle.abort();
 
         let _ = std::fs::remove_file("active_port.txt");
         let _ = std::fs::remove_file(std::env::temp_dir().join("killswitch_active_port.txt"));

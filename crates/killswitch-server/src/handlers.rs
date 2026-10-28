@@ -1225,27 +1225,58 @@ pub async fn post_octopus_breakout(
     };
 
     let mut auto_killswitch_triggered = false;
-    if !eval.is_clean && *state.active_mode.read().await == OrchestratorMode::Autonomous {
-        let _ = state
-            .containment_manager
-            .engage_isolation(
-                "ai_breakout_gate",
-                &eval.summary,
-                ContainmentLevel::HermeticIsolation,
-                None,
-            )
-            .await;
-        *state.last_trigger_cause.write().await = Some((
-            eval.frontier_framework_classification.clone(),
-            format!("{} -> {}", req.action, req.resource),
-            eval.summary.clone(),
-        ));
-        auto_killswitch_triggered = true;
+    let mut severed_arm_new_generation = None;
+    let mut severed_arms = Vec::new();
+    if !eval.is_clean {
+        // Perform Surgical Autotomy on Arm #0 (UntrustedDocIngest / INCOMING) and/or Arm #2 (NetworkEgress / OUTGOING)
+        if eval.direction.contains("INCOMING") || eval.direction.contains("BIDIRECTIONAL") {
+            if let Ok(new_gen) = state
+                .arm_registry
+                .sever_and_regenerate_arm(0, &eval.summary)
+                .await
+            {
+                severed_arm_new_generation = Some(new_gen);
+                severed_arms.push(serde_json::json!({ "arm_id": 0, "role": "UntrustedDocIngest (INCOMING)", "new_generation": new_gen }));
+            }
+        }
+        if eval.direction.contains("OUTGOING")
+            || eval.direction.contains("BIDIRECTIONAL")
+            || severed_arms.is_empty()
+        {
+            if let Ok(new_gen) = state
+                .arm_registry
+                .sever_and_regenerate_arm(2, &eval.summary)
+                .await
+            {
+                severed_arm_new_generation = Some(new_gen);
+                severed_arms.push(serde_json::json!({ "arm_id": 2, "role": "NetworkEgress (OUTGOING)", "new_generation": new_gen }));
+            }
+        }
+
+        if *state.active_mode.read().await == OrchestratorMode::Autonomous {
+            let _ = state
+                .containment_manager
+                .engage_isolation(
+                    "ai_breakout_gate",
+                    &eval.summary,
+                    ContainmentLevel::HermeticIsolation,
+                    None,
+                )
+                .await;
+            *state.last_trigger_cause.write().await = Some((
+                format!("{} — {}", eval.direction, eval.frontier_framework_classification),
+                format!("{} -> {}", req.action, req.resource),
+                eval.summary.clone(),
+            ));
+            auto_killswitch_triggered = true;
+        }
     }
 
     Ok(Json(serde_json::json!({
         "breakout_evaluation": eval,
         "rl_decision": rl_decision,
+        "severed_arm_new_generation": severed_arm_new_generation,
+        "severed_arms": severed_arms,
         "autonomous_killswitch_triggered": auto_killswitch_triggered,
     })))
 }

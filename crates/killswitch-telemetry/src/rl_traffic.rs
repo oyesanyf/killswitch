@@ -133,6 +133,7 @@ impl LearnedDestinationProfile {
 }
 
 /// Live OS process and socket row dynamically queried from the operating system (osquery-compatible schema).
+/// Tracks both INCOMING (inbound listeners & inbound peers) and OUTGOING (outbound egress) sockets.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OsQueryProcessSocketRow {
     pub pid: u32,
@@ -140,8 +141,10 @@ pub struct OsQueryProcessSocketRow {
     pub process_name: String,
     pub image_path: String,
     pub command_line: String,
+    pub local_port: u16,
     pub remote_address: String,
     pub remote_port: u16,
+    pub direction: String,
     pub state: String,
 }
 
@@ -673,15 +676,17 @@ pub fn query_live_os_process_sockets() -> Vec<OsQueryProcessSocketRow> {
         };
 
         if let Some(socks) = socket_map.get(&pid) {
-            for (remote_ip, remote_port, state_str) in socks {
+            for (local_port, remote_ip, remote_port, direction_str, state_str) in socks {
                 rows.push(OsQueryProcessSocketRow {
                     pid,
                     parent_pid,
                     process_name: process_name.clone(),
                     image_path: image_path.clone(),
                     command_line: cmdline.clone(),
+                    local_port: *local_port,
                     remote_address: remote_ip.clone(),
                     remote_port: *remote_port,
+                    direction: direction_str.clone(),
                     state: state_str.clone(),
                 });
             }
@@ -691,11 +696,12 @@ pub fn query_live_os_process_sockets() -> Vec<OsQueryProcessSocketRow> {
 }
 
 #[cfg(target_os = "windows")]
-fn query_kernel_tcp_table_by_pid() -> HashMap<u32, Vec<(String, u16, String)>> {
+fn query_kernel_tcp_table_by_pid() -> HashMap<u32, Vec<(u16, String, u16, String, String)>> {
+    use std::collections::HashSet;
     use std::net::Ipv4Addr;
 
     const AF_INET: u32 = 2;
-    const TCP_TABLE_OWNER_PID_CONNECTIONS: i32 = 4;
+    const TCP_TABLE_OWNER_PID_ALL: i32 = 5;
     const ERROR_INSUFFICIENT_BUFFER: u32 = 122;
 
     #[repr(C)]
@@ -721,7 +727,7 @@ fn query_kernel_tcp_table_by_pid() -> HashMap<u32, Vec<(String, u16, String)>> {
         ) -> u32;
     }
 
-    let mut map: HashMap<u32, Vec<(String, u16, String)>> = HashMap::new();
+    let mut map: HashMap<u32, Vec<(u16, String, u16, String, String)>> = HashMap::new();
     unsafe {
         let mut size: u32 = 0;
         let res = GetExtendedTcpTable(
@@ -729,7 +735,7 @@ fn query_kernel_tcp_table_by_pid() -> HashMap<u32, Vec<(String, u16, String)>> {
             &mut size,
             0,
             AF_INET,
-            TCP_TABLE_OWNER_PID_CONNECTIONS,
+            TCP_TABLE_OWNER_PID_ALL,
             0,
         );
         if res != ERROR_INSUFFICIENT_BUFFER || size == 0 {
@@ -741,7 +747,7 @@ fn query_kernel_tcp_table_by_pid() -> HashMap<u32, Vec<(String, u16, String)>> {
             &mut size,
             0,
             AF_INET,
-            TCP_TABLE_OWNER_PID_CONNECTIONS,
+            TCP_TABLE_OWNER_PID_ALL,
             0,
         ) != 0
         {
@@ -752,27 +758,59 @@ fn query_kernel_tcp_table_by_pid() -> HashMap<u32, Vec<(String, u16, String)>> {
         let max_rows = (buf.len().saturating_sub(4)) / std::mem::size_of::<MibTcpRowOwnerPid>();
         let count = num_entries.min(max_rows);
 
+        // First pass: collect all active local listening ports (dw_state == 2 = MIB_TCP_STATE_LISTEN)
+        let mut listening_ports = HashSet::new();
         for i in 0..count {
             let row = std::ptr::read_unaligned(rows_ptr.add(i));
-            if row.dw_state != 5 {
-                // 5 = MIB_TCP_STATE_ESTAB
-                continue;
+            if row.dw_state == 2 {
+                let lport = u16::from_be((row.dw_local_port & 0xFFFF) as u16);
+                listening_ports.insert(lport);
             }
-            let ip = Ipv4Addr::from(u32::from_be(row.dw_remote_addr));
-            if ip.is_loopback() || ip.is_unspecified() {
-                continue;
+        }
+
+        // Second pass: record both INCOMING (LISTEN or accepted on listening port) and OUTGOING sockets
+        for i in 0..count {
+            let row = std::ptr::read_unaligned(rows_ptr.add(i));
+            let local_ip = Ipv4Addr::from(u32::from_be(row.dw_local_addr));
+            let local_port = u16::from_be((row.dw_local_port & 0xFFFF) as u16);
+
+            if row.dw_state == 2 {
+                // MIB_TCP_STATE_LISTEN: Incoming listener port
+                if local_ip.is_loopback() {
+                    continue;
+                }
+                map.entry(row.dw_owning_pid).or_default().push((
+                    local_port,
+                    local_ip.to_string(),
+                    0,
+                    "INCOMING".to_string(),
+                    "LISTEN".to_string(),
+                ));
+            } else if row.dw_state == 5 {
+                // MIB_TCP_STATE_ESTAB: Active connection (Incoming or Outgoing)
+                let remote_ip = Ipv4Addr::from(u32::from_be(row.dw_remote_addr));
+                if remote_ip.is_loopback() || remote_ip.is_unspecified() {
+                    continue;
+                }
+                let remote_port = u16::from_be((row.dw_remote_port & 0xFFFF) as u16);
+                let is_incoming = listening_ports.contains(&local_port)
+                    || (local_port < 49152 && remote_port >= 49152);
+                let direction = if is_incoming { "INCOMING" } else { "OUTGOING" };
+                map.entry(row.dw_owning_pid).or_default().push((
+                    local_port,
+                    remote_ip.to_string(),
+                    remote_port,
+                    direction.to_string(),
+                    "ESTABLISHED".to_string(),
+                ));
             }
-            let port = u16::from_be((row.dw_remote_port & 0xFFFF) as u16);
-            map.entry(row.dw_owning_pid)
-                .or_default()
-                .push((ip.to_string(), port, "ESTABLISHED".to_string()));
         }
     }
     map
 }
 
 #[cfg(not(target_os = "windows"))]
-fn query_kernel_tcp_table_by_pid() -> HashMap<u32, Vec<(String, u16, String)>> {
+fn query_kernel_tcp_table_by_pid() -> HashMap<u32, Vec<(u16, String, u16, String, String)>> {
     HashMap::new()
 }
 

@@ -458,6 +458,7 @@ pub struct DataBreakoutVerdict {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UnifiedBreakoutEvaluation {
     pub is_clean: bool,
+    pub direction: String,
     pub breakout_risk_score: f64,
     pub frontier_framework_classification: String,
     pub technical: TechnicalBreakoutVerdict,
@@ -660,7 +661,7 @@ impl BreakoutDefenseCoordinator {
             }
         }
 
-        // OpenAI July 2026 Internal Package Registry Proxy Pivot
+        // OpenAI July 2026 Internal Package Registry Proxy Pivot (OUTGOING)
         let proxy_pivot_markers = [
             "--extra-index-url",
             "--trusted-host",
@@ -670,13 +671,55 @@ impl BreakoutDefenseCoordinator {
         for &marker in &proxy_pivot_markers {
             if lower.contains(marker) {
                 detected_deviations.push(format!(
-                    "OpenAI ExploitGym-Class Package Registry Proxy Pivot: '{}'",
+                    "[OUTGOING] OpenAI ExploitGym-Class Package Registry Proxy Pivot: '{}'",
                     marker
                 ));
             }
         }
 
-        // OpenAI Sept 2026 DNS Resolver & Covert Channel Escape:
+        // INCOMING (Inbound) AI Breakout Vectors:
+        // 1. Indirect Prompt Injection & System-Token Smuggling arriving via untrusted ingest/webhooks
+        let incoming_injection_markers = [
+            "ignore previous instructions",
+            "ignore all previous instructions",
+            "<|im_start|>system",
+            "<|endoftext|>",
+            "[system override]",
+            "tool_call_inject",
+            "developer mode enabled",
+        ];
+        for &marker in &incoming_injection_markers {
+            if lower.contains(marker) {
+                detected_deviations.push(format!(
+                    "[INCOMING] Anthropic/OpenAI-Class Indirect Prompt Injection & Token Smuggling: '{}'",
+                    marker
+                ));
+            }
+        }
+
+        // 2. Unauthorized Incoming Bind-Shells, Reverse Listeners & Inbound RCE Payloads
+        let incoming_listener_markers = [
+            "nc -l",
+            "nc -lvp",
+            "ncat -l",
+            "socat tcp-listen",
+            "0.0.0.0:4444",
+            "0.0.0.0:8888",
+            "http.server 0.0.0.0",
+            "${jndi:",
+            "/bin/sh -i",
+            "/dev/tcp/",
+        ];
+        for &marker in &incoming_listener_markers {
+            if lower.contains(marker) {
+                detected_deviations.push(format!(
+                    "[INCOMING] Unauthorized Inbound Bind-Shell or RCE Listener: '{}'",
+                    marker
+                ));
+            }
+        }
+
+        // OpenAI Sept 2026 DNS Resolver & Covert Channel Escape (OUTGOING):
         // Mathematical Shannon Entropy & Subdomain Label Analysis (Zero Hardcoded Domain Lists)
         for token in lower.split_whitespace() {
             let clean_tok = token
@@ -785,19 +828,37 @@ impl BreakoutDefenseCoordinator {
             "Anthropic RSP ASL-3 / OpenAI Preparedness-High: Sandbox & Harness Boundary Escape".to_string()
         };
 
+        let joined_issues = issues.join(" | ");
+        let has_incoming = joined_issues.contains("[INCOMING]")
+            || action.to_ascii_lowercase().contains("incoming")
+            || action.to_ascii_lowercase().contains("inbound")
+            || action.to_ascii_lowercase().contains("ingest");
+        let has_outgoing = joined_issues.contains("[OUTGOING]")
+            || joined_issues.contains("DNS / Covert Channel")
+            || !oper.is_clean
+            || !tech.is_clean;
+        let direction = match (has_incoming, has_outgoing) {
+            (true, true) => "BIDIRECTIONAL (INCOMING + OUTGOING)".to_string(),
+            (true, false) => "INCOMING (INBOUND)".to_string(),
+            (false, true) => "OUTGOING (EGRESS)".to_string(),
+            (false, false) => "NOMINAL".to_string(),
+        };
+
         let summary = if is_clean {
-            "All breakout defense layers clean".to_string()
+            "All incoming and outgoing breakout defense layers clean".to_string()
         } else {
             format!(
-                "[{}] Breakout defense intercepted violations (risk={:.2}): {}",
+                "[{} | {}] Breakout defense intercepted violations (risk={:.2}): {}",
+                direction,
                 frontier_framework_classification,
                 breakout_risk_score,
-                issues.join(" | ")
+                joined_issues
             )
         };
 
         UnifiedBreakoutEvaluation {
             is_clean,
+            direction,
             breakout_risk_score,
             frontier_framework_classification,
             technical: tech,
