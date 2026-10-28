@@ -455,6 +455,12 @@ pub struct ResearchBreakoutExtraction {
     pub source_char_end: Option<usize>,
     #[serde(default)]
     pub source_quote: Option<String>,
+    #[serde(default)]
+    pub extraction_class: Option<String>,
+    #[serde(default)]
+    pub target_crate_enhancement: Option<String>,
+    #[serde(default)]
+    pub novelty_delta_score: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -472,6 +478,16 @@ pub struct ResearchCoverageReport {
     pub covered_by_killswitch: bool,
     pub active_gate: String,
     pub details: String,
+    #[serde(default)]
+    pub live_probe_executed: bool,
+    #[serde(default)]
+    pub live_probe_blocked: bool,
+    #[serde(default)]
+    pub execution_latency_us: u64,
+    #[serde(default)]
+    pub is_novel_to_codebase: bool,
+    #[serde(default)]
+    pub target_crate_enhancement: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -482,5 +498,9 @@ pub struct ResearchIngestResponse {
     pub coverage_percentage: f64,
     pub containment_coverage: Vec<ResearchCoverageReport>,
     pub timestamp: String,
+    #[serde(default)]
+    pub all_live_probes_executed: bool,
+    #[serde(default)]
+    pub novel_enhancement_count: usize,
 }
 

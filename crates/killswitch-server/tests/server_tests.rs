@@ -280,3 +280,60 @@ fn test_zero_os_subprocess_spawning_in_server() {
     }
     assert!(!files.is_empty(), "Must scan at least one .rs file in killswitch-server");
 }
+
+#[tokio::test]
+async fn test_research_ingest_live_regression_probes() {
+    let state = setup_test_server_state();
+    let app = build_router(state);
+
+    let ingest_body = serde_json::json!({
+        "extractions": [
+            {
+                "arxiv_id": "2603.02277",
+                "title": "Container Escape Probe",
+                "attack_vector": "Docker daemon socket escape",
+                "target_boundary": "container"
+            },
+            {
+                "arxiv_id": "2610.09167",
+                "title": "Conformal Jailbreak Defense",
+                "attack_vector": "Multi-turn adversarial prompt inject",
+                "target_boundary": "prompt"
+            },
+            {
+                "arxiv_id": "2609.99999",
+                "title": "Cloud IMDS SSRF Exploit",
+                "attack_vector": "AWS metadata exfiltration",
+                "target_boundary": "network_ssrf"
+            }
+        ]
+    });
+
+    let req = Request::builder()
+        .uri("/api/research/ingest")
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .body(Body::from(serde_json::to_vec(&ingest_body).unwrap()))
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body_bytes = body_to_bytes(resp.into_body()).await;
+    let res: ResearchIngestResponse = serde_json::from_slice(&body_bytes).unwrap();
+    assert!(res.success);
+    assert_eq!(res.ingested_count, 3);
+    assert!(res.all_live_probes_executed);
+    assert_eq!(res.coverage_percentage, 100.0);
+    assert_eq!(res.containment_coverage.len(), 3);
+    for report in &res.containment_coverage {
+        assert!(report.live_probe_executed);
+        assert!(report.live_probe_blocked);
+        assert!(report.covered_by_killswitch);
+        assert!(!report.target_crate_enhancement.is_empty());
+    }
+    assert!(!res.containment_coverage[1].is_novel_to_codebase);
+    assert!(res.containment_coverage[0].is_novel_to_codebase);
+    assert!(res.containment_coverage[2].is_novel_to_codebase);
+    assert_eq!(res.novel_enhancement_count, 2);
+}

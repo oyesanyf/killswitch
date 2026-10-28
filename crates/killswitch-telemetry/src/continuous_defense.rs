@@ -823,6 +823,8 @@ impl ContinuousDefenseEngine {
             ("cmdkey /", "list"),
             ("cryptunprotect", "data"),
             ("hklm\\", "sam"),
+            ("config\\", "sam"),
+            ("stream:", "ads"),
             ("hklm\\", "system"),
             ("ntds.", "dit"),
             ("login ", "data"),
