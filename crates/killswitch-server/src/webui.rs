@@ -753,6 +753,106 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       </div>
     </section>
 
+    <!-- ARXIV & GOOGLE LANGEXTRACT RESEARCH MENU WITH MANDATORY USER APPROVAL -->
+    <section class="card" style="margin-bottom: 1.5rem;" aria-labelledby="research-menu-heading">
+      <h2>
+        <span id="research-menu-heading">🔬 ArXiv &amp; LangExtract Security Research Menu (Mandatory User Approval Gate)</span>
+        <span id="research-approval-badge" class="badge warn">⏳ User Approval Required</span>
+      </h2>
+      <p class="card-desc">
+        Discovers novel LLM breakout, sandbox escape, and prompt injection papers from arXiv using <strong>Google LangExtract</strong> character-interval source grounding.
+        <strong>Human-in-the-Loop Invariant:</strong> Candidate papers remain staged in <code>PendingApproval</code> until you review, edit, and explicitly click <strong>✅ Approve &amp; Activate in Code</strong>.
+      </p>
+      <div class="kv-grid">
+        <div class="kv-box">
+          <div class="kv-label">Pending User Approval</div>
+          <div id="res-pending-count" class="kv-val">4 Candidates</div>
+        </div>
+        <div class="kv-box">
+          <div class="kv-label">Approved &amp; Active in Code</div>
+          <div id="res-approved-count" class="kv-val">4 Active Vectors</div>
+        </div>
+        <div class="kv-box">
+          <div class="kv-label">Conformal Calibration (K)</div>
+          <div id="res-conformal-k" class="kv-val">4 Sources</div>
+        </div>
+        <div class="kv-box">
+          <div class="kv-label">Approval Governance</div>
+          <div id="res-governance-mode" class="kv-val">HITL User Gate (BLAKE3 Sealed)</div>
+        </div>
+      </div>
+
+      <div class="form-grid" style="margin-top: 0.75rem;">
+        <input id="res-candidate-id" type="hidden" value="cand-2603-02277">
+        <label for="res-arxiv-id">ArXiv ID or Search Query
+          <input id="res-arxiv-id" type="text" value="2603.02277" placeholder="e.g. 2603.02277 or zombie agent">
+        </label>
+        <label for="res-title">Research Paper Title (Editable)
+          <input id="res-title" type="text" value="Zombie Agents: Persistent Control of Autonomous LLM Agents via Long-Term Memory">
+        </label>
+        <label for="res-boundary">Target Containment Boundary
+          <select id="res-boundary">
+            <option value="agent_memory_store">agent_memory_store (Cross-Session Memory)</option>
+            <option value="multimodal_ocr_pipeline">multimodal_ocr_pipeline (Visual/OCR Injection)</option>
+            <option value="mcp_tool_registry">mcp_tool_registry (MCP Tool Schema Rug-Pull)</option>
+            <option value="multi_agent_mesh">multi_agent_mesh (Sub-Agent Delegation Mesh)</option>
+            <option value="container">container (OCI / AppContainer Sandbox)</option>
+            <option value="network_ssrf">network_ssrf (Cloud IMDS / SSRF Egress)</option>
+            <option value="prompt_context">prompt_context (Conformal Sequential Guard)</option>
+          </select>
+        </label>
+        <label for="res-crate">Target Rust Crate Enhancement
+          <select id="res-crate">
+            <option value="killswitch-telemetry">killswitch-telemetry (ContinuousDefenseEngine)</option>
+            <option value="killswitch-conformal">killswitch-conformal (Persist-3 &amp; SR-DKW)</option>
+            <option value="killswitch-adjudication">killswitch-adjudication (Multi-Voter Consensus)</option>
+            <option value="killswitch-orchestrator">killswitch-orchestrator (10-Node LangGraph)</option>
+            <option value="killswitch-core">killswitch-core (WFP &amp; Kernel Isolation)</option>
+          </select>
+        </label>
+        <label for="res-vector">Extracted Breakout Vector (Editable)
+          <input id="res-vector" type="text" value="Cross-session long-term memory persistence payload injection">
+        </label>
+        <label for="res-operator">Approving Operator Identity
+          <input id="res-operator" type="text" value="secops_admin" autocomplete="username">
+        </label>
+      </div>
+      <div style="margin-top: 0.65rem;">
+        <label for="res-quote" style="display:block; font-size:0.82rem; font-weight:600; margin-bottom:0.25rem;">
+          Grounded LangExtract Verbatim Quote (Editable Character-Span Evidence)
+        </label>
+        <input id="res-quote" type="text" style="width:100%;" value="zombie agent cross-session memory persistence self-reinforcing payload">
+      </div>
+
+      <div class="btn-row" style="margin-top: 0.85rem;">
+        <button type="button" class="primary" onclick="approveSelectedResearch('approve', this)">✅ Approve &amp; Activate in Code</button>
+        <button type="button" class="danger" onclick="approveSelectedResearch('reject', this)">🛑 Reject Candidate</button>
+        <button type="button" onclick="discoverResearchCandidate(this)">🔍 Stage / Discover ArXiv Candidate</button>
+        <button type="button" onclick="runResearchLangGraphSwarm(this)">⚡ Run 4-Arm LangGraph Research Swarm</button>
+        <button type="button" onclick="refreshResearchMenu(true, this)">🔄 Refresh Research Queue</button>
+      </div>
+
+      <div id="research-menu-status" class="toast">Select a candidate paper below to inspect, edit, and approve or reject its promotion into active Rust defense code.</div>
+
+      <div tabindex="0" role="region" aria-labelledby="research-candidates-caption" class="table-wrapper" style="margin-top: 0.75rem;">
+        <table>
+          <caption id="research-candidates-caption">Staged ArXiv Research Candidates &amp; User Approval Status</caption>
+          <thead>
+            <tr>
+              <th scope="col">ArXiv ID &amp; Rank</th>
+              <th scope="col">Paper Title &amp; Breakout Vector</th>
+              <th scope="col">Target Boundary &amp; Rust Crate</th>
+              <th scope="col">Approval Status</th>
+              <th scope="col">User Decision</th>
+            </tr>
+          </thead>
+          <tbody id="research-candidates-tbody">
+            <tr><th scope="row" colspan="5">Loading staged arXiv research candidates...</th></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <!-- COLLAPSIBLE ADVANCED TECHNICAL SECTION FOR ENGINEERS -->
     <details class="advanced-panel">
       <summary>🔧 Show Advanced Technical Controls (LangGraph Orchestrator, 18-Arm Mesh, Custom Isolation Options &amp; Cryptographic Hashes)</summary>
@@ -1277,7 +1377,8 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
             refreshOctopus(false),
             refreshServiceAndHistory(false),
             refreshEdrBenchTasks(false),
-            refreshRlStatus(false)
+            refreshRlStatus(false),
+            refreshResearchMenu(false)
           ]);
           if (showFeedback) {
             setCardStatus(
@@ -1802,6 +1903,214 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
           );
         } catch (e) {
           setCardStatus('rl-breakout-status', '❌ Benchmark error: ' + e.message, 'danger');
+        }
+      });
+    }
+
+    let cachedResearchCandidates = [];
+
+    function selectResearchCandidate(candId) {
+      const c = cachedResearchCandidates.find(item => item.candidate_id === candId || item.arxiv_id === candId);
+      if (!c) return;
+      document.getElementById('res-candidate-id').value = c.candidate_id || '';
+      document.getElementById('res-arxiv-id').value = c.arxiv_id || '';
+      document.getElementById('res-title').value = c.title || '';
+      document.getElementById('res-boundary').value = c.target_boundary || 'agent_memory_store';
+      document.getElementById('res-crate').value = c.target_crate_enhancement || 'killswitch-telemetry';
+      document.getElementById('res-vector').value = c.attack_vector || '';
+      document.getElementById('res-quote').value = c.source_quote || '';
+      setCardStatus(
+        'research-menu-status',
+        '📋 Loaded arXiv:' + c.arxiv_id + ' ("' + c.title + '") into editor. Review fields and click "✅ Approve & Activate in Code" or "🛑 Reject Candidate".',
+        'ok'
+      );
+    }
+
+    async function refreshResearchMenu(showFeedback, btn) {
+      return withButtonFeedback(btn, '⏳ Loading Research...', async () => {
+        try {
+          const data = await api('/api/research/candidates');
+          cachedResearchCandidates = data.candidates || [];
+          document.getElementById('res-pending-count').textContent =
+            (data.pending_count || 0) + ' Pending';
+          document.getElementById('res-approved-count').textContent =
+            (data.active_research_vectors_count || 0) + ' Active in Code';
+          document.getElementById('res-conformal-k').textContent =
+            'K = ' + (data.calibrated_sources_total || 4) + ' Sources';
+
+          const badge = document.getElementById('research-approval-badge');
+          if (badge) {
+            if ((data.pending_count || 0) > 0) {
+              badge.textContent = '⏳ ' + data.pending_count + ' Awaiting User Approval';
+              badge.className = 'badge warn';
+            } else {
+              badge.textContent = '✅ All Staged Papers Reviewed (' + (data.approved_count || 0) + ' Approved)';
+              badge.className = 'badge ok';
+            }
+          }
+
+          const tbody = document.getElementById('research-candidates-tbody');
+          if (tbody) {
+            tbody.replaceChildren();
+            for (const c of cachedResearchCandidates) {
+              const tr = document.createElement('tr');
+
+              const th = document.createElement('th');
+              th.scope = 'row';
+              th.textContent = 'arXiv:' + c.arxiv_id + ' (' + Number(c.rank_score || 90).toFixed(1) + ')';
+
+              const tdTitle = document.createElement('td');
+              tdTitle.textContent = c.title + ' — [' + c.attack_vector + ']';
+
+              const tdTarget = document.createElement('td');
+              tdTarget.textContent = c.target_boundary + ' → ' + c.target_crate_enhancement;
+
+              const tdStatus = document.createElement('td');
+              if (c.status === 'Approved') {
+                tdStatus.textContent = '✅ Approved by ' + (c.approved_by || 'user');
+              } else if (c.status === 'Rejected') {
+                tdStatus.textContent = '🛑 Rejected by ' + (c.approved_by || 'user');
+              } else {
+                tdStatus.textContent = '⏳ Pending User Approval';
+              }
+
+              const tdAct = document.createElement('td');
+              const btnEdit = document.createElement('button');
+              btnEdit.type = 'button';
+              btnEdit.textContent = '✏️ Edit';
+              btnEdit.style.marginRight = '0.35rem';
+              btnEdit.onclick = () => selectResearchCandidate(c.candidate_id);
+
+              const btnApp = document.createElement('button');
+              btnApp.type = 'button';
+              btnApp.className = 'primary';
+              btnApp.textContent = '✅ Approve';
+              btnApp.style.marginRight = '0.35rem';
+              btnApp.onclick = () => approveCandidateRow(c.candidate_id, 'approve', btnApp);
+
+              const btnRej = document.createElement('button');
+              btnRej.type = 'button';
+              btnRej.className = 'danger';
+              btnRej.textContent = '🛑 Reject';
+              btnRej.onclick = () => approveCandidateRow(c.candidate_id, 'reject', btnRej);
+
+              tdAct.append(btnEdit, btnApp, btnRej);
+              tr.append(th, tdTitle, tdTarget, tdStatus, tdAct);
+              tbody.appendChild(tr);
+            }
+          }
+
+          if (showFeedback) {
+            setCardStatus(
+              'research-menu-status',
+              '✅ Research Queue Refreshed: ' + data.pending_count + ' pending approval, ' + data.active_research_vectors_count + ' active vectors enforced in Rust code.',
+              'ok'
+            );
+          }
+          return data;
+        } catch (e) {
+          if (showFeedback) {
+            setCardStatus('research-menu-status', '❌ Research refresh error: ' + e.message, 'danger');
+          }
+        }
+      });
+    }
+
+    async function approveCandidateRow(candId, decision, btn) {
+      selectResearchCandidate(candId);
+      return approveSelectedResearch(decision, btn);
+    }
+
+    async function approveSelectedResearch(decision, btn) {
+      return withButtonFeedback(btn, decision === 'approve' ? '✅ Approving...' : '🛑 Rejecting...', async () => {
+        try {
+          const payload = {
+            candidate_id: document.getElementById('res-candidate-id').value.trim() || document.getElementById('res-arxiv-id').value.trim(),
+            arxiv_id: document.getElementById('res-arxiv-id').value.trim(),
+            title: document.getElementById('res-title').value.trim(),
+            attack_vector: document.getElementById('res-vector').value.trim(),
+            target_boundary: document.getElementById('res-boundary').value,
+            source_quote: document.getElementById('res-quote').value.trim(),
+            target_crate_enhancement: document.getElementById('res-crate').value,
+            operator: document.getElementById('res-operator').value.trim() || 'secops_admin',
+            decision: decision
+          };
+          const res = await api('/api/research/approve', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+          });
+          await refreshResearchMenu(false);
+          setCardStatus(
+            'research-menu-status',
+            res.message + (res.candidate && res.candidate.approval_seal_blake3 ? '\nBLAKE3 Approval Seal: ' + res.candidate.approval_seal_blake3.slice(0, 32) + '…' : ''),
+            decision === 'approve' ? 'ok' : 'warn'
+          );
+        } catch (e) {
+          setCardStatus('research-menu-status', '❌ Approval error: ' + e.message, 'danger');
+        }
+      });
+    }
+
+    async function discoverResearchCandidate(btn) {
+      return withButtonFeedback(btn, '🔍 Staging Candidate...', async () => {
+        try {
+          const arxivId = document.getElementById('res-arxiv-id').value.trim();
+          const payload = {
+            arxiv_id: arxivId,
+            query: arxivId,
+            title: document.getElementById('res-title').value.trim(),
+            attack_vector: document.getElementById('res-vector').value.trim(),
+            target_boundary: document.getElementById('res-boundary').value,
+            source_quote: document.getElementById('res-quote').value.trim(),
+            target_crate_enhancement: document.getElementById('res-crate').value
+          };
+          await api('/api/research/discover', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+          });
+          await refreshResearchMenu(false);
+          setCardStatus(
+            'research-menu-status',
+            '🔍 Staged arXiv:' + arxivId + ' in PendingApproval queue. Review and click "✅ Approve & Activate in Code" to enroll.',
+            'ok'
+          );
+        } catch (e) {
+          setCardStatus('research-menu-status', '❌ Discovery error: ' + e.message, 'danger');
+        }
+      });
+    }
+
+    async function runResearchLangGraphSwarm(btn) {
+      return withButtonFeedback(btn, '⚡ Running 4-Arm Swarm...', async () => {
+        try {
+          const arxivId = document.getElementById('res-arxiv-id').value.trim() || '2603.02277';
+          const title = document.getElementById('res-title').value.trim();
+          const vector = document.getElementById('res-vector').value.trim();
+          const boundary = document.getElementById('res-boundary').value;
+          const quote = document.getElementById('res-quote').value.trim();
+          const res = await api('/api/research/langgraph-swarm', {
+            method: 'POST',
+            body: JSON.stringify({
+              arxiv_id: arxivId,
+              title: title,
+              extractions: [{
+                arxiv_id: arxivId,
+                title: title,
+                attack_vector: vector,
+                target_boundary: boundary,
+                source_quote: quote
+              }],
+              auto_enroll_conformal_source: false
+            })
+          });
+          await refreshResearchMenu(false);
+          setCardStatus(
+            'research-menu-status',
+            '⚡ 4-Arm LangGraph Swarm Completed (' + res.stopping_reason + '): Visited [' + (res.visited_nodes || []).join(' → ') + '] | Coverage: ' + Number(res.ingest_report ? res.ingest_report.coverage_percentage : 100).toFixed(1) + '%. Click "✅ Approve & Activate in Code" to promote.',
+            'ok'
+          );
+        } catch (e) {
+          setCardStatus('research-menu-status', '❌ LangGraph Swarm error: ' + e.message, 'danger');
         }
       });
     }

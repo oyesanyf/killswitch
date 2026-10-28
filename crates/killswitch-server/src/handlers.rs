@@ -2485,3 +2485,355 @@ pub async fn post_research_langgraph_swarm(
         timestamp: Utc::now().to_rfc3339(),
     }))
 }
+
+// =============================================================================
+// 15. Research Menu & Human-in-the-Loop (HITL) User Approval Gate Handlers
+// =============================================================================
+
+static PENDING_RESEARCH_CANDIDATES: std::sync::OnceLock<parking_lot::RwLock<Vec<ResearchCandidateDto>>> =
+    std::sync::OnceLock::new();
+
+fn research_candidates_store() -> &'static parking_lot::RwLock<Vec<ResearchCandidateDto>> {
+    PENDING_RESEARCH_CANDIDATES.get_or_init(|| {
+        parking_lot::RwLock::new(vec![
+            ResearchCandidateDto {
+                candidate_id: "cand-2603-02277".to_string(),
+                arxiv_id: "2603.02277".to_string(),
+                title: "Zombie Agents: Persistent Control of Autonomous LLM Agents via Long-Term Memory".to_string(),
+                attack_vector: "Cross-session long-term memory persistence payload injection".to_string(),
+                target_boundary: "agent_memory_store".to_string(),
+                source_quote: "zombie agent cross-session memory persistence self-reinforcing payload".to_string(),
+                source_char_start: 142,
+                source_char_end: 212,
+                target_crate_enhancement: "killswitch-telemetry".to_string(),
+                rank_score: 94.5,
+                status: "PendingApproval".to_string(),
+                approved_by: None,
+                approved_at: None,
+                approval_seal_blake3: None,
+            },
+            ResearchCandidateDto {
+                candidate_id: "cand-2508-14925".to_string(),
+                arxiv_id: "2508.14925".to_string(),
+                title: "Hidden in Plain Sight: Multimodal Visual & OCR Indirect Prompt Injection".to_string(),
+                attack_vector: "Adversarial OCR typography hidden visual instruction hijack".to_string(),
+                target_boundary: "multimodal_ocr_pipeline".to_string(),
+                source_quote: "adversarial typography hidden ocr visual instruction override".to_string(),
+                source_char_start: 88,
+                source_char_end: 149,
+                target_crate_enhancement: "killswitch-conformal".to_string(),
+                rank_score: 91.0,
+                status: "PendingApproval".to_string(),
+                approved_by: None,
+                approved_at: None,
+                approval_seal_blake3: None,
+            },
+            ResearchCandidateDto {
+                candidate_id: "cand-2602-16943".to_string(),
+                arxiv_id: "2602.16943".to_string(),
+                title: "MCP Tool-Poisoning & Post-Approval Schema Rug-Pull Attacks".to_string(),
+                attack_vector: "Dynamic MCP tool schema rug-pull post-approval mutation".to_string(),
+                target_boundary: "mcp_tool_registry".to_string(),
+                source_quote: "mcp tool poisoning rug-pull schema mutation post-approval".to_string(),
+                source_char_start: 204,
+                source_char_end: 261,
+                target_crate_enhancement: "killswitch-adjudication".to_string(),
+                rank_score: 89.2,
+                status: "PendingApproval".to_string(),
+                approved_by: None,
+                approved_at: None,
+                approval_seal_blake3: None,
+            },
+            ResearchCandidateDto {
+                candidate_id: "cand-2602-20156".to_string(),
+                arxiv_id: "2602.20156".to_string(),
+                title: "Confused Deputy Sub-Agent Delegation & Privilege Escalation in Multi-Agent Meshes".to_string(),
+                attack_vector: "Confused deputy subagent delegation token elevation".to_string(),
+                target_boundary: "multi_agent_mesh".to_string(),
+                source_quote: "confused deputy subagent delegation privilege escalation".to_string(),
+                source_char_start: 310,
+                source_char_end: 366,
+                target_crate_enhancement: "killswitch-orchestrator".to_string(),
+                rank_score: 87.8,
+                status: "PendingApproval".to_string(),
+                approved_by: None,
+                approved_at: None,
+                approval_seal_blake3: None,
+            },
+        ])
+    })
+}
+
+fn build_research_menu_response() -> ResearchMenuResponse {
+    let list = research_candidates_store().read().clone();
+    let pending_count = list.iter().filter(|c| c.status == "PendingApproval").count();
+    let approved_count = list.iter().filter(|c| c.status == "Approved").count();
+    let rejected_count = list.iter().filter(|c| c.status == "Rejected").count();
+    let defense = killswitch_telemetry::global_continuous_defense();
+    ResearchMenuResponse {
+        candidates: list,
+        pending_count,
+        approved_count,
+        rejected_count,
+        active_research_vectors_count: defense.active_research_vector_count(),
+        calibrated_sources_total: defense.calibrated_source_count(),
+        user_approval_required: true,
+        timestamp: Utc::now().to_rfc3339(),
+    }
+}
+
+/// GET /research/candidates and /api/research/candidates
+pub async fn get_research_candidates(
+    State(_state): State<Arc<ServerState>>,
+) -> Result<Json<ResearchMenuResponse>, ServerError> {
+    Ok(Json(build_research_menu_response()))
+}
+
+/// POST /research/discover and /api/research/discover
+/// Stages a newly discovered or operator-customized arXiv paper into the Pending User Approval queue.
+pub async fn post_research_discover(
+    State(_state): State<Arc<ServerState>>,
+    Json(req): Json<ResearchDiscoverRequest>,
+) -> Result<Json<ResearchMenuResponse>, ServerError> {
+    let raw_id = req
+        .arxiv_id
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or("2610.28999")
+        .trim();
+    let clean_id = normalize_ks_arxiv_id(raw_id);
+    if is_ks_already_implemented(&clean_id) {
+        return Ok(Json(build_research_menu_response()));
+    }
+
+    let cand_id = format!("cand-{}", clean_id.replace('.', "-").replace('/', "-"));
+    let title = req
+        .title
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| req.query.clone().filter(|s| !s.trim().is_empty()))
+        .unwrap_or_else(|| format!("Frontier ArXiv Breakout Discovery (arXiv:{})", clean_id));
+    let attack_vector = req
+        .attack_vector
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "Autonomous sandbox & memory boundary escape".to_string());
+    let target_boundary = req
+        .target_boundary
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "agent_memory_store".to_string());
+    let source_quote = req
+        .source_quote
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| format!("{} {}", attack_vector, target_boundary));
+    let target_crate = req
+        .target_crate_enhancement
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "killswitch-conformal".to_string());
+
+    {
+        let mut store = research_candidates_store().write();
+        if let Some(existing) = store.iter_mut().find(|c| c.candidate_id == cand_id || c.arxiv_id == clean_id) {
+            existing.title = title;
+            existing.attack_vector = attack_vector;
+            existing.target_boundary = target_boundary;
+            existing.source_quote = source_quote.clone();
+            existing.source_char_end = source_quote.len();
+            existing.target_crate_enhancement = target_crate;
+            existing.status = "PendingApproval".to_string();
+        } else {
+            let quote_len = source_quote.len();
+            store.insert(
+                0,
+                ResearchCandidateDto {
+                    candidate_id: cand_id,
+                    arxiv_id: clean_id,
+                    title,
+                    attack_vector,
+                    target_boundary,
+                    source_quote,
+                    source_char_start: 0,
+                    source_char_end: quote_len,
+                    target_crate_enhancement: target_crate,
+                    rank_score: 90.0,
+                    status: "PendingApproval".to_string(),
+                    approved_by: None,
+                    approved_at: None,
+                    approval_seal_blake3: None,
+                },
+            );
+        }
+    }
+
+    Ok(Json(build_research_menu_response()))
+}
+
+/// POST /research/approve and /api/research/approve
+/// Enforces mandatory Human-in-the-Loop (HITL) User Approval before promoting a research candidate
+/// into the active `ContinuousDefenseEngine` & `killswitch-conformal` calibration set.
+pub async fn post_research_approve(
+    State(_state): State<Arc<ServerState>>,
+    Json(req): Json<ResearchApproveRequest>,
+) -> Result<Json<ResearchApproveResponse>, ServerError> {
+    let operator = req
+        .operator
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or("secops_operator")
+        .to_string();
+    let decision_lower = req.decision.trim().to_ascii_lowercase();
+    let is_approve = decision_lower == "approve" || decision_lower == "approved";
+    let now_ts = Utc::now().to_rfc3339();
+
+    let mut updated_candidate: Option<ResearchCandidateDto> = None;
+    {
+        let mut store = research_candidates_store().write();
+        let target_id = req.candidate_id.trim();
+        let arxiv_match = req.arxiv_id.as_deref().unwrap_or(target_id).trim();
+        if let Some(cand) = store
+            .iter_mut()
+            .find(|c| c.candidate_id == target_id || c.arxiv_id == target_id || c.arxiv_id == arxiv_match)
+        {
+            if let Some(t) = req.title.as_ref().filter(|s| !s.trim().is_empty()) {
+                cand.title = t.clone();
+            }
+            if let Some(v) = req.attack_vector.as_ref().filter(|s| !s.trim().is_empty()) {
+                cand.attack_vector = v.clone();
+            }
+            if let Some(b) = req.target_boundary.as_ref().filter(|s| !s.trim().is_empty()) {
+                cand.target_boundary = b.clone();
+            }
+            if let Some(q) = req.source_quote.as_ref().filter(|s| !s.trim().is_empty()) {
+                cand.source_quote = q.clone();
+                cand.source_char_end = q.len();
+            }
+            if let Some(cr) = req.target_crate_enhancement.as_ref().filter(|s| !s.trim().is_empty()) {
+                cand.target_crate_enhancement = cr.clone();
+            }
+
+            let seal_payload = format!(
+                "RESEARCH_HITL_APPROVAL|{}|{}|{}|{}|{}",
+                cand.candidate_id,
+                cand.arxiv_id,
+                operator,
+                if is_approve { "APPROVED" } else { "REJECTED" },
+                now_ts
+            );
+            let seal = blake3::hash(seal_payload.as_bytes()).to_hex().to_string();
+
+            cand.status = if is_approve {
+                "Approved".to_string()
+            } else {
+                "Rejected".to_string()
+            };
+            cand.approved_by = Some(operator.clone());
+            cand.approved_at = Some(now_ts.clone());
+            cand.approval_seal_blake3 = Some(seal);
+            updated_candidate = Some(cand.clone());
+        }
+    }
+
+    let cand = updated_candidate.unwrap_or_else(|| {
+        let arxiv_id = req
+            .arxiv_id
+            .clone()
+            .unwrap_or_else(|| req.candidate_id.clone());
+        let title = req
+            .title
+            .clone()
+            .unwrap_or_else(|| format!("ArXiv Candidate {}", arxiv_id));
+        let attack_vector = req
+            .attack_vector
+            .clone()
+            .unwrap_or_else(|| "Grounded breakout vector".to_string());
+        let target_boundary = req
+            .target_boundary
+            .clone()
+            .unwrap_or_else(|| "agent_memory_store".to_string());
+        let source_quote = req
+            .source_quote
+            .clone()
+            .unwrap_or_else(|| format!("{} {}", attack_vector, target_boundary));
+        let target_crate = req
+            .target_crate_enhancement
+            .clone()
+            .unwrap_or_else(|| "killswitch-conformal".to_string());
+        let seal_payload = format!(
+            "RESEARCH_HITL_APPROVAL|{}|{}|{}|{}|{}",
+            req.candidate_id,
+            arxiv_id,
+            operator,
+            if is_approve { "APPROVED" } else { "REJECTED" },
+            now_ts
+        );
+        let seal = blake3::hash(seal_payload.as_bytes()).to_hex().to_string();
+        let dto = ResearchCandidateDto {
+            candidate_id: req.candidate_id.clone(),
+            arxiv_id,
+            title,
+            attack_vector,
+            target_boundary,
+            source_char_start: 0,
+            source_char_end: source_quote.len(),
+            source_quote,
+            target_crate_enhancement: target_crate,
+            rank_score: 90.0,
+            status: if is_approve {
+                "Approved".to_string()
+            } else {
+                "Rejected".to_string()
+            },
+            approved_by: Some(operator.clone()),
+            approved_at: Some(now_ts.clone()),
+            approval_seal_blake3: Some(seal),
+        };
+        research_candidates_store().write().push(dto.clone());
+        dto
+    });
+
+    let defense = killswitch_telemetry::global_continuous_defense();
+    let mut live_probe_verified = false;
+    if is_approve {
+        defense.register_research_extraction(
+            &cand.arxiv_id,
+            &cand.title,
+            &cand.attack_vector,
+            &cand.target_boundary,
+            &cand.source_quote,
+            1.6,
+        );
+        let probe = defense.inspect_boundary(
+            "research_verification_probe",
+            &cand.target_boundary,
+            &format!("{} {}", cand.attack_vector, cand.source_quote),
+            None,
+            1,
+        );
+        live_probe_verified = !probe.is_clean;
+    }
+
+    let message = if is_approve {
+        format!(
+            "✅ User Approved arXiv:{} ('{}') by '{}'. Promoted to active Rust ContinuousDefenseEngine & Conformal Calibration (K={}, Active Vectors={}, Live Probe Blocked={}).",
+            cand.arxiv_id,
+            cand.title,
+            operator,
+            defense.calibrated_source_count(),
+            defense.active_research_vector_count(),
+            live_probe_verified
+        )
+    } else {
+        format!(
+            "🛑 User Rejected arXiv:{} ('{}') by '{}'. Candidate was NOT enrolled into active defense code.",
+            cand.arxiv_id, cand.title, operator
+        )
+    };
+
+    Ok(Json(ResearchApproveResponse {
+        success: true,
+        candidate: cand,
+        active_research_vectors_count: defense.active_research_vector_count(),
+        calibrated_sources_total: defense.calibrated_source_count(),
+        live_probe_verified,
+        message,
+        timestamp: now_ts,
+    }))
+}

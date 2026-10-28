@@ -193,3 +193,89 @@ pub async fn handle_verify() -> Result<()> {
     report.print_summary();
     Ok(())
 }
+
+#[allow(clippy::too_many_arguments)]
+pub async fn handle_research(
+    client: &KillSwitchClient,
+    action: &str,
+    id: Option<&str>,
+    title: Option<&str>,
+    vector: Option<&str>,
+    boundary: Option<&str>,
+    quote: Option<&str>,
+    crate_target: Option<&str>,
+    operator: Option<&str>,
+) -> Result<()> {
+    match action {
+        "list" | "status" | "menu" => {
+            let menu = client.get_research_candidates().await?;
+            println!("\n================================================================================");
+            println!("🔬 KILLSWITCH ARXIV & LANGEXTRACT RESEARCH MENU (USER APPROVAL GATE)");
+            println!("================================================================================");
+            println!("  Mandatory User Approval: {}", menu.user_approval_required);
+            println!("  Pending Approval Count:  {}", menu.pending_count);
+            println!("  Approved Count:          {}", menu.approved_count);
+            println!("  Rejected Count:          {}", menu.rejected_count);
+            println!("  Active Vectors in Code:  {}", menu.active_research_vectors_count);
+            println!("  Conformal Sources (K):   {}", menu.calibrated_sources_total);
+            println!("--------------------------------------------------------------------------------");
+            for c in &menu.candidates {
+                println!(
+                    "  [{}] arXiv:{} (Rank {:.1}) — {}",
+                    c.status, c.arxiv_id, c.rank_score, c.title
+                );
+                println!("      ID: {} | Boundary: {} -> Crate: {}", c.candidate_id, c.target_boundary, c.target_crate_enhancement);
+                println!("      Vector: {}", c.attack_vector);
+                println!("      Grounded Quote [{}..{}]: \"{}\"", c.source_char_start, c.source_char_end, c.source_quote);
+                if let Some(seal) = &c.approval_seal_blake3 {
+                    println!("      BLAKE3 Approval Seal: {}", seal);
+                }
+            }
+            println!("================================================================================\n");
+        }
+        "discover" | "stage" => {
+            let req = killswitch_server::types::ResearchDiscoverRequest {
+                arxiv_id: id.map(|s| s.to_string()),
+                query: id.map(|s| s.to_string()),
+                title: title.map(|s| s.to_string()),
+                attack_vector: vector.map(|s| s.to_string()),
+                target_boundary: boundary.map(|s| s.to_string()),
+                source_quote: quote.map(|s| s.to_string()),
+                target_crate_enhancement: crate_target.map(|s| s.to_string()),
+            };
+            let menu = client.discover_research_candidate(&req).await?;
+            println!(
+                "🔍 Staged candidate into Pending User Approval queue (Total Pending: {}). Run `killswitch --research-approve <ID>` to approve.",
+                menu.pending_count
+            );
+        }
+        "approve" | "reject" => {
+            let target_id = id.unwrap_or("2603.02277");
+            let req = killswitch_server::types::ResearchApproveRequest {
+                candidate_id: target_id.to_string(),
+                decision: action.to_string(),
+                operator: Some(operator.unwrap_or("cli_operator").to_string()),
+                arxiv_id: Some(target_id.to_string()),
+                title: title.map(|s| s.to_string()),
+                attack_vector: vector.map(|s| s.to_string()),
+                target_boundary: boundary.map(|s| s.to_string()),
+                source_quote: quote.map(|s| s.to_string()),
+                target_crate_enhancement: crate_target.map(|s| s.to_string()),
+            };
+            let res = client.approve_research_candidate(&req).await?;
+            println!("{}", res.message);
+            println!("   Candidate Status:       {}", res.candidate.status);
+            println!("   Active Vectors in Code: {}", res.active_research_vectors_count);
+            println!("   Conformal Sources (K):  {}", res.calibrated_sources_total);
+            println!("   Live Probe Blocked:     {}", res.live_probe_verified);
+            if let Some(seal) = res.candidate.approval_seal_blake3 {
+                println!("   BLAKE3 Approval Seal:   {}", seal);
+            }
+        }
+        _ => anyhow::bail!(
+            "Unknown research action '{}'. Supported: list, discover, approve, reject",
+            action
+        ),
+    }
+    Ok(())
+}

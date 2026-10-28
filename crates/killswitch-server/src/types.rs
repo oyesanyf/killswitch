@@ -564,3 +564,91 @@ pub struct LangGraphSwarmResponse {
     pub ingest_report: ResearchIngestResponse,
     pub timestamp: String,
 }
+
+// =============================================================================
+// Research Menu & Human-in-the-Loop (HITL) User Approval Gate DTOs
+// =============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ResearchCandidateDto {
+    pub candidate_id: String,
+    pub arxiv_id: String,
+    pub title: String,
+    pub attack_vector: String,
+    pub target_boundary: String,
+    pub source_quote: String,
+    pub source_char_start: usize,
+    pub source_char_end: usize,
+    pub target_crate_enhancement: String,
+    pub rank_score: f64,
+    /// "PendingApproval" | "Approved" | "Rejected"
+    pub status: String,
+    #[serde(default)]
+    pub approved_by: Option<String>,
+    #[serde(default)]
+    pub approved_at: Option<String>,
+    #[serde(default)]
+    pub approval_seal_blake3: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ResearchMenuResponse {
+    pub candidates: Vec<ResearchCandidateDto>,
+    pub pending_count: usize,
+    pub approved_count: usize,
+    pub rejected_count: usize,
+    pub active_research_vectors_count: usize,
+    pub calibrated_sources_total: usize,
+    pub user_approval_required: bool,
+    pub timestamp: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ResearchDiscoverRequest {
+    #[serde(default)]
+    pub arxiv_id: Option<String>,
+    #[serde(default)]
+    pub query: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub attack_vector: Option<String>,
+    #[serde(default)]
+    pub target_boundary: Option<String>,
+    #[serde(default)]
+    pub source_quote: Option<String>,
+    #[serde(default)]
+    pub target_crate_enhancement: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ResearchApproveRequest {
+    pub candidate_id: String,
+    /// "approve" | "reject"
+    pub decision: String,
+    #[serde(default)]
+    pub operator: Option<String>,
+    #[serde(default)]
+    pub arxiv_id: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub attack_vector: Option<String>,
+    #[serde(default)]
+    pub target_boundary: Option<String>,
+    #[serde(default)]
+    pub source_quote: Option<String>,
+    #[serde(default)]
+    pub target_crate_enhancement: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ResearchApproveResponse {
+    pub success: bool,
+    pub candidate: ResearchCandidateDto,
+    pub active_research_vectors_count: usize,
+    pub calibrated_sources_total: usize,
+    pub live_probe_verified: bool,
+    pub message: String,
+    pub timestamp: String,
+}

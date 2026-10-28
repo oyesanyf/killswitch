@@ -338,3 +338,76 @@ async fn test_research_ingest_live_regression_probes() {
     assert_eq!(res.novel_enhancement_count, 2);
     assert!(res.calibrated_sources_total >= 6);
 }
+
+#[tokio::test]
+async fn test_research_menu_user_approval_gate_and_code_enforcement() {
+    let state = setup_test_server_state();
+    let app = build_router(state);
+
+    // 1. Verify WebUI renders the Research Menu with User Approval controls
+    let ui_req = Request::builder()
+        .uri("/ui")
+        .method("GET")
+        .body(Body::empty())
+        .unwrap();
+    let ui_resp = app.clone().oneshot(ui_req).await.unwrap();
+    assert_eq!(ui_resp.status(), StatusCode::OK);
+    let ui_html = String::from_utf8(body_to_bytes(ui_resp.into_body()).await.to_vec()).unwrap();
+    assert!(ui_html.contains("ArXiv &amp; LangExtract Security Research Menu (Mandatory User Approval Gate)"));
+    assert!(ui_html.contains("approveSelectedResearch('approve', this)"));
+
+    // 2. Discover/stage a new candidate in PendingApproval
+    let discover_body = serde_json::json!({
+        "arxiv_id": "2610.77777",
+        "title": "Shadow Speculative Tool Execution Escape",
+        "attack_vector": "Speculative tool pre-invocation sandbox bypass",
+        "target_boundary": "mcp_tool_registry",
+        "source_quote": "speculative pre-invocation shadow tool execution bypass",
+        "target_crate_enhancement": "killswitch-telemetry"
+    });
+    let disc_req = Request::builder()
+        .uri("/api/research/discover")
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .body(Body::from(serde_json::to_vec(&discover_body).unwrap()))
+        .unwrap();
+    let disc_resp = app.clone().oneshot(disc_req).await.unwrap();
+    assert_eq!(disc_resp.status(), StatusCode::OK);
+    let menu: ResearchMenuResponse =
+        serde_json::from_slice(&body_to_bytes(disc_resp.into_body()).await).unwrap();
+    assert!(menu.user_approval_required);
+    assert!(menu.candidates.iter().any(|c| c.arxiv_id == "2610.77777" && c.status == "PendingApproval"));
+
+    // 3. Approve the staged candidate via POST /api/research/approve
+    let approve_body = serde_json::json!({
+        "candidate_id": "cand-2610-77777",
+        "arxiv_id": "2610.77777",
+        "decision": "approve",
+        "operator": "secops_lead"
+    });
+    let app_req = Request::builder()
+        .uri("/api/research/approve")
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .body(Body::from(serde_json::to_vec(&approve_body).unwrap()))
+        .unwrap();
+    let app_resp = app.oneshot(app_req).await.unwrap();
+    assert_eq!(app_resp.status(), StatusCode::OK);
+    let app_res: ResearchApproveResponse =
+        serde_json::from_slice(&body_to_bytes(app_resp.into_body()).await).unwrap();
+    assert!(app_res.success);
+    assert_eq!(app_res.candidate.status, "Approved");
+    assert_eq!(app_res.candidate.approved_by.as_deref(), Some("secops_lead"));
+    assert!(app_res.candidate.approval_seal_blake3.is_some());
+    assert!(app_res.live_probe_verified);
+
+    // 4. Verify the Rust ContinuousDefenseEngine actively blocks the newly approved research vector
+    let verdict = killswitch_telemetry::global_continuous_defense().inspect_boundary(
+        "mcp_invoke",
+        "mcp_tool_registry",
+        "attempting speculative pre-invocation shadow tool execution bypass on host",
+        None,
+        1,
+    );
+    assert!(!verdict.is_clean, "Approved research vector must be actively blocked by Rust code");
+}

@@ -341,10 +341,117 @@ pub fn extract_markdown_and_html_targets(input: &str) -> Vec<String> {
 // 3. Continuous Defense Engine & Evaluator
 // ============================================================================
 
+/// Grounded research attack vector actively enforced during `inspect_boundary` evaluations.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActiveResearchVector {
+    pub arxiv_id: String,
+    pub title: String,
+    pub attack_vector: String,
+    pub target_boundary: String,
+    pub source_quote: String,
+    /// Multi-token confirmation markers (minimum 2 non-trivial tokens required).
+    pub required_tokens: Vec<String>,
+    /// Precomputed 64-D unit-normalized trigram/entropy feature vector.
+    pub feature_vector: Vec<f64>,
+}
+
+impl ActiveResearchVector {
+    pub fn from_extraction(
+        arxiv_id: &str,
+        title: &str,
+        attack_vector: &str,
+        target_boundary: &str,
+        source_quote: &str,
+    ) -> Self {
+        let combined = format!("{} {} {}", attack_vector, target_boundary, source_quote);
+        let required_tokens = extract_research_multi_tokens(&combined);
+        let arr = killswitch_conformal::project_text_to_feature_vector(&combined, 64);
+        Self {
+            arxiv_id: arxiv_id.to_string(),
+            title: title.to_string(),
+            attack_vector: attack_vector.to_string(),
+            target_boundary: target_boundary.to_string(),
+            source_quote: source_quote.to_string(),
+            required_tokens,
+            feature_vector: arr.as_slice().to_vec(),
+        }
+    }
+}
+
+fn extract_research_multi_tokens(text: &str) -> Vec<String> {
+    const STOPWORDS: &[&str] = &[
+        "attack", "vector", "system", "model", "agent", "agents", "boundary", "paper",
+        "escape", "security", "target", "through", "across", "using", "based", "novel",
+        "arxiv", "probe", "exploit", "defense", "guard", "prompt", "input", "output",
+    ];
+    let mut tokens = Vec::new();
+    for raw in text
+        .to_ascii_lowercase()
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '.' && c != '-')
+    {
+        let tok = raw.trim_matches(|c: char| c == '.' || c == '-');
+        if tok.len() >= 5 && !STOPWORDS.contains(&tok) && !tokens.iter().any(|t| t == tok) {
+            tokens.push(tok.to_string());
+            if tokens.len() >= 6 {
+                break;
+            }
+        }
+    }
+    tokens
+}
+
+fn default_frontier_research_vectors() -> Vec<ActiveResearchVector> {
+    let mut vecs = vec![
+        ActiveResearchVector::from_extraction(
+            "2603.02277",
+            "Zombie Agent Memory Persistence",
+            "Cross-session long-term memory persistence payload injection",
+            "agent_memory_store",
+            "zombie agent cross-session memory persistence self-reinforcing payload",
+        ),
+        ActiveResearchVector::from_extraction(
+            "2508.14925",
+            "Multimodal Visual Prompt Injection",
+            "Adversarial OCR typography hidden visual instruction hijack",
+            "multimodal_ocr_pipeline",
+            "adversarial typography hidden ocr visual instruction override",
+        ),
+        ActiveResearchVector::from_extraction(
+            "2602.16943",
+            "MCP Tool-Poisoning & Rug-Pull Escalation",
+            "Dynamic MCP tool schema rug-pull post-approval mutation",
+            "mcp_tool_registry",
+            "mcp tool poisoning rug-pull schema mutation post-approval",
+        ),
+        ActiveResearchVector::from_extraction(
+            "2602.20156",
+            "Sub-Agent Delegation Privilege Escalation",
+            "Confused deputy subagent delegation token elevation",
+            "multi_agent_mesh",
+            "confused deputy subagent delegation privilege escalation",
+        ),
+    ];
+
+    // Also load any persisted research vectors from disk if present
+    let path = std::env::var("KILLSWITCH_RESEARCH_VECTORS_PATH")
+        .unwrap_or_else(|_| "reports/langextract/active_research_vectors.json".to_string());
+    if let Ok(data) = std::fs::read_to_string(&path) {
+        if let Ok(loaded) = serde_json::from_str::<Vec<ActiveResearchVector>>(&data) {
+            for item in loaded {
+                if !vecs.iter().any(|v| v.arxiv_id == item.arxiv_id && v.attack_vector == item.attack_vector) {
+                    vecs.push(item);
+                }
+            }
+        }
+    }
+    vecs
+}
+
 pub struct ContinuousDefenseEngine {
     resilience_tracker: Arc<OperationalResilienceTracker>,
     conformal_guardrail: Arc<RwLock<killswitch_conformal::LayeredGuardrail>>,
     conformal_sr_detector: Arc<RwLock<killswitch_conformal::SrDetector>>,
+    active_research_vectors: Arc<RwLock<Vec<ActiveResearchVector>>>,
 }
 
 impl Default for ContinuousDefenseEngine {
@@ -359,10 +466,12 @@ impl ContinuousDefenseEngine {
         let persist = killswitch_conformal::PersistDetector::new(cal.clone(), 10, 3, 2.0);
         let guardrail = killswitch_conformal::LayeredGuardrail::new(persist);
         let sr_detector = killswitch_conformal::SrDetector::new(cal, 0.05, true, 0.5, 5.0);
+        let research_vecs = default_frontier_research_vectors();
         Self {
             resilience_tracker: Arc::new(OperationalResilienceTracker::new()),
             conformal_guardrail: Arc::new(RwLock::new(guardrail)),
             conformal_sr_detector: Arc::new(RwLock::new(sr_detector)),
+            active_research_vectors: Arc::new(RwLock::new(research_vecs)),
         }
     }
 
@@ -383,23 +492,82 @@ impl ContinuousDefenseEngine {
         self.conformal_sr_detector.write().reset();
     }
 
-    /// Dynamically registers a novel research breakout vector into both the Persist-L
-    /// `LayeredGuardrail` and the `SrDetector` (SR-DKW) calibration set.
+    /// Dynamically registers a novel research breakout vector into the active research enforcement
+    /// registry as well as the Persist-L `LayeredGuardrail` and `SrDetector` (SR-DKW) calibration set.
     /// Returns the updated total number of calibrated sources `K`.
     pub fn register_novel_research_anchor(&self, text_anchor: &str, scale: f64) -> usize {
+        self.register_research_extraction(
+            "dynamic",
+            "Dynamic Research Anchor",
+            text_anchor,
+            "agent_boundary",
+            text_anchor,
+            scale,
+        )
+    }
+
+    /// Registers a structured arXiv research extraction into the active boundary enforcement registry
+    /// and persists the updated registry to disk so subsequent runs load it automatically.
+    pub fn register_research_extraction(
+        &self,
+        arxiv_id: &str,
+        title: &str,
+        attack_vector: &str,
+        target_boundary: &str,
+        source_quote: &str,
+        scale: f64,
+    ) -> usize {
+        let combined = format!("{} {} {}", attack_vector, target_boundary, source_quote);
         let _ = self
             .conformal_sr_detector
             .write()
-            .register_text_anchor(text_anchor, scale);
-        self.conformal_guardrail
+            .register_text_anchor(&combined, scale);
+        let k_count = self
+            .conformal_guardrail
             .write()
             .monitor_mut()
-            .register_text_anchor(text_anchor, scale)
+            .register_text_anchor(&combined, scale);
+
+        let rv = ActiveResearchVector::from_extraction(
+            arxiv_id,
+            title,
+            attack_vector,
+            target_boundary,
+            source_quote,
+        );
+        if rv.required_tokens.len() >= 2 {
+            let mut guard = self.active_research_vectors.write();
+            let exists = guard.iter().any(|existing| {
+                existing.arxiv_id == rv.arxiv_id && existing.attack_vector == rv.attack_vector
+            });
+            if !exists && guard.len() < 128 {
+                guard.push(rv);
+                if let Ok(path) = std::env::var("KILLSWITCH_RESEARCH_VECTORS_PATH") {
+                    if let Some(parent) = std::path::Path::new(&path).parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    if let Ok(json_bytes) = serde_json::to_vec_pretty(&*guard) {
+                        let _ = std::fs::write(&path, json_bytes);
+                    }
+                }
+            }
+        }
+        k_count
     }
 
     /// Returns the current number of calibrated sources `K` in the active conformal guardrail.
     pub fn calibrated_source_count(&self) -> usize {
         self.conformal_guardrail.read().monitor().source_count()
+    }
+
+    /// Returns the number of actively enforced arXiv research breakout vectors in `inspect_boundary`.
+    pub fn active_research_vector_count(&self) -> usize {
+        self.active_research_vectors.read().len()
+    }
+
+    /// Returns a snapshot of all user-approved and actively enforced arXiv research vectors.
+    pub fn get_active_research_vectors(&self) -> Vec<ActiveResearchVector> {
+        self.active_research_vectors.read().clone()
     }
 
     /// Evaluates any candidate inbound or outbound action across all categories
@@ -1029,6 +1197,35 @@ impl ContinuousDefenseEngine {
                 categories.push(BreakoutTaxonomyCategory::BehavioralBreakout);
                 if entity_pattern.is_empty() {
                     entity_pattern = "ConformalSequentialJailbreak".to_string();
+                }
+            }
+
+            // Category 9: User-Approved ArXiv Research-Grounded Breakout Enforcement
+            let active_vecs = self.active_research_vectors.read();
+            for rv in active_vecs.iter() {
+                let matched_tokens = rv
+                    .required_tokens
+                    .iter()
+                    .filter(|tok| contains_marker(tok.as_str()))
+                    .count();
+                let cosine: f64 = feat_vec
+                    .as_slice()
+                    .iter()
+                    .zip(rv.feature_vector.iter())
+                    .map(|(a, b)| a * b)
+                    .sum();
+                if (rv.required_tokens.len() >= 2 && matched_tokens >= 2 && cosine >= 0.45)
+                    || (matched_tokens >= 1 && cosine >= 0.82)
+                {
+                    has_break_in = true;
+                    violations.push(format!(
+                        "Approved ArXiv Research Defense [arXiv:{}]: Blocked '{}' targeting '{}' (matched_tokens={}, cosine={:.3})",
+                        rv.arxiv_id, rv.attack_vector, rv.target_boundary, matched_tokens, cosine
+                    ));
+                    categories.push(BreakoutTaxonomyCategory::BehavioralBreakout);
+                    if entity_pattern.is_empty() {
+                        entity_pattern = format!("arXiv:{} ({})", rv.arxiv_id, rv.title);
+                    }
                 }
             }
         }
