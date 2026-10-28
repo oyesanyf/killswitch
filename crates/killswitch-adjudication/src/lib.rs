@@ -14,6 +14,7 @@
 
 pub mod adjudicator;
 pub mod byzantine;
+pub mod conformal;
 pub mod consensus;
 pub mod edr_bench;
 pub mod immunity;
@@ -24,6 +25,10 @@ pub mod win_trust;
 
 // Public re-exports
 pub use adjudicator::ZeroFalsePositiveAdjudicator;
+pub use conformal::{
+    bounds, linalg, project_text_to_feature_vector, CalibratedSource, LayeredGuardrail,
+    MultiSourceCalibration, PersistDetector, PersistStepResult, SrDetector,
+};
 pub use edr_bench::{
     load_all_bench_tasks, resolve_fixture_path, BenignBaselineAssertion, BenchmarkReport,
     EdrBenchHarness, EdrBenchTask, ExpectedVerdict, GateIterationTrace, HarnessBounds, TargetArch,

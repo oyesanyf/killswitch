@@ -914,6 +914,7 @@ dependencies = [
  "chrono",
  "clap",
  "killswitch-adjudication",
+ "killswitch-conformal",
  "killswitch-core",
  "killswitch-orchestrator",
  "killswitch-server",
@@ -928,6 +929,10 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
 ]
+
+[[package]]
+name = "killswitch-conformal"
+version = "0.1.0"
 
 [[package]]
 name = "killswitch-core"
@@ -996,6 +1001,7 @@ dependencies = [
  "chrono",
  "dashmap",
  "killswitch-adjudication",
+ "killswitch-conformal",
  "killswitch-core",
  "killswitch-telemetry",
  "killswitch-types",
@@ -1026,6 +1032,7 @@ dependencies = [
  "hex",
  "hmac",
  "killswitch-adjudication",
+ "killswitch-conformal",
  "killswitch-core",
  "killswitch-types",
  "libc",

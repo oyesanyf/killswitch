@@ -24,6 +24,7 @@ killswitch-adjudication = { workspace = true }
 killswitch-telemetry = { workspace = true }
 killswitch-orchestrator = { workspace = true }
 killswitch-server = { workspace = true }
+killswitch-conformal = { workspace = true }
 
 # Web & async runtime
 axum = { workspace = true, features = ["macros"] }

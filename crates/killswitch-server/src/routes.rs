@@ -1,6 +1,6 @@
 //! # Axum Router Assembly & Middleware Stacking
 //!
-//! Exposes all 15 dedicated endpoints with layered security middleware.
+//! Exposes all 16 dedicated endpoints with layered security middleware.
 
 use std::sync::Arc;
 use axum::routing::{get, post};
@@ -78,6 +78,11 @@ pub fn build_router(state: Arc<ServerState>) -> Router {
         .route("/api/resilience/status", get(handlers::get_resilience_status))
         .route("/octopus/inspect-boundary", post(handlers::post_inspect_boundary))
         .route("/api/octopus/inspect-boundary", post(handlers::post_inspect_boundary))
+        // 13. Conformal Sequential Jailbreak Detection (Persist-L, SR-DKW, LayeredGuardrail)
+        .route("/conformal/status", get(handlers::get_conformal_status))
+        .route("/api/conformal/status", get(handlers::get_conformal_status))
+        .route("/conformal/evaluate", post(handlers::post_conformal_evaluate))
+        .route("/api/conformal/evaluate", post(handlers::post_conformal_evaluate))
         // Middleware Layers (applied bottom-up)
         .layer(axum::middleware::from_fn(middleware::rate_limit_middleware))
         .layer(middleware::cors_layer())

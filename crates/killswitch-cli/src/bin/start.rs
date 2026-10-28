@@ -60,11 +60,11 @@ async fn main() -> Result<()> {
     // Self-Diagnostic Check Mode (--verify / --check)
     // -------------------------------------------------------------------------
     if cli.verify {
-        println!("🛡️  [START.EXE] Executing 6-Phase Subsystem Self-Diagnostics...");
+        println!("🛡️  [START.EXE] Executing 7-Phase Subsystem Self-Diagnostics...");
         match SubsystemVerifier::run_all().await {
             Ok(report) => {
                 report.print_summary();
-                println!("✅ [START.EXE] All 6 Subsystems Verified Successfully! Self-check passed (exit 0).");
+                println!("✅ [START.EXE] All 7 Subsystems Verified Successfully! Self-check passed (exit 0).");
                 std::process::exit(0);
             }
             Err(e) => {
