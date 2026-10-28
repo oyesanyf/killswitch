@@ -6,9 +6,10 @@ use killswitch_types::graph::GraphNodeId;
 use serde::{Deserialize, Serialize};
 
 /// The 10 discrete lifecycle transitions of the KillSwitch LangGraph StateGraph.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum LifecycleStage {
     /// 1. Passive ingestion of raw telemetry and EDR signals.
+    #[default]
     Ingest,
     /// 2. Causal graph, attack graph, and PhaseLock drift correlation.
     Correlate,
@@ -30,11 +31,6 @@ pub enum LifecycleStage {
     Terminal,
 }
 
-impl Default for LifecycleStage {
-    fn default() -> Self {
-        Self::Ingest
-    }
-}
 
 impl LifecycleStage {
     /// Maps 10-node LifecycleStage to killswitch-types GraphNodeId.

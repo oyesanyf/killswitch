@@ -66,7 +66,7 @@ impl OrchestratorBridge for InMemoryOrchestratorBridge {
         let mut state = self.state.write().await;
 
         let current = state.current_node;
-        let next = force_node.unwrap_or_else(|| match current {
+        let next = force_node.unwrap_or(match current {
             GraphNodeId::Monitoring => GraphNodeId::IngestingSignals,
             GraphNodeId::IngestingSignals => GraphNodeId::CorrelatingEdrAndOctopus,
             GraphNodeId::CorrelatingEdrAndOctopus => GraphNodeId::AdjudicatingZeroFalsePositive,

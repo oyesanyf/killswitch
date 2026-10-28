@@ -53,9 +53,12 @@ impl KillSwitchClient {
             std::env::temp_dir().join("killswitch_active_port.txt"),
         ];
         for path in candidates {
+            if path.is_symlink() {
+                continue;
+            }
             if let Ok(raw) = std::fs::read_to_string(&path) {
                 if let Ok(p) = raw.trim().parse::<u16>() {
-                    if p > 0 {
+                    if (1024..=65535).contains(&p) {
                         return Some(p);
                     }
                 }

@@ -188,12 +188,8 @@ impl KillChainHostManager {
         );
 
         let current_status = self.get_status();
-        let has_active_wfp = self
-            .get_network_receipts()
-            .iter()
-            .any(|r| !r.wfp_filter_ids.is_empty());
-        if current_status.isolated && has_active_wfp && current_status.containment_level == level {
-            info!("🛡️ [KILLCHAIN-IDEMPOTENCY] Host is already isolated at {:?} with active WFP filters; preserving state.", level);
+        if current_status.isolated && current_status.containment_level == level {
+            info!("🛡️ [KILLCHAIN-IDEMPOTENCY] Host is already isolated at {:?}; preserving state.", level);
             return Ok(current_status);
         }
 

@@ -260,7 +260,7 @@ fn scan_dir_recursive(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>
             let path = entry.path();
             if path.is_dir() {
                 scan_dir_recursive(&path, files);
-            } else if path.extension().map_or(false, |ext| ext == "rs") {
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
                 files.push(path);
             }
         }

@@ -291,8 +291,7 @@ impl CompiledRule {
                             return Err(format!("YARA syntax error: empty hex pattern '{}'", id));
                         }
                         patterns.push(CompiledPattern { id, bytes });
-                    } else if rhs.starts_with('"') {
-                        let rest = &rhs[1..];
+                    } else if let Some(rest) = rhs.strip_prefix('"') {
                         let end_quote = rest.find('"').ok_or_else(|| {
                             format!("YARA syntax error: unclosed string literal in '{}'", line)
                         })?;

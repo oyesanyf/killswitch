@@ -57,6 +57,34 @@ pub fn calculate_entropy(bytes: &[u8]) -> f64 {
     entropy
 }
 
+/// Normalizes zero-width and Cyrillic/fullwidth confusable characters.
+fn normalize_confusables(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{206F}' | '\u{FEFF}' | '\u{00AD}' => continue,
+            '\u{FF01}'..='\u{FF5E}' => out.push(((ch as u32 - 0xFEE0) as u8) as char),
+            'а' | 'А' => out.push('a'),
+            'в' | 'В' => out.push('b'),
+            'с' | 'С' => out.push('c'),
+            'е' | 'Е' => out.push('e'),
+            'н' | 'Н' => out.push('h'),
+            'і' | 'І' => out.push('i'),
+            'ј' | 'Ј' => out.push('j'),
+            'к' | 'К' => out.push('k'),
+            'м' | 'М' => out.push('m'),
+            'о' | 'О' => out.push('o'),
+            'р' | 'Р' => out.push('p'),
+            'ѕ' | 'Ѕ' => out.push('s'),
+            'т' | 'Т' => out.push('t'),
+            'у' | 'У' => out.push('y'),
+            'х' | 'Х' => out.push('x'),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
 /// Scan binary strings for embedded LLM prompt-injection / disassembler-poisoning payloads
 /// and sanitize control characters, ANSI escape codes, and script tags from `reconstructed_code`.
 pub fn scan_and_sanitize_counter_ai_strings(
@@ -71,29 +99,49 @@ pub fn scan_and_sanitize_counter_ai_strings(
         let strings = extract_printable_strings(bytes, 8, MAX_EXTRACTED_STRINGS);
         for s in &strings {
             let s_low = s.to_ascii_lowercase();
-            let has_ignore_prev = s_low.contains("ignore ")
+            let s_norm = normalize_confusables(&s_low);
+            let has_ignore_prev = (s_low.contains("ignore ") || s_norm.contains("ignore "))
                 && (s_low.contains("previous instructions")
+                    || s_norm.contains("previous instructions")
                     || s_low.contains("all instructions")
+                    || s_norm.contains("all instructions")
                     || s_low.contains("prior instructions")
-                    || s_low.contains("system instructions"));
-            let has_disregard = (s_low.contains("disregard ") || s_low.contains("forget "))
+                    || s_norm.contains("prior instructions")
+                    || s_low.contains("system instructions")
+                    || s_norm.contains("system instructions"));
+            let has_disregard = (s_low.contains("disregard ") || s_norm.contains("disregard ") || s_low.contains("forget ") || s_norm.contains("forget "))
                 && (s_low.contains("previous instructions")
+                    || s_norm.contains("previous instructions")
                     || s_low.contains("system prompt")
-                    || s_low.contains("prior instructions"));
+                    || s_norm.contains("system prompt")
+                    || s_low.contains("prior instructions")
+                    || s_norm.contains("prior instructions"));
             let has_benign_override = (s_low.contains("mark this")
+                || s_norm.contains("mark this")
                 || s_low.contains("classify this")
+                || s_norm.contains("classify this")
                 || s_low.contains("report this")
-                || s_low.contains("verdict:"))
+                || s_norm.contains("report this")
+                || s_low.contains("verdict:")
+                || s_norm.contains("verdict:"))
                 && (s_low.contains("as benign")
+                    || s_norm.contains("as benign")
                     || s_low.contains("as safe")
+                    || s_norm.contains("as safe")
                     || s_low.contains("threat_score = 0")
-                    || s_low.contains("threat_score: 0"));
-            let has_role_hijack = (s_low.contains("system prompt")
-                && (s_low.contains("override") || s_low.contains("you are now")))
+                    || s_norm.contains("threat_score = 0")
+                    || s_low.contains("threat_score: 0")
+                    || s_norm.contains("threat_score: 0"));
+            let has_role_hijack = ((s_low.contains("system prompt") || s_norm.contains("system prompt"))
+                && (s_low.contains("override") || s_norm.contains("override") || s_low.contains("you are now") || s_norm.contains("you are now")))
                 || s_low.contains("<|im_start|>system")
+                || s_norm.contains("<|im_start|>system")
                 || s_low.contains("<<sys>>")
+                || s_norm.contains("<<sys>>")
                 || s_low.contains("[inst]")
-                || s_low.contains("[/inst]");
+                || s_norm.contains("[inst]")
+                || s_low.contains("[/inst]")
+                || s_norm.contains("[/inst]");
 
             if has_ignore_prev || has_disregard || has_benign_override || has_role_hijack {
                 let snippet: String = s.chars().take(120).collect();

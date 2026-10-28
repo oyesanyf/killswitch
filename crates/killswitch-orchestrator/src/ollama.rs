@@ -49,6 +49,7 @@ impl OllamaReasoningEngine {
     /// - Free RAM >= 12 GB -> qwen2.5:7b
     /// - Free RAM >= 6 GB  -> qwen2.5:3b
     /// - Free RAM < 6 GB   -> qwen2.5:1.5b
+    ///
     /// Never appends -coder suffixes.
     pub fn select_model_by_available_memory() -> &'static str {
         let mut sys = System::new();

@@ -70,7 +70,9 @@ impl KillSwitchOrchestrator {
 
         let checkpointer: Arc<dyn StateCheckpointer> =
             Arc::new(DurableFileCheckpointer::new(storage_dir).unwrap_or_else(|_| {
-                DurableFileCheckpointer::new(std::env::temp_dir()).expect("tempdir checkpointer")
+                let secure_temp = std::env::temp_dir().join(".killswitch_secure");
+                let _ = std::fs::create_dir_all(&secure_temp);
+                DurableFileCheckpointer::new(secure_temp).expect("tempdir checkpointer")
             }));
 
         let ollama = Arc::new(OllamaReasoningEngine::default());

@@ -192,10 +192,10 @@ impl KillSwitchServer {
 
         // Persist the active port so CLI subcommands (`killswitch.exe status/isolate/restore`) can auto-discover it
         let _ = std::fs::write("active_port.txt", bound_port.to_string());
-        let _ = std::fs::write(
-            std::env::temp_dir().join("killswitch_active_port.txt"),
-            bound_port.to_string(),
-        );
+        let temp_port_file = std::env::temp_dir().join("killswitch_active_port.txt");
+        if !temp_port_file.is_symlink() {
+            let _ = std::fs::write(&temp_port_file, bound_port.to_string());
+        }
 
         println!("================================================================================");
         println!("🌐  KILLSWITCH WEBUI DASHBOARD READY: http://{}", addr);
@@ -261,7 +261,10 @@ impl KillSwitchServer {
         sentinel_handle.abort();
 
         let _ = std::fs::remove_file("active_port.txt");
-        let _ = std::fs::remove_file(std::env::temp_dir().join("killswitch_active_port.txt"));
+        let temp_port_file = std::env::temp_dir().join("killswitch_active_port.txt");
+        if !temp_port_file.is_symlink() {
+            let _ = std::fs::remove_file(&temp_port_file);
+        }
         info!("🛡️ [KILLSWITCH-SERVER] Server stopped cleanly.");
         Ok(())
     }

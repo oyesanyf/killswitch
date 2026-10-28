@@ -398,10 +398,13 @@ pub fn check_authenticode_status(path: &str) -> AuthenticodeStatus {
         return AuthenticodeStatus::new_valid("Detached Cryptographic Signature", "", "", "");
     }
 
-    // 2. Check if path matches current running executable
+    // 2. Check if path matches current running executable (hardened against symlinks & writable temp bypasses)
     if let Ok(cur_exe) = std::env::current_exe() {
         if let (Ok(c1), Ok(c2)) = (p.canonicalize(), cur_exe.canonicalize()) {
-            if c1 == c2 {
+            // Reject if the executable is a symlink or resides in an untrusted writable directory
+            let is_sym = cur_exe.is_symlink() || p.is_symlink();
+            let is_untrusted = is_untrusted_writable_location(&c2.to_string_lossy());
+            if !is_sym && !is_untrusted && c1 == c2 {
                 return AuthenticodeStatus::new_valid("KillSwitch Host Agent Binary", "", "", "");
             }
         }

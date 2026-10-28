@@ -444,7 +444,7 @@ pub fn refresh_hardware_tpm_probe() -> HardwareTpmProbe {
 fn probe_hardware_tpm_uncached() -> HardwareTpmProbe {
     #[cfg(target_os = "windows")]
     {
-        return win_tpm::probe_windows_tpm();
+        win_tpm::probe_windows_tpm()
     }
 
     #[cfg(target_os = "linux")]

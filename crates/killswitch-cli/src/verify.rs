@@ -514,8 +514,6 @@ impl SubsystemVerifier {
         if !fprime_status.all_components_healthy || !fprime_status.swebench_two_gate_verified {
             bail!("Expected NASA F' components and SWE-Bench Two-Gate to be healthy");
         }
-        if false {
-        }
 
         Ok(())
     }

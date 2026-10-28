@@ -62,9 +62,14 @@ pub fn discover_active_control_ports() -> Vec<u16> {
         std::env::temp_dir().join("killswitch_active_port.txt"),
     ];
     for path in candidates {
+        // Reject symlinks to prevent TOCTOU redirection
+        if path.is_symlink() {
+            continue;
+        }
         if let Ok(raw) = std::fs::read_to_string(&path) {
             if let Ok(p) = raw.trim().parse::<u16>() {
-                if p > 0 && !ports.contains(&p) {
+                // Strict bounds check: only allow valid unprivileged/listening port numbers
+                if (1024..=65535).contains(&p) && !ports.contains(&p) {
                     ports.push(p);
                 }
             }
@@ -1932,7 +1937,9 @@ fn persist_wfp_filter_ids(ids: &[u64]) {
     }
     if let Ok(json) = serde_json::to_string(&all_ids) {
         for path in wfp_filter_ledger_paths() {
-            let _ = std::fs::write(path, &json);
+            if !path.is_symlink() {
+                let _ = std::fs::write(path, &json);
+            }
         }
     }
     let mut mem = get_active_wfp_filter_ids().lock();
@@ -1992,6 +1999,14 @@ pub fn engage_windows_network_quarantine(
     engaged_by: &str,
     reason: &str,
 ) -> KillSwitchResult<IsolationReceipt> {
+    engage_windows_network_quarantine_with_ports(engaged_by, reason, &[])
+}
+
+pub fn engage_windows_network_quarantine_with_ports(
+    engaged_by: &str,
+    reason: &str,
+    custom_ports: &[u16],
+) -> KillSwitchResult<IsolationReceipt> {
     info!(
         engaged_by = %engaged_by,
         reason = %reason,
@@ -2029,12 +2044,17 @@ pub fn engage_windows_network_quarantine(
     let registry_rules = apply_bfe_registry_quarantine_rules();
     let terminated_tcp = terminate_all_non_loopback_tcp_sockets();
 
-    let mut preserved_ports = discover_active_control_ports();
-    for p in [53u16, 67, 68, 546, 547] {
-        if !preserved_ports.contains(&p) {
-            preserved_ports.push(p);
+    let preserved_ports = if !custom_ports.is_empty() {
+        custom_ports.to_vec()
+    } else {
+        let mut ports = discover_active_control_ports();
+        for p in [53u16, 67, 68, 546, 547] {
+            if !ports.contains(&p) {
+                ports.push(p);
+            }
         }
-    }
+        ports
+    };
     let preserved_ips = vec![
         IpAddr::V4(Ipv4Addr::LOCALHOST),
         IpAddr::V6(Ipv6Addr::LOCALHOST),
@@ -2119,11 +2139,11 @@ pub struct WindowsWfpIsolator;
 impl NetworkIsolator for WindowsWfpIsolator {
     fn engage_quarantine(
         &self,
-        _preserved_ports: &[u16],
+        preserved_ports: &[u16],
         operator: &str,
         reason: &str,
     ) -> Result<IsolationReceipt, KillSwitchError> {
-        engage_windows_network_quarantine(operator, reason)
+        engage_windows_network_quarantine_with_ports(operator, reason, preserved_ports)
     }
 
     fn restore_quarantine(&self, _receipt: &IsolationReceipt) -> Result<(), KillSwitchError> {
