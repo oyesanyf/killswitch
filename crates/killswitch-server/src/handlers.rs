@@ -1867,6 +1867,17 @@ pub async fn post_research_ingest(
             !ALREADY_IMPLEMENTED_ARXIV_IDS.contains(&ext.arxiv_id.trim())
         });
 
+        if is_novel && payload.auto_synthesize_rules.unwrap_or(true) {
+            let anchor_text = format!(
+                "{} {} {}",
+                ext.attack_vector,
+                ext.target_boundary,
+                ext.source_quote.as_deref().unwrap_or("")
+            );
+            killswitch_telemetry::global_continuous_defense()
+                .register_novel_research_anchor(&anchor_text, 1.6);
+        }
+
         let target_crate = ext
             .target_crate_enhancement
             .clone()
@@ -1894,6 +1905,8 @@ pub async fn post_research_ingest(
 
     let all_live_probes_executed = coverage_reports.iter().all(|r| r.live_probe_executed);
     let novel_enhancement_count = coverage_reports.iter().filter(|r| r.is_novel_to_codebase).count();
+    let calibrated_sources_total =
+        killswitch_telemetry::global_continuous_defense().calibrated_source_count();
 
     Ok(Json(ResearchIngestResponse {
         success: true,
@@ -1904,6 +1917,7 @@ pub async fn post_research_ingest(
         timestamp: Utc::now().to_rfc3339(),
         all_live_probes_executed,
         novel_enhancement_count,
+        calibrated_sources_total,
     }))
 }
 

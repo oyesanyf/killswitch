@@ -383,6 +383,25 @@ impl ContinuousDefenseEngine {
         self.conformal_sr_detector.write().reset();
     }
 
+    /// Dynamically registers a novel research breakout vector into both the Persist-L
+    /// `LayeredGuardrail` and the `SrDetector` (SR-DKW) calibration set.
+    /// Returns the updated total number of calibrated sources `K`.
+    pub fn register_novel_research_anchor(&self, text_anchor: &str, scale: f64) -> usize {
+        let _ = self
+            .conformal_sr_detector
+            .write()
+            .register_text_anchor(text_anchor, scale);
+        self.conformal_guardrail
+            .write()
+            .monitor_mut()
+            .register_text_anchor(text_anchor, scale)
+    }
+
+    /// Returns the current number of calibrated sources `K` in the active conformal guardrail.
+    pub fn calibrated_source_count(&self) -> usize {
+        self.conformal_guardrail.read().monitor().source_count()
+    }
+
     /// Evaluates any candidate inbound or outbound action across all categories
     /// of the Oyesanya (2026) taxonomy, Google shared-state pollution, Symantec 2026 Skynet mode,
     /// and Vassilev's bound. Multi-layer de-obfuscation normalizes Unicode, decodes Base64/Hex/URL,

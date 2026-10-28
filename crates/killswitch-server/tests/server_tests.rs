@@ -336,4 +336,5 @@ async fn test_research_ingest_live_regression_probes() {
     assert!(res.containment_coverage[0].is_novel_to_codebase);
     assert!(res.containment_coverage[2].is_novel_to_codebase);
     assert_eq!(res.novel_enhancement_count, 2);
+    assert!(res.calibrated_sources_total >= 6);
 }
