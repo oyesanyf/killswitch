@@ -10,6 +10,7 @@ description = "EDR Telemetry, Nonlinear Phase-Lock Lyapunov Monitor, Causal/Atta
 
 [dependencies]
 killswitch-types = { workspace = true }
+killswitch-conformal = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }

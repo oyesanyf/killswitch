@@ -21,6 +21,7 @@ killswitch-telemetry = { path = "crates/killswitch-telemetry" }
 killswitch-orchestrator = { path = "crates/killswitch-orchestrator" }
 killswitch-server = { path = "crates/killswitch-server" }
 killswitch-cli = { path = "crates/killswitch-cli" }
+killswitch-conformal = { path = "crates/killswitch-conformal" }
 
 
 # OpenTelemetry & OpenLineage Integration

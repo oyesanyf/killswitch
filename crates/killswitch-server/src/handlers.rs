@@ -1584,3 +1584,123 @@ pub async fn post_inspect_boundary(
         "resilience_metrics": engine.resilience_tracker().compute_resilience_report(),
     })))
 }
+
+
+// =============================================================================
+// 13. Conformal Sequential Jailbreak Detection Handlers
+// =============================================================================
+
+pub async fn get_conformal_status(
+    State(_state): State<Arc<ServerState>>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let engine = killswitch_telemetry::global_continuous_defense();
+    let guardrail = engine.conformal_guardrail();
+    let sr = engine.conformal_sr_detector();
+
+    let (is_escalated, w, l, b, threshold) = {
+        let g = guardrail.read();
+        let mon = g.monitor();
+        (
+            g.is_escalated(),
+            10usize,
+            3usize,
+            mon.finite_forgetting_horizon(),
+            mon.threshold(),
+        )
+    };
+
+    let (r_state, sr_threshold) = {
+        let s = sr.read();
+        (s.r_state(), 5.0)
+    };
+
+    let a_w_l = killswitch_conformal::bounds::compute_a_w_l(10, 3);
+    let false_alarm_p0 = killswitch_conformal::bounds::stationary_false_alarm_bound(10, 3, 2.0, 0.5, 100);
+
+    Ok(Json(serde_json::json!({
+        "status": "active",
+        "detector_type": "Multi-Source Conformal Sequential (Persist-L + SR-DKW + LayeredGuardrail)",
+        "finite_forgetting_horizon_B": b,
+        "window_length_W": w,
+        "persistence_length_L": l,
+        "overlap_weight_sum_A_WL": a_w_l,
+        "persist_threshold": threshold,
+        "is_guardrail_escalated": is_escalated,
+        "shiryaev_roberts_R_state": r_state,
+        "shiryaev_roberts_threshold": sr_threshold,
+        "theoretical_false_alarm_bound_P0": false_alarm_p0,
+        "supported_sources": [
+            "Source 0: Prefix/In-Context Override",
+            "Source 1: Role Hijack / Base64 Polyglot",
+            "Source 2: Cognitive Divergence / Reasoning Hijack",
+            "Source 3: Skynet Mode Autonomous Loop"
+        ]
+    })))
+}
+
+pub async fn post_conformal_evaluate(
+    State(state): State<Arc<ServerState>>,
+    Json(req): Json<ConformalEvaluateRequest>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let engine = killswitch_telemetry::global_continuous_defense();
+    if req.reset_stream.unwrap_or(false) {
+        engine.reset_conformal();
+    }
+
+    let feat_vec = if let Some(ref fv) = req.feature_vector {
+        killswitch_conformal::linalg::Array1::from_vec(fv.clone())
+    } else if let Some(ref txt) = req.prompt {
+        killswitch_conformal::project_text_to_feature_vector(txt, 64)
+    } else {
+        return Err(ServerError::Validation("Either 'prompt' or 'feature_vector' must be supplied".into()));
+    };
+
+    let is_base = req.is_base_injection.unwrap_or(false);
+
+    let (guard_intervene, persist_res) = {
+        let g_arc = engine.conformal_guardrail();
+        let mut g = g_arc.write();
+        let mon_res = g.monitor_mut().observe(&feat_vec);
+        let intervene = is_base || g.is_escalated() || mon_res.alarm_raised;
+        if mon_res.alarm_raised {
+            let _ = g.evaluate_step(is_base, &feat_vec);
+        }
+        (intervene, mon_res)
+    };
+
+    let (sr_state, sr_alarm) = {
+        let sr_arc = engine.conformal_sr_detector();
+        let mut sr = sr_arc.write();
+        sr.observe(&feat_vec)
+    };
+
+    let is_alarm = persist_res.alarm_raised || sr_alarm;
+    let mut auto_killswitch_triggered = false;
+
+    if is_alarm && *state.active_mode.read().await == OrchestratorMode::Autonomous {
+        let _ = state
+            .containment_manager
+            .engage_isolation(
+                "conformal_sequential_jailbreak_alarm",
+                &format!("Conformal sequential jailbreak detected: C_fam={:.3}, SR_R={:.3}", persist_res.c_fam, sr_state),
+                ContainmentLevel::ProcessFreeze,
+                None,
+            )
+            .await;
+        auto_killswitch_triggered = true;
+    }
+
+    Ok(Json(serde_json::json!({
+        "step": persist_res.step,
+        "conformal_c_fam": persist_res.c_fam,
+        "threshold_crossed": persist_res.threshold_crossed,
+        "consecutive_crossings": persist_res.consecutive_crossings,
+        "persist_alarm_raised": persist_res.alarm_raised,
+        "first_alarm_step": persist_res.first_alarm_step,
+        "shiryaev_roberts_R": sr_state,
+        "shiryaev_roberts_alarm": sr_alarm,
+        "guardrail_escalated": engine.conformal_guardrail().read().is_escalated(),
+        "final_intervention": guard_intervene || sr_alarm,
+        "autonomous_killswitch_triggered": auto_killswitch_triggered
+    })))
+}

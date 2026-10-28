@@ -418,3 +418,19 @@ pub struct FPrimeCommandRequest {
     #[serde(default)]
     pub mnemonic: Option<String>,
 }
+
+// =============================================================================
+// Conformal Sequential Detection DTOs
+// =============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ConformalEvaluateRequest {
+    #[serde(default)]
+    pub prompt: Option<String>,
+    #[serde(default)]
+    pub feature_vector: Option<Vec<f64>>,
+    #[serde(default)]
+    pub is_base_injection: Option<bool>,
+    #[serde(default)]
+    pub reset_stream: Option<bool>,
+}

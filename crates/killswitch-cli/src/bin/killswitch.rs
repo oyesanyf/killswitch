@@ -190,11 +190,11 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     if cli.verify {
-        println!("🛡️  [KILLSWITCH.EXE] Executing 6-Phase Subsystem Self-Diagnostics...");
+        println!("🛡️  [KILLSWITCH.EXE] Executing 7-Phase Subsystem Self-Diagnostics...");
         match SubsystemVerifier::run_all().await {
             Ok(report) => {
                 report.print_summary();
-                println!("✅ [KILLSWITCH.EXE] All 6 Subsystems Verified Successfully! Self-check passed (exit 0).");
+                println!("✅ [KILLSWITCH.EXE] All 7 Subsystems Verified Successfully! Self-check passed (exit 0).");
                 std::process::exit(0);
             }
             Err(e) => {

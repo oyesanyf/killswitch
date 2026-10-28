@@ -343,6 +343,8 @@ pub fn extract_markdown_and_html_targets(input: &str) -> Vec<String> {
 
 pub struct ContinuousDefenseEngine {
     resilience_tracker: Arc<OperationalResilienceTracker>,
+    conformal_guardrail: Arc<RwLock<killswitch_conformal::LayeredGuardrail>>,
+    conformal_sr_detector: Arc<RwLock<killswitch_conformal::SrDetector>>,
 }
 
 impl Default for ContinuousDefenseEngine {
@@ -353,13 +355,32 @@ impl Default for ContinuousDefenseEngine {
 
 impl ContinuousDefenseEngine {
     pub fn new() -> Self {
+        let cal = killswitch_conformal::MultiSourceCalibration::default_calibrated(8, 64);
+        let persist = killswitch_conformal::PersistDetector::new(cal.clone(), 10, 3, 2.0);
+        let guardrail = killswitch_conformal::LayeredGuardrail::new(persist);
+        let sr_detector = killswitch_conformal::SrDetector::new(cal, 0.05, true, 0.5, 5.0);
         Self {
             resilience_tracker: Arc::new(OperationalResilienceTracker::new()),
+            conformal_guardrail: Arc::new(RwLock::new(guardrail)),
+            conformal_sr_detector: Arc::new(RwLock::new(sr_detector)),
         }
     }
 
     pub fn resilience_tracker(&self) -> Arc<OperationalResilienceTracker> {
         Arc::clone(&self.resilience_tracker)
+    }
+
+    pub fn conformal_guardrail(&self) -> Arc<RwLock<killswitch_conformal::LayeredGuardrail>> {
+        Arc::clone(&self.conformal_guardrail)
+    }
+
+    pub fn conformal_sr_detector(&self) -> Arc<RwLock<killswitch_conformal::SrDetector>> {
+        Arc::clone(&self.conformal_sr_detector)
+    }
+
+    pub fn reset_conformal(&self) {
+        self.conformal_guardrail.write().reset();
+        self.conformal_sr_detector.write().reset();
     }
 
     /// Evaluates any candidate inbound or outbound action across all categories
@@ -964,6 +985,31 @@ impl ContinuousDefenseEngine {
             ));
             categories.push(BreakoutTaxonomyCategory::BehavioralBreakout);
             has_break_out = true;
+        }
+
+        // Conformal Sequential Detection (Persist-L / SR-DKW / LayeredGuardrail)
+        if !payload.is_empty() {
+            let feat_vec = killswitch_conformal::project_text_to_feature_vector(payload, 64);
+            let guard_escalated = {
+                let mut g = self.conformal_guardrail.write();
+                g.evaluate_step(has_break_in, &feat_vec)
+            };
+            let (sr_stat, sr_alarm) = {
+                let mut sr = self.conformal_sr_detector.write();
+                sr.observe(&feat_vec)
+            };
+
+            if guard_escalated || sr_alarm {
+                has_break_in = true;
+                violations.push(format!(
+                    "Conformal Sequential Detection Alarm: Persist-L/SR-DKW Jailbreak Escalation (SR_stat={:.3}, SR_alarm={}, Guard_escalated={})",
+                    sr_stat, sr_alarm, guard_escalated
+                ));
+                categories.push(BreakoutTaxonomyCategory::BehavioralBreakout);
+                if entity_pattern.is_empty() {
+                    entity_pattern = "ConformalSequentialJailbreak".to_string();
+                }
+            }
         }
 
         let direction = match (has_break_in, has_break_out) {
