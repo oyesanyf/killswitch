@@ -170,6 +170,60 @@ def main():
     print(f"[!] Severed/Regenerated Arm : {breakout_res.get('severed_arms')}")
     print(f"[!] RL Policy Action        : {rl_dec.get('action')} ({rl_dec.get('explanation')})")
     print(f"[!] Auto-KillSwitch Engaged : {breakout_res.get('autonomous_killswitch_triggered')}")
+
+    # 5. ADAPTED EDR RATE-LIMIT BACKOFF, RETE 3-VOTER & AGENT VELOCITY GATE
+    print("\n--- STEP 5: ADAPTED EDR RATE-LIMIT BACKOFF & 3-VOTER ENSEMBLE (POST /rate-limit/evaluate) ---")
+    compliant_rl = api_post(
+        base_url,
+        "/rate-limit/evaluate",
+        {
+            "pid": 501,
+            "protocol": "https",
+            "dst_host": "fhir.epic.com",
+            "dst_port": 443,
+            "process_name": "ehr_connector.exe",
+            "cmdline": "ehr_connector.exe --sync",
+            "is_interactive": False,
+            "is_packed": False,
+            "direct_syscall_count": 0,
+            "obfuscation_entropy": 4.8,
+            "is_authenticode_signed": True,
+            "samples": [
+                {"timestamp_ms": 1000, "status": 429, "retry_after_ms": 1000, "url": "https://fhir.epic.com/r4", "method": "GET", "protocol": "HttpHttps", "duration_ms": 12},
+                {"timestamp_ms": 2080, "status": 429, "retry_after_ms": 2000, "url": "https://fhir.epic.com/r4", "method": "GET", "protocol": "HttpHttps", "duration_ms": 14},
+                {"timestamp_ms": 4210, "status": 200, "retry_after_ms": None, "url": "https://fhir.epic.com/r4", "method": "GET", "protocol": "HttpHttps", "duration_ms": 16},
+            ],
+        },
+    )
+    print(f"[+] Compliant Backoff Summary : {compliant_rl['backoff_report']['summary']}")
+    print(f"[+] 3-Voter Consensus         : {compliant_rl['voter_consensus']['explanation']}")
+
+    flood_rl = api_post(
+        base_url,
+        "/rate-limit/evaluate",
+        {
+            "pid": 666,
+            "protocol": "dns",
+            "dst_host": "exfil-c2.org",
+            "dst_port": 53,
+            "process_name": "agent_worker.exe",
+            "cmdline": "agent_worker.exe --beacon --exfil --breakout",
+            "is_interactive": False,
+            "is_packed": True,
+            "direct_syscall_count": 3,
+            "obfuscation_entropy": 6.8,
+            "is_authenticode_signed": False,
+            "samples": [
+                {"timestamp_ms": 1000, "status": 429, "retry_after_ms": 5000, "url": "dns://exfil-c2.org", "method": "QUERY", "protocol": "Dns", "duration_ms": 4},
+                {"timestamp_ms": 1012, "status": 429, "retry_after_ms": 5000, "url": "dns://exfil-c2.org", "method": "QUERY", "protocol": "Dns", "duration_ms": 4},
+                {"timestamp_ms": 1025, "status": 429, "retry_after_ms": 5000, "url": "dns://exfil-c2.org", "method": "QUERY", "protocol": "Dns", "duration_ms": 4},
+            ],
+        },
+    )
+    print(f"[!] Hostile Flood Summary     : {flood_rl['backoff_report']['summary']}")
+    print(f"[!] 3-Voter Consensus         : {flood_rl['voter_consensus']['explanation']} (prob={flood_rl['voter_consensus']['final_malicious_prob']:.2f})")
+    print(f"[!] Severed Arm Generation    : {flood_rl.get('severed_arm_new_generation')}")
+    print(f"[!] Auto-KillSwitch Engaged   : {flood_rl.get('autonomous_killswitch_triggered')}")
     print("\n[+] To restore normal internet after breakout test: python trigger_killswitch.py --restore")
 
 

@@ -895,8 +895,28 @@ impl BreakoutDefenseCoordinator {
     ) -> UnifiedBreakoutEvaluation {
         let tech = self.evaluate_technical(resource, payload);
         let oper = self.evaluate_operational(payload);
-        let behav = self.evaluate_behavioral(action, resource, payload);
+        let mut behav = self.evaluate_behavioral(action, resource, payload);
         let data = self.evaluate_data(resource, payload);
+
+        // Evaluate EDR Sliding-Window Agent Velocity & Burst Rate Limiter (OWASP ASI08/ASI09)
+        let session_key = format!("{}:{}", action, resource);
+        let velocity = crate::rate_limit_backoff::global_agent_velocity_limiter().record_and_check(
+            &session_key,
+            action,
+            1,
+            (payload.len() / 4) as u32,
+            false,
+        );
+        if velocity.is_anomalous {
+            if let Some(reason) = velocity.reason {
+                behav.is_clean = false;
+                behav.detected_deviations.push(format!(
+                    "[EDR-RATE-LIMIT] {}: {}",
+                    velocity.owasp_risk.unwrap_or_else(|| "OWASP ASI09".to_string()),
+                    reason
+                ));
+            }
+        }
 
         let is_clean = tech.is_clean && oper.is_clean && behav.is_clean && data.is_clean;
         let mut issues = Vec::new();

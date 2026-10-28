@@ -1280,3 +1280,223 @@ pub async fn post_octopus_breakout(
         "autonomous_killswitch_triggered": auto_killswitch_triggered,
     })))
 }
+
+// =============================================================================
+// 11. Adapted EDR Multi-Protocol Rate-Limit Backoff, RETE 3-Voter & Agent Velocity
+// =============================================================================
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct RateLimitEvaluateRequest {
+    pub pid: Option<u32>,
+    pub protocol: Option<String>,
+    pub dst_host: String,
+    pub dst_port: Option<u16>,
+    pub process_name: Option<String>,
+    pub cmdline: Option<String>,
+    pub is_interactive: Option<bool>,
+    pub is_packed: Option<bool>,
+    pub direct_syscall_count: Option<u32>,
+    pub obfuscation_entropy: Option<f64>,
+    pub is_authenticode_signed: Option<bool>,
+    pub samples: Option<Vec<killswitch_telemetry::HarEntrySample>>,
+    pub session_id: Option<String>,
+    pub tool_name: Option<String>,
+    pub items_requested: Option<u64>,
+    pub tokens_used: Option<u32>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct RateLimitAllowlistRequest {
+    pub destination_host: String,
+    pub protocol: Option<String>,
+    pub pid: Option<u32>,
+    pub operator: Option<String>,
+    pub reason: Option<String>,
+    pub clear: Option<bool>,
+}
+
+/// GET /rate-limit/status (and /api/rate-limit/status)
+pub async fn get_rate_limit_status() -> Result<Json<serde_json::Value>, ServerError> {
+    let rete = killswitch_telemetry::global_rete_engine();
+    let (har_mem, osq_mem, rea_mem) = rete.alpha_memory_sizes();
+    let allowlist = killswitch_telemetry::RateLimitAllowlist::list_entries();
+    let velocity = killswitch_telemetry::global_agent_velocity_limiter();
+    let http_limiter = &crate::middleware::GLOBAL_HTTP_RATE_LIMITER;
+    let (ctrl_b, heavy_b, gen_b) = http_limiter.active_bucket_counts();
+
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "engine": "EDR Multi-Protocol Rate-Limit & Exponential Backoff + Jitter Correlation Engine (11 Protocols + RETE 3-Voter + Agent Velocity)",
+        "rete_alpha_memories": {
+            "har_flow_facts": har_mem,
+            "osquery_process_facts": osq_mem,
+            "rea_binary_facts": rea_mem,
+        },
+        "http_token_bucket_limiter": {
+            "total_throttled_requests": http_limiter.total_throttled(),
+            "active_control_buckets": ctrl_b,
+            "active_heavy_buckets": heavy_b,
+            "active_general_buckets": gen_b,
+            "control_policy": http_limiter.control_policy,
+            "heavy_policy": http_limiter.heavy_policy,
+            "general_policy": http_limiter.general_policy,
+        },
+        "agent_velocity_limiter": {
+            "active_sessions": velocity.sessions.len(),
+            "rate_limit_per_minute": velocity.rate_limit_per_minute,
+            "subsecond_burst_limit": velocity.subsecond_burst_limit,
+            "batch_threshold": velocity.batch_threshold,
+            "token_burst_threshold": velocity.token_burst_threshold,
+            "max_consecutive_errors": velocity.max_consecutive_errors,
+        },
+        "allowlist_entries": allowlist,
+    })))
+}
+
+/// POST /rate-limit/evaluate (and /api/rate-limit/evaluate)
+pub async fn post_rate_limit_evaluate(
+    State(state): State<Arc<ServerState>>,
+    Json(req): Json<RateLimitEvaluateRequest>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let pid = req.pid.unwrap_or(9900);
+    let proto = killswitch_telemetry::NetworkProtocol::from_str_or_port(
+        req.protocol.as_deref().unwrap_or("https"),
+        req.dst_port,
+    );
+    let samples = req.samples.unwrap_or_default();
+    let backoff_report = killswitch_telemetry::GoogleApiBackoffAnalyzer::evaluate_protocol_stream(
+        proto,
+        &samples,
+    );
+
+    let rete = killswitch_telemetry::global_rete_engine();
+    rete.insert_har_fact(killswitch_telemetry::HarFlowFact {
+        flow_id: format!("flow_{}_{}", pid, req.dst_host),
+        pid,
+        protocol: proto,
+        dst_host: req.dst_host.clone(),
+        dst_port: req.dst_port.unwrap_or(443),
+        samples,
+        backoff_compliant: backoff_report.backoff_compliant,
+        observed_jitter_present: backoff_report.observed_jitter_present,
+        honors_retry_after: backoff_report.honors_retry_after,
+        flood_detected: backoff_report.flood_detected,
+    });
+
+    let proc_name = req.process_name.unwrap_or_else(|| "agent_worker.exe".to_string());
+    let cmdline = req.cmdline.unwrap_or_else(|| format!("{} --connect {}", proc_name, req.dst_host));
+    rete.insert_osquery_fact(killswitch_telemetry::OsqueryProcessFact {
+        pid,
+        process_name: proc_name.clone(),
+        cmdline: cmdline.clone(),
+        is_interactive: req.is_interactive.unwrap_or(false),
+        parent_pid: 1,
+        username: "agent".to_string(),
+    });
+
+    let entropy = req
+        .obfuscation_entropy
+        .unwrap_or_else(|| killswitch_telemetry::compute_shannon_entropy(&req.dst_host));
+    rete.insert_rea_fact(killswitch_telemetry::ReaBinaryFact {
+        pid,
+        binary_path: proc_name.clone(),
+        is_packed: req.is_packed.unwrap_or(false),
+        direct_syscall_count: req.direct_syscall_count.unwrap_or(0),
+        obfuscation_entropy: entropy,
+        is_authenticode_signed: req.is_authenticode_signed.unwrap_or(false),
+        yara_detections: if backoff_report.flood_detected {
+            vec!["EdrRateLimitFlood".to_string()]
+        } else {
+            vec![]
+        },
+    });
+
+    let bundle = rete.evaluate_beta_join(pid).unwrap();
+    let consensus = killswitch_telemetry::global_rate_limit_ensemble().evaluate_and_vote(&bundle);
+
+    let session_id = req
+        .session_id
+        .unwrap_or_else(|| format!("pid_{}_{}", pid, req.dst_host));
+    let velocity_verdict = killswitch_telemetry::global_agent_velocity_limiter().record_and_check(
+        &session_id,
+        req.tool_name.as_deref().unwrap_or("network_egress"),
+        req.items_requested.unwrap_or(1),
+        req.tokens_used.unwrap_or(120),
+        backoff_report.flood_detected,
+    );
+
+    let is_hostile = matches!(
+        consensus.action,
+        killswitch_telemetry::EdrAction::ContainProcessWfpBlock { .. }
+    ) || velocity_verdict.is_anomalous;
+
+    let mut auto_killswitch_triggered = false;
+    let mut severed_arm_gen = None;
+    if is_hostile {
+        let reason_str = format!(
+            "EDR Rate-Limit & Backoff Gate: {} (prob={:.2}, flood={})",
+            consensus.explanation, consensus.final_malicious_prob, backoff_report.flood_detected
+        );
+        if let Ok(gen) = state
+            .arm_registry
+            .sever_and_regenerate_arm(2, &reason_str)
+            .await
+        {
+            severed_arm_gen = Some(gen);
+        }
+        if *state.active_mode.read().await == OrchestratorMode::Autonomous {
+            let _ = state
+                .containment_manager
+                .engage_isolation(
+                    "edr_rate_limit_backoff_voter",
+                    &reason_str,
+                    ContainmentLevel::HermeticIsolation,
+                    None,
+                )
+                .await;
+            *state.last_trigger_cause.write().await = Some((
+                "EDR 3-Voter Rate-Limit & Exponential Backoff Flood Containment".to_string(),
+                format!("PID {} ({}) -> {}", pid, proc_name, req.dst_host),
+                reason_str,
+            ));
+            auto_killswitch_triggered = true;
+        }
+    }
+
+    Ok(Json(serde_json::json!({
+        "backoff_report": backoff_report,
+        "voter_consensus": consensus,
+        "agent_velocity": velocity_verdict,
+        "severed_arm_new_generation": severed_arm_gen,
+        "autonomous_killswitch_triggered": auto_killswitch_triggered,
+    })))
+}
+
+/// POST /rate-limit/allowlist (and /api/rate-limit/allowlist)
+pub async fn post_rate_limit_allowlist(
+    Json(req): Json<RateLimitAllowlistRequest>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    if req.clear.unwrap_or(false) {
+        killswitch_telemetry::RateLimitAllowlist::clear();
+        return Ok(Json(serde_json::json!({
+            "success": true,
+            "message": "Cleared all rate-limit override allowlist entries",
+            "entries": [],
+        })));
+    }
+
+    let entry = killswitch_telemetry::RateLimitReleaseEntry {
+        destination_host: req.destination_host,
+        protocol: req.protocol.unwrap_or_else(|| "*".to_string()),
+        pid: req.pid,
+        operator: req.operator.unwrap_or_else(|| "operator".to_string()),
+        reason: req.reason.unwrap_or_else(|| "Manual operator rate-limit release".to_string()),
+        timestamp_epoch_secs: chrono::Utc::now().timestamp() as u64,
+    };
+    killswitch_telemetry::RateLimitAllowlist::add_entry(entry);
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "entries": killswitch_telemetry::RateLimitAllowlist::list_entries(),
+    })))
+}

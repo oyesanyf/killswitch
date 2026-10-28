@@ -12,6 +12,7 @@ pub mod honeytokens;
 pub mod octopus;
 pub mod otel_lineage;
 pub mod phaselock;
+pub mod rate_limit_backoff;
 pub mod rl_traffic;
 pub mod watchdog;
 
@@ -44,5 +45,15 @@ pub use rl_traffic::{
     LearnedDestinationProfile, OsQueryProcessSocketRow, PolicyEvaluationMetrics,
     RlEmpiricalBenchmarkReport, RlPolicyPersistenceSnapshot, RlTrafficAction, RlTrafficDecision,
     RlTrafficLearner, TrafficFeatureVector, RL_ENVIRONMENT_BACKEND_LABEL,
+};
+pub use rate_limit_backoff::{
+    calculate_exponential_backoff_ms, global_agent_velocity_limiter, global_rate_limit_ensemble,
+    global_rete_engine, rfc6298_next_rto_ms, rfc6298_rto_after_attempts_ms, rfc9002_next_pto_ms,
+    AgentCallRecord, AgentSessionWindow, AgentVelocityRateLimiter, AgentVelocityVerdict,
+    BackoffEvaluationReport, CorrelatedEvidenceBundle, CurveFitResult, DeterministicPhysicsVoter,
+    EdrAction, GenerativeLlmVoter, GoogleApiBackoffAnalyzer, HarEntrySample, HarFlowFact,
+    NetworkProtocol, OpenJevDecisionVoter, OsqueryProcessFact, RateLimitAllowlist,
+    RateLimitReleaseEntry, RateLimitVoterEnsemble, ReaBinaryFact, ReteEngine, VoterConsensus,
+    VoterVerdict,
 };
 pub use watchdog::{HardwareWatchdog, MemoryPressureLevel, WatchdogConfig};
