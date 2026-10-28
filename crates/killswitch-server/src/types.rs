@@ -434,3 +434,53 @@ pub struct ConformalEvaluateRequest {
     #[serde(default)]
     pub reset_stream: Option<bool>,
 }
+
+// =============================================================================
+// Research Breakout Ingest & Google LangExtract DTOs
+// =============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ResearchBreakoutExtraction {
+    pub arxiv_id: String,
+    pub title: String,
+    pub attack_vector: String,
+    pub target_boundary: String,
+    #[serde(default)]
+    pub evasion_technique: Option<String>,
+    #[serde(default)]
+    pub mitigation: Option<String>,
+    #[serde(default)]
+    pub source_char_start: Option<usize>,
+    #[serde(default)]
+    pub source_char_end: Option<usize>,
+    #[serde(default)]
+    pub source_quote: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ResearchIngestRequest {
+    #[serde(default)]
+    pub extractions: Vec<ResearchBreakoutExtraction>,
+    #[serde(default)]
+    pub auto_synthesize_rules: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ResearchCoverageReport {
+    pub attack_vector: String,
+    pub target_boundary: String,
+    pub covered_by_killswitch: bool,
+    pub active_gate: String,
+    pub details: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ResearchIngestResponse {
+    pub success: bool,
+    pub ingested_count: usize,
+    pub evaluated_against_containment: bool,
+    pub coverage_percentage: f64,
+    pub containment_coverage: Vec<ResearchCoverageReport>,
+    pub timestamp: String,
+}
+
