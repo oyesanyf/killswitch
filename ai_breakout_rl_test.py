@@ -27,7 +27,19 @@ if hasattr(sys.stdout, "reconfigure"):
 
 
 def detect_killswitch_url():
-    for port in [3031, 3030, 4040]:
+    ports = [3031, 3030, 3035, 4040]
+    try:
+        with open("active_port.txt", "r") as f:
+            p = int(f.read().strip())
+            if p not in ports:
+                ports.insert(0, p)
+            else:
+                ports.remove(p)
+                ports.insert(0, p)
+    except Exception:
+        pass
+
+    for port in ports:
         url = f"http://127.0.0.1:{port}"
         try:
             req = urllib.request.Request(f"{url}/status", headers={"User-Agent": "KillSwitch-RL-Test"})
