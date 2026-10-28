@@ -1064,6 +1064,32 @@ def generate_interactive_html(annotated_doc: AnnotatedDocument, output_file: str
 # 8. Multi-Target Ingestion & Live Regression Probe Audit
 # =============================================================================
 
+def _build_edr_auth_headers(user_agent: str = "LangExtract-ResearchFeed/1.2") -> Dict[str, str]:
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": user_agent,
+        "Connection": "close",
+    }
+    token = os.environ.get("OSOOSI_DASHBOARD_API_TOKEN", "").strip()
+    if not token:
+        for candidate in [
+            Path("config/dashboard_token.key"),
+            Path(r"D:/harfile/OshoosiClaw/config/dashboard_token.key"),
+        ]:
+            if candidate.exists():
+                try:
+                    token = candidate.read_text(encoding="utf-8").strip()
+                    if token:
+                        break
+                except OSError:
+                    pass
+    if token:
+        headers["X-Osoosi-Token"] = token
+        headers["Authorization"] = f"Bearer {token}"
+        headers["Cookie"] = f"osoosi_token={token}"
+    return headers
+
+
 def ingest_into_killswitch(
     extractions: List[Dict[str, Any]],
     server_url: str = "http://127.0.0.1:3030",
@@ -1079,7 +1105,7 @@ def ingest_into_killswitch(
         endpoint,
         data=payload,
         method="POST",
-        headers={"Content-Type": "application/json", "User-Agent": "LangExtract-ResearchFeed"},
+        headers=_build_edr_auth_headers("LangExtract-ResearchFeed/1.2"),
     )
 
     try:
@@ -1480,10 +1506,7 @@ def edr_live_regression_probe_tool(
                 candidate_url,
                 data=payload_bytes,
                 method="POST",
-                headers={
-                    "Content-Type": "application/json",
-                    "User-Agent": "LangGraph-4Arm-ResearchSwarm/1.2",
-                },
+                headers=_build_edr_auth_headers("LangGraph-4Arm-ResearchSwarm/1.2"),
             )
             try:
                 with urllib.request.urlopen(req, timeout=2) as resp:
