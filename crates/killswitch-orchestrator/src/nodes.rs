@@ -83,6 +83,43 @@ impl LifecycleNode for CorrelateNode {
             state.aggregate_threat_score = 0.85;
         }
 
+        let defense = killswitch_telemetry::global_continuous_defense();
+        let mut continuous_defense_hits = 0usize;
+        for (idx, candidate) in state.active_threats.iter().enumerate() {
+            let resource = candidate
+                .binary_path
+                .as_deref()
+                .unwrap_or(&candidate.proc_name);
+            let payload = candidate
+                .command_line
+                .as_deref()
+                .unwrap_or(&candidate.detection_reason);
+            let verdict = defense.inspect_boundary(
+                &candidate.source_detector,
+                resource,
+                payload,
+                None,
+                (state.execution_trace.len() + idx + 1) as u64,
+            );
+            if !verdict.is_clean {
+                continuous_defense_hits += 1;
+                let risk_f32 = verdict.risk_score as f32;
+                if risk_f32 > state.aggregate_threat_score {
+                    state.aggregate_threat_score = risk_f32;
+                }
+            }
+        }
+
+        let calibrated_sources = defense.calibrated_source_count();
+        state.metadata.insert(
+            "conformal_calibrated_sources".to_string(),
+            calibrated_sources.to_string(),
+        );
+        state.metadata.insert(
+            "continuous_defense_hits".to_string(),
+            continuous_defense_hits.to_string(),
+        );
+
         let score = state.aggregate_threat_score;
 
         Ok(GraphNodeOutput {
@@ -91,7 +128,10 @@ impl LifecycleNode for CorrelateNode {
             candidate_updates: vec![],
             containment_action_taken: None,
             fraud_proofs_emitted: vec![],
-            summary: format!("Correlated signals; aggregate threat score: {:.2}", score),
+            summary: format!(
+                "Correlated signals; aggregate threat score: {:.2} (conformal sources={}, defense hits={})",
+                score, calibrated_sources, continuous_defense_hits
+            ),
         })
     }
 }

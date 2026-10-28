@@ -158,6 +158,42 @@ impl MultiSourceCalibration {
 
         Self::new(proj, None, vec![src1, src2, src3, src4])
     }
+
+    /// Synthesizes a new `CalibratedSource` in the projected PCA space from a grounded research breakout text anchor.
+    pub fn create_source_from_text(&self, text: &str, scale: f64) -> CalibratedSource {
+        let d = self.pca_projection.rows().max(1);
+        let original_dim = self.pca_projection.cols().max(1);
+        let raw_feat = project_text_to_feature_vector(text, original_dim);
+        let projected_mean = self.project(&raw_feat);
+        let id_d = Array2::eye(d);
+        let safe_scale = scale.clamp(0.5, 5.0);
+        let scores: Vec<f64> = (1..=100)
+            .map(|i| {
+                let u = i as f64 / 101.0;
+                safe_scale * (-((1.0 - u).ln()))
+            })
+            .collect();
+        CalibratedSource::new(projected_mean, id_d, scores)
+    }
+
+    /// Appends a new `CalibratedSource` if no existing source has a near-identical mean vector (capped at 64 sources).
+    pub fn add_source_dedup(&mut self, src: CalibratedSource) -> bool {
+        if self.sources.len() >= 64 {
+            return false;
+        }
+        let exists = self.sources.iter().any(|existing| {
+            if existing.mean.len() != src.mean.len() {
+                return false;
+            }
+            let diff = &existing.mean - &src.mean;
+            diff.dot(&diff) < 1e-9
+        });
+        if exists {
+            return false;
+        }
+        self.sources.push(src);
+        true
+    }
 }
 
 /// Step-by-step diagnostic output for the Persist-L detector.
@@ -248,7 +284,11 @@ impl PersistDetector {
         // Equation (3) & (4): Compute C_{k,t} over the window and take C^{fam}_t = min_{k \in [K]} C_{k,t}
         let mut c_fam = f64::INFINITY;
         for k in 0..num_sources {
-            let sum_k: f64 = self.window.iter().map(|step_vec| step_vec[k]).sum();
+            let sum_k: f64 = self
+                .window
+                .iter()
+                .map(|step_vec| step_vec.get(k).copied().unwrap_or(0.0))
+                .sum();
             let c_k_t = sum_k / m_t;
             if c_k_t < c_fam {
                 c_fam = c_k_t;
@@ -286,12 +326,29 @@ impl PersistDetector {
         self.current_step = 0;
         self.first_alarm_step = None;
     }
+
+    /// Dynamically registers a novel research text anchor into the calibration set.
+    /// Returns the total number of calibrated sources after registration.
+    pub fn register_text_anchor(&mut self, text: &str, scale: f64) -> usize {
+        let src = self.calibration.create_source_from_text(text, scale);
+        if self.calibration.add_source_dedup(src) {
+            for step_vec in &mut self.window {
+                step_vec.push(0.0);
+            }
+        }
+        self.calibration.sources.len()
+    }
+
+    pub fn source_count(&self) -> usize {
+        self.calibration.sources.len()
+    }
 }
 
 /// Appendix F: Shiryaev-Roberts detector with DKW-adjusted or raw p-values (SR-DKW / SR-RAW).
 #[derive(Clone, Debug)]
 pub struct SrDetector {
     calibration: MultiSourceCalibration,
+    beta: f64,
     /// Precomputed DKW inflation terms \varepsilon_k(\beta) = \sqrt{\log(2K/\beta) / (2 n_k)}.
     dkw_epsilons: Vec<f64>,
     use_dkw: bool,
@@ -327,6 +384,7 @@ impl SrDetector {
 
         Self {
             calibration,
+            beta,
             dkw_epsilons,
             use_dkw,
             lambda: lambda.clamp(0.0, 1.0),
@@ -335,6 +393,32 @@ impl SrDetector {
             current_step: 0,
             first_alarm_step: None,
         }
+    }
+
+    /// Dynamically registers a novel research text anchor and recomputes DKW inflation bounds.
+    pub fn register_text_anchor(&mut self, text: &str, scale: f64) -> usize {
+        let src = self.calibration.create_source_from_text(text, scale);
+        if self.calibration.add_source_dedup(src) {
+            let k_float = self.calibration.sources.len() as f64;
+            self.dkw_epsilons = self
+                .calibration
+                .sources
+                .iter()
+                .map(|s| {
+                    let n_k = s.calibration_size() as f64;
+                    if n_k > 0.0 {
+                        ((2.0 * k_float / self.beta.max(1e-12)).ln() / (2.0 * n_k)).sqrt()
+                    } else {
+                        0.0
+                    }
+                })
+                .collect();
+        }
+        self.calibration.sources.len()
+    }
+
+    pub fn source_count(&self) -> usize {
+        self.calibration.sources.len()
     }
 
     /// Updates R_{t,\lambda} = (1 + R_{t-1,\lambda}) g_\lambda(\tilde{p}^{fam}_t)
@@ -620,5 +704,21 @@ mod tests {
 
         let power = bounds::nearest_source_power_bound(10, 3, 4, 1.5, 100);
         assert!(power <= 1.0 && power >= 0.0);
+
+        // Verify dynamic novel research anchor registration & deduplication
+        let cal = MultiSourceCalibration::default_calibrated(4, 16);
+        let mut persist = PersistDetector::new(cal.clone(), 5, 2, 1.5);
+        let mut sr = SrDetector::new(cal, 0.05, true, 0.5, 5.0);
+        assert_eq!(persist.source_count(), 4);
+        assert_eq!(sr.source_count(), 4);
+
+        let count_after = persist.register_text_anchor("zombie agent long-term memory persistence attack", 1.6);
+        assert_eq!(count_after, 5);
+        // Duplicate anchor should be deduplicated
+        let count_dup = persist.register_text_anchor("zombie agent long-term memory persistence attack", 1.6);
+        assert_eq!(count_dup, 5);
+
+        let sr_count = sr.register_text_anchor("zombie agent long-term memory persistence attack", 1.6);
+        assert_eq!(sr_count, 5);
     }
 }

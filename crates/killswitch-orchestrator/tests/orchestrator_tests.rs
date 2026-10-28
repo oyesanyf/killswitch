@@ -287,3 +287,59 @@ fn test_zero_os_subprocess_spawning_in_orchestrator() {
     assert!(!files.is_empty(), "Must scan at least one .rs file in killswitch-orchestrator");
 }
 
+#[tokio::test]
+async fn test_orchestrator_correlates_conformal_and_continuous_defense() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let lineage = Arc::new(EndpointLineageEngine::new_in_memory());
+    let adjudicator = Arc::new(ZeroFalsePositiveAdjudicator::new());
+    let containment = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
+
+    // Register a novel research breakout anchor into the global conformal engine
+    let updated_sources = killswitch_telemetry::global_continuous_defense()
+        .register_novel_research_anchor("docker.sock sibling container breakout", 1.6);
+    assert!(updated_sources >= 4);
+
+    let config = OrchestratorConfig {
+        mode: OrchestratorMode::Manual,
+        db_dir: Some(temp_dir.path().to_path_buf()),
+        consecutive_healthy_probes_required: 3,
+        probe_interval_secs: 60,
+        watchdog_max_secs: 1800,
+    };
+
+    let orch = KillSwitchOrchestrator::new(config, containment, adjudicator, lineage);
+    let mut candidate = ThreatCandidate::new(
+        Some(4242),
+        "container_worker.exe",
+        "OctopusSensor",
+        "Attempted /var/run/docker.sock escape",
+        0.90,
+        killswitch_types::adjudication::EvidenceClass::Behavior,
+    );
+    candidate.command_line = Some("curl --unix-socket /var/run/docker.sock http://localhost/containers/create".to_string());
+    orch.submit_threat(candidate).await.unwrap();
+
+    // Step 1: Ingest -> Correlate
+    let _ = orch.step().await.unwrap();
+    // Step 2: Correlate -> Adjudicate (executes ContinuousDefenseEngine + Conformal Guardrail)
+    let t_corr = orch.step().await.unwrap();
+    assert_eq!(t_corr.from_stage, LifecycleStage::Correlate);
+
+    let state = orch.get_state().await;
+    let hits: usize = state
+        .metadata
+        .get("continuous_defense_hits")
+        .unwrap()
+        .parse()
+        .unwrap();
+    let sources: usize = state
+        .metadata
+        .get("conformal_calibrated_sources")
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(hits >= 1, "CorrelateNode must record continuous defense & conformal hit");
+    assert!(sources >= 4, "CorrelateNode must report calibrated conformal sources");
+}
+
+

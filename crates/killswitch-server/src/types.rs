@@ -502,5 +502,7 @@ pub struct ResearchIngestResponse {
     pub all_live_probes_executed: bool,
     #[serde(default)]
     pub novel_enhancement_count: usize,
+    #[serde(default)]
+    pub calibrated_sources_total: usize,
 }
 
