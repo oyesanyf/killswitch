@@ -1500,3 +1500,87 @@ pub async fn post_rate_limit_allowlist(
         "entries": killswitch_telemetry::RateLimitAllowlist::list_entries(),
     })))
 }
+
+// =============================================================================
+// 12. Continuous Security Architecture (Oyesanya 2026 Taxonomy & Vassilev Bound)
+// =============================================================================
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct InspectBoundaryRequest {
+    pub action: String,
+    pub resource: String,
+    pub payload: String,
+    pub destination_url: Option<String>,
+    pub step_index: Option<u64>,
+}
+
+/// GET /resilience/status (and /api/resilience/status)
+pub async fn get_resilience_status() -> Result<Json<serde_json::Value>, ServerError> {
+    let engine = killswitch_telemetry::global_continuous_defense();
+    let report = engine.resilience_tracker().compute_resilience_report();
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "framework": "Beyond One and Done: Continuous Security Architecture for Agentic AI Systems (Oyesanya 2026)",
+        "sisyphean_bound": "Vassilev 2026 (P_secure(N) <= (1 - epsilon_min)^N -> 0)",
+        "report": report,
+    })))
+}
+
+/// POST /octopus/inspect-boundary (and /api/octopus/inspect-boundary)
+pub async fn post_inspect_boundary(
+    State(state): State<Arc<ServerState>>,
+    Json(req): Json<InspectBoundaryRequest>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let engine = killswitch_telemetry::global_continuous_defense();
+    let step = req.step_index.unwrap_or(1);
+    let verdict = engine.inspect_boundary(
+        &req.action,
+        &req.resource,
+        &req.payload,
+        req.destination_url.as_deref(),
+        step,
+    );
+
+    let mut auto_killswitch_triggered = false;
+    let mut severed_arm_gen = None;
+
+    if !verdict.is_clean {
+        let arm_id = match verdict.direction {
+            killswitch_telemetry::BoundaryDirection::BreakIn => 0, // UntrustedDocIngest
+            _ => 2, // NetworkEgress
+        };
+
+        if let Ok(gen) = state
+            .arm_registry
+            .sever_and_regenerate_arm(arm_id, &verdict.summary)
+            .await
+        {
+            severed_arm_gen = Some(gen);
+        }
+
+        if verdict.circuit_breaker_triggered && *state.active_mode.read().await == OrchestratorMode::Autonomous {
+            let _ = state
+                .containment_manager
+                .engage_isolation(
+                    "continuous_defense_circuit_breaker",
+                    &verdict.summary,
+                    ContainmentLevel::HermeticIsolation,
+                    None,
+                )
+                .await;
+            *state.last_trigger_cause.write().await = Some((
+                format!("Oyesanya 2026 Taxonomy: {:?}", verdict.primary_category),
+                format!("{} on {}", req.action, req.resource),
+                verdict.summary.clone(),
+            ));
+            auto_killswitch_triggered = true;
+        }
+    }
+
+    Ok(Json(serde_json::json!({
+        "verdict": verdict,
+        "severed_arm_new_generation": severed_arm_gen,
+        "autonomous_killswitch_triggered": auto_killswitch_triggered,
+        "resilience_metrics": engine.resilience_tracker().compute_resilience_report(),
+    })))
+}

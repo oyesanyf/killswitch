@@ -7,6 +7,7 @@
 pub mod attack;
 pub mod canary;
 pub mod causal;
+pub mod continuous_defense;
 pub mod correlator;
 pub mod honeytokens;
 pub mod octopus;
@@ -22,6 +23,11 @@ pub use attack::{
 };
 pub use canary::{CanaryAuditReport, CanaryDecoyFile, CanaryManager};
 pub use causal::{CausalEdge, CausalEdgeKind, CausalNodeType, CausalSecurityGraph};
+pub use continuous_defense::{
+    global_continuous_defense, BoundaryDirection, BoundaryInspectionVerdict,
+    BoundaryViolationIncident, BreakoutTaxonomyCategory, ContinuousDefenseEngine,
+    OperationalResilienceReport, OperationalResilienceTracker,
+};
 pub use correlator::{EventCorrelator, ProcessCorrelationContext};
 pub use honeytokens::{HoneytokenManager, HoneytokenRecord, HoneytokenType, NativeEphemeralTrap};
 pub use octopus::{

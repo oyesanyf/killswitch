@@ -918,7 +918,6 @@ impl BreakoutDefenseCoordinator {
             }
         }
 
-        let is_clean = tech.is_clean && oper.is_clean && behav.is_clean && data.is_clean;
         let mut issues = Vec::new();
         let mut risk_score: f64 = 0.0;
         if !tech.is_clean {
@@ -937,6 +936,25 @@ impl BreakoutDefenseCoordinator {
             risk_score += 0.40 * (data.detected_violations.len() as f64).min(2.0);
             issues.push(format!("Data ({})", data.detected_violations.join("; ")));
         }
+
+        // Continuous Security Architecture (Oyesanya 2026 Taxonomy & Vassilev Sisyphean Bound)
+        let cont_verdict = crate::continuous_defense::global_continuous_defense().inspect_boundary(
+            action,
+            resource,
+            payload,
+            None,
+            1,
+        );
+        if !cont_verdict.is_clean {
+            behav.is_clean = false;
+            for v in &cont_verdict.detected_violations {
+                behav.detected_deviations.push(v.clone());
+            }
+            issues.push(format!("ContinuousDefense ({})", cont_verdict.detected_violations.join("; ")));
+            risk_score = risk_score.max(cont_verdict.risk_score);
+        }
+
+        let is_clean = tech.is_clean && oper.is_clean && behav.is_clean && data.is_clean && cont_verdict.is_clean;
 
         // Dynamically query live OS process & socket tables for concurrent breakout activity
         let mut live_os_suspicious_processes = Vec::new();
