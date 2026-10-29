@@ -64,10 +64,10 @@ CODEBASE_IMPLEMENTED_PAPERS: Dict[str, str] = {
 
 
 def normalize_arxiv_id(raw_id: str) -> str:
-    """Normalize an arXiv ID by stripping prefixes and version suffixes (e.g. 'arXiv:2610.09167v2' -> '2610.09167')."""
+    """Normalize an arXiv ID by stripping prefixes, version suffixes, and disallowing unsafe characters."""
     if not raw_id:
         return ""
-    clean = raw_id.strip()
+    clean = str(raw_id).strip()[:64]
     if clean.lower().startswith("arxiv:"):
         clean = clean[6:].strip()
     clean = clean.split("/")[-1]
@@ -75,7 +75,8 @@ def normalize_arxiv_id(raw_id: str) -> str:
         parts = clean.split("v", 1)
         if len(parts) == 2 and parts[1].isdigit():
             clean = parts[0]
-    return clean
+    safe = "".join(ch for ch in clean if ch.isalnum() or ch in (".", "-", "_"))
+    return safe[:32]
 
 
 # =============================================================================

@@ -9,6 +9,7 @@ pub mod canary;
 pub mod causal;
 pub mod continuous_defense;
 pub mod correlator;
+pub mod edr_behavioral;
 pub mod honeytokens;
 pub mod octopus;
 pub mod otel_lineage;
@@ -29,6 +30,12 @@ pub use continuous_defense::{
     OperationalResilienceReport, OperationalResilienceTracker,
 };
 pub use correlator::{EventCorrelator, ProcessCorrelationContext};
+pub use edr_behavioral::{
+    evaluate_deterministic_mitre_ioas, global_edr_behavioral_engine, AccountRole,
+    BaselineAnomalyDeviation, EdrBehavioralEngine, EdrBehavioralStatusReport, EdrContainmentAction,
+    EdrSensorTelemetryEvent, EdrThreatNarrative, LineageChainViolation, MitreIoaFinding,
+    OsSensorMechanism, ProcessLineageNode, StatefulProcessLineageTree, WelfordBaselineMetric,
+};
 pub use honeytokens::{HoneytokenManager, HoneytokenRecord, HoneytokenType, NativeEphemeralTrap};
 pub use octopus::{
     validate_egress_url, validate_sandbox_path, ArmContainmentRing, ArmRingConfig,

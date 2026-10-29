@@ -110,6 +110,37 @@ impl LifecycleNode for CorrelateNode {
             }
         }
 
+        let edr_engine = killswitch_telemetry::global_edr_behavioral_engine();
+        let mut edr_narrative_hits = 0usize;
+        for candidate in &state.active_threats {
+            let pid = candidate.pid.unwrap_or(9900);
+            let bin_path = candidate
+                .binary_path
+                .clone()
+                .unwrap_or_else(|| candidate.proc_name.clone());
+            let cmd = candidate
+                .command_line
+                .clone()
+                .unwrap_or_else(|| candidate.detection_reason.clone());
+            let edr_ev = killswitch_telemetry::EdrSensorTelemetryEvent::new_process_create(
+                pid,
+                None,
+                &candidate.proc_name,
+                bin_path,
+                cmd,
+                "orchestrator_candidate",
+            );
+            if let Some(narrative) = edr_engine.ingest_telemetry_event(&edr_ev) {
+                edr_narrative_hits += 1;
+                if narrative.composite_risk_score > state.aggregate_threat_score {
+                    state.aggregate_threat_score = narrative.composite_risk_score;
+                }
+            }
+        }
+        state.metadata.insert(
+            "edr_narrative_hits".to_string(),
+            edr_narrative_hits.to_string(),
+        );
         let calibrated_sources = defense.calibrated_source_count();
         state.metadata.insert(
             "conformal_calibrated_sources".to_string(),

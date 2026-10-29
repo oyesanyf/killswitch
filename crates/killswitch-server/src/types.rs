@@ -652,3 +652,25 @@ pub struct ResearchApproveResponse {
     pub message: String,
     pub timestamp: String,
 }
+
+
+// =============================================================================
+// Continuous EDR Behavioral Anomaly, Process Lineage Tree & Baseline DTOs
+// =============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct EdrBehavioralIngestRequest {
+    #[serde(default)]
+    pub scenario: Option<String>,
+    #[serde(default)]
+    pub events: Vec<killswitch_telemetry::EdrSensorTelemetryEvent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EdrBehavioralIngestResponse {
+    pub success: bool,
+    pub events_processed: usize,
+    pub narratives_emitted: Vec<killswitch_telemetry::EdrThreatNarrative>,
+    pub status: killswitch_telemetry::EdrBehavioralStatusReport,
+    pub timestamp: String,
+}

@@ -58,6 +58,8 @@ struct Cli {
     /// Reject a staged ArXiv research candidate by ID (e.g. 2603.02277)
     #[arg(long)]
     research_reject: Option<String>,
+    #[arg(long)]
+    edr_behavior: bool,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -140,6 +142,11 @@ enum Commands {
 
     /// Run the 6-phase in-memory self-diagnostics
     Verify,
+    /// Inspect or verify the Continuous EDR Behavioral Anomaly & Process Lineage Engine
+    EdrBehavior {
+        #[arg(default_value = "verify-chains")]
+        action: String,
+    },
 
     /// Inspect, stage, approve, or reject ArXiv & LangExtract security research candidates
     Research {
@@ -285,6 +292,10 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
+    if cli.edr_behavior {
+        handle_edr_behavior("verify-chains").await?;
+        return Ok(());
+    }
     if cli.research {
         handle_research(&client, "list", None, None, None, None, None, None, None).await?;
         return Ok(());
@@ -341,6 +352,7 @@ async fn main() -> Result<()> {
             handle_graph(&client, &action, node.as_deref()).await?
         }
         Some(Commands::Verify) => handle_verify().await?,
+        Some(Commands::EdrBehavior { action }) => handle_edr_behavior(&action).await?,
         Some(Commands::Research {
             action,
             id,

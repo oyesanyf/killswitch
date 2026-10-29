@@ -979,6 +979,42 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
         </section>
       </div>
     </details>
+    </details>
+
+    <!-- CONTINUOUS EDR BEHAVIORAL LINEAGE, MITRE ATT&CK IoA & BASELINE MONITOR -->
+    <section class="card" aria-labelledby="edr-beh-heading" style="margin-bottom:20px; border-color: rgba(16, 185, 129, 0.45);">
+      <div class="card-title" id="edr-beh-heading">
+        <span>🛡️ Continuous EDR Behavioral Lineage Tree, MITRE ATT&amp;CK IoA &amp; Statistical Baseline</span>
+        <span class="badge ok" id="edr-beh-badge">ETW / eBPF + Welford Baseline: ACTIVE</span>
+      </div>
+      <p class="card-help">
+        Monitors real-time process lineage trees (<code class="mono">ppid → pid → child</code>), Living-off-the-Land (LotL) execution chains (e.g., <code class="mono">WINWORD.EXE → cmd.exe → powershell.exe -enc → external IP</code>), deterministic MITRE ATT&amp;CK IoAs (LSASS dump <code class="mono">T1003.001</code>, hollowing <code class="mono">T1055.012</code>, rapid encryption + VSS deletion <code class="mono">T1486+T1490</code>), and Welford statistical baselines (service account recon, temp unsigned DLLs, 3&sigma; egress spikes).
+      </p>
+      <div class="btn-row">
+        <button type="button" class="primary" onclick="scanHostEdrBehavioral(this)">🔍 Scan Live Host Process Lineage &amp; Sockets</button>
+        <button type="button" onclick="runEdrBehavioralScenario('lotl_word_powershell', this)">⚡ Verify LotL Chain (Word → cmd → PowerShell -enc)</button>
+        <button type="button" onclick="runEdrBehavioralScenario('ransomware_vss', this)">🚨 Verify Ransomware + VSS Shadow Delete</button>
+        <button type="button" onclick="runEdrBehavioralScenario('baseline_correlation', this)">📈 Verify 3-Anomaly Baseline Narrative Correlation</button>
+      </div>
+      <div id="edr-beh-status" class="toast">EDR Behavioral Lineage &amp; Baseline Engine online.</div>
+      <div tabindex="0" role="region" aria-labelledby="edr-beh-caption" class="table-wrapper">
+        <table>
+          <caption id="edr-beh-caption">Correlated EDR Threat Narratives &amp; Automated Containment Verdicts</caption>
+          <thead>
+            <tr>
+              <th scope="col">Narrative ID</th>
+              <th scope="col">Execution Lineage Chain</th>
+              <th scope="col">MITRE ATT&amp;CK</th>
+              <th scope="col">Composite Risk</th>
+              <th scope="col">Automated Containment Action</th>
+            </tr>
+          </thead>
+          <tbody id="edr-beh-tbody">
+            <tr><th scope="row" colspan="5">Click a verification button or scan live host to inspect correlated threat narratives...</th></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
   </main>
 
   <script>
@@ -2115,7 +2151,62 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       });
     }
 
+    async function refreshEdrBehavioral() {
+      try {
+        const st = await api('/api/edr/behavioral/status');
+        const badge = document.getElementById('edr-beh-badge');
+        if (badge) {
+          badge.textContent = 'Lineage Nodes: ' + (st.tracked_processes_in_lineage_tree || 0) + ' | IoAs: ' + (st.total_ioa_matches || 0) + ' | Narratives: ' + ((st.active_narratives || []).length);
+        }
+        const tbody = document.getElementById('edr-beh-tbody');
+        if (tbody && Array.isArray(st.active_narratives) && st.active_narratives.length > 0) {
+          tbody.innerHTML = st.active_narratives.map(n => {
+            const actionStr = n.containment_action ? n.containment_action.action_type : 'monitor_only';
+            return '<tr>' +
+              '<th scope="row" class="mono">' + (n.narrative_id || '-') + '</th>' +
+              '<td class="mono">' + (n.lineage_chain || '-') + '</td>' +
+              '<td class="mono">' + ((n.mitre_techniques || []).join(', ')) + '</td>' +
+              '<td><strong>' + Number(n.composite_risk_score || 0).toFixed(2) + '</strong> (' + (n.severity || 'low') + ')</td>' +
+              '<td class="mono">' + actionStr + '</td>' +
+            '</tr>';
+          }).join('');
+        }
+      } catch (_e) {}
+    }
+
+    async function scanHostEdrBehavioral(btn) {
+      return withButtonFeedback(btn, '🔍 Scanning Host Lineage...', async () => {
+        try {
+          const st = await api('/api/edr/behavioral/scan-host', { method: 'POST', body: '{}' });
+          await refreshEdrBehavioral();
+          setCardStatus('edr-beh-status', '✅ Scanned Live Host Lineage: ' + st.tracked_processes_in_lineage_tree + ' processes tracked across ' + st.learned_baseline_profiles + ' Welford baseline profiles.', 'ok');
+        } catch (e) {
+          setCardStatus('edr-beh-status', '❌ Scan error: ' + e.message, 'danger');
+        }
+      });
+    }
+
+    async function runEdrBehavioralScenario(scenario, btn) {
+      return withButtonFeedback(btn, '⚡ Correlating Telemetry...', async () => {
+        try {
+          const res = await api('/api/edr/behavioral/ingest', {
+            method: 'POST',
+            body: JSON.stringify({ scenario: scenario })
+          });
+          await refreshEdrBehavioral();
+          const topNar = (res.narratives_emitted || [])[res.narratives_emitted.length - 1];
+          const msg = topNar
+            ? ('🚨 Correlated Narrative [' + topNar.narrative_id + ']: ' + topNar.narrative_summary + ' | Action: ' + topNar.containment_action.action_type)
+            : ('Evaluated ' + res.events_processed + ' telemetry events.');
+          setCardStatus('edr-beh-status', msg, 'warn');
+        } catch (e) {
+          setCardStatus('edr-beh-status', '❌ Scenario error: ' + e.message, 'danger');
+        }
+      });
+    }
+
     refreshAll(false);
+    refreshEdrBehavioral();
     setInterval(() => refreshAll(false), 5000);
   </script>
 </body>

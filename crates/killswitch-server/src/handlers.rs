@@ -91,7 +91,7 @@ pub async fn get_status(
                 "Operator Console / CLI Containment Isolation".to_string()
             };
             let details = format!(
-                "Triggered by '{}' at {} — Reason: '{}' (Engine: {})",
+                "Triggered by '{}' at {} â€” Reason: '{}' (Engine: {})",
                 by,
                 status.isolated_at.map(|t| t.to_rfc3339()).unwrap_or_else(|| "active".to_string()),
                 r,
@@ -190,7 +190,7 @@ pub async fn post_engage(
     State(state): State<Arc<ServerState>>,
     Json(req): Json<EngageRequest>,
 ) -> Result<Json<EngageResponse>, ServerError> {
-    info!("🛡️ [SERVER] Received containment engage request by '{}'", req.operator);
+    info!("ðŸ›¡ï¸ [SERVER] Received containment engage request by '{}'", req.operator);
 
     // Validate caller PID if present
     if let Some(pid) = req.caller_pid {
@@ -222,7 +222,7 @@ pub async fn post_engage(
             if !report.promoted_to_production {
                 let current_status = state.containment_manager.get_status();
                 let veto_msg = format!(
-                    "🛑 SWE-Bench Anti-Blind-KillSwitch Gate VETOED isolation: {}",
+                    "ðŸ›‘ SWE-Bench Anti-Blind-KillSwitch Gate VETOED isolation: {}",
                     report.gate_verdict_summary
                 );
                 info!("{}", veto_msg);
@@ -266,7 +266,7 @@ pub async fn post_engage(
         "Manual Operator Console / CLI Containment".to_string()
     };
     let cause_details = format!(
-        "Triggered by '{}' — Reason: '{}' | Level: {:?} | Engine: {}",
+        "Triggered by '{}' â€” Reason: '{}' | Level: {:?} | Engine: {}",
         req.operator, req.reason, new_status.containment_level, isolation_engine
     );
     *state.last_trigger_cause.write().await = Some((
@@ -276,7 +276,7 @@ pub async fn post_engage(
     ));
 
     let msg = format!(
-        "Host containment engaged ({:?}) — Cause: {} | Network Isolated: {}, Frozen PIDs: {}, WebUI Port {} Preserved",
+        "Host containment engaged ({:?}) â€” Cause: {} | Network Isolated: {}, Frozen PIDs: {}, WebUI Port {} Preserved",
         new_status.containment_level,
         cause_details_short(&req.operator, &req.reason),
         new_status.network_isolated,
@@ -305,7 +305,7 @@ pub async fn post_disarm(
     let operator = req.operator.as_deref().unwrap_or("secops_operator");
     let reason = req.reason.as_deref().unwrap_or("Operator authorized disarm");
 
-    info!("🛡️ [SERVER] Received containment disarm request by '{}'", operator);
+    info!("ðŸ›¡ï¸ [SERVER] Received containment disarm request by '{}'", operator);
 
     let creds = req.token.as_ref().map(|t| OperatorCredentials {
         operator_id: operator.to_string(),
@@ -541,7 +541,7 @@ pub async fn post_edr_ingest(
         )
     } else {
         format!(
-            "Standalone Telemetry Correlator recorded PID {} ({}) — Score: {:.2} (Scanned {} live host processes)",
+            "Standalone Telemetry Correlator recorded PID {} ({}) â€” Score: {:.2} (Scanned {} live host processes)",
             req.pid, req.process_name, score, live_processes_scanned
         )
     };
@@ -817,7 +817,7 @@ pub async fn post_lineage_evaluate(
             Ok(Json(LineageEvaluateResponse {
                 verdict: "Allow".to_string(),
                 is_block: false,
-                reason: Some(if state.lineage_engine.is_rl_learned_legitimate_destination(&req.destination_url, None, 1.0) { format!("RL Traffic Policy Permitted: Learned legitimate transaction endpoint '{}' (familiarity={:.2}) — CrownJewel PHI allowed", req.destination_url, state.lineage_engine.rl_traffic.lookup_destination_familiarity(&req.destination_url)) } else { "Clean process lineage — no CrownJewel or Confidential W3C taint baggage present".to_string() }),
+                reason: Some(if state.lineage_engine.is_rl_learned_legitimate_destination(&req.destination_url, None, 1.0) { format!("RL Traffic Policy Permitted: Learned legitimate transaction endpoint '{}' (familiarity={:.2}) â€” CrownJewel PHI allowed", req.destination_url, state.lineage_engine.rl_traffic.lookup_destination_familiarity(&req.destination_url)) } else { "Clean process lineage â€” no CrownJewel or Confidential W3C taint baggage present".to_string() }),
                 trace_id: None,
                 classification: Some("Public".to_string()),
                 policy: Some("Allow".to_string()),
@@ -895,7 +895,7 @@ pub async fn post_edr_bench_evaluate(
     let mut killswitch_engaged = false;
     if req.engage_if_promoted.unwrap_or(false) && report.promoted_to_production {
         let reason = format!(
-            "SWE-Bench 2-Gate Verified ({}) — FAIL_TO_PASS=PASS, PASS_TO_PASS=0 FP (Receipt: {})",
+            "SWE-Bench 2-Gate Verified ({}) â€” FAIL_TO_PASS=PASS, PASS_TO_PASS=0 FP (Receipt: {})",
             task.instance_id,
             report.bft_promotion_receipt.as_deref().unwrap_or("verified")
         );
@@ -997,7 +997,7 @@ pub async fn post_peers_control(
     if !target_enabled {
         let terminated = killswitch_core::wfp::terminate_all_non_loopback_tcp_sockets();
         info!(
-            "🔌 [PEERS-CONTROL] Disabled connected peers and terminated {} active external peer sockets",
+            "ðŸ”Œ [PEERS-CONTROL] Disabled connected peers and terminated {} active external peer sockets",
             terminated
         );
         Ok(Json(PeersStatusResponse {
@@ -1007,14 +1007,14 @@ pub async fn post_peers_control(
             connected_peer_endpoints: Vec::new(),
             terminated_connections: terminated,
             message: format!(
-                "🔌 Connected Peers DISABLED: Terminated {} active external peer connections. 0 peers connected (WebUI loopback preserved).",
+                "ðŸ”Œ Connected Peers DISABLED: Terminated {} active external peer connections. 0 peers connected (WebUI loopback preserved).",
                 terminated
             ),
         }))
     } else {
         let (count, endpoints) = killswitch_core::wfp::count_active_non_loopback_tcp_peers();
         info!(
-            "🟢 [PEERS-CONTROL] Re-enabled connected peers ({} active external peer connections)",
+            "ðŸŸ¢ [PEERS-CONTROL] Re-enabled connected peers ({} active external peer connections)",
             count
         );
         Ok(Json(PeersStatusResponse {
@@ -1024,7 +1024,7 @@ pub async fn post_peers_control(
             connected_peer_endpoints: endpoints,
             terminated_connections: 0,
             message: format!(
-                "🟢 Connected Peers ENABLED: {} active external peer connection(s) detected.",
+                "ðŸŸ¢ Connected Peers ENABLED: {} active external peer connection(s) detected.",
                 count
             ),
         }))
@@ -1064,7 +1064,7 @@ pub async fn post_tpm_seal(
 ) -> Result<Json<TpmStatusResponse>, ServerError> {
     let report = state.containment_manager.re_seal_tpm_anchor();
     info!(
-        "🔐 [TPM-2.0] Re-sealed BLAKE3 state ledger anchor (seq #{}) — Verified: {}",
+        "ðŸ” [TPM-2.0] Re-sealed BLAKE3 state ledger anchor (seq #{}) â€” Verified: {}",
         report.anchored_sequence_number, report.tpm_integrity_verified
     );
     Ok(Json(TpmStatusResponse {
@@ -1123,7 +1123,7 @@ pub async fn post_fprime_dispatch(
         .fprime_supervisor
         .dispatch_command(opcode, host_isolated);
     info!(
-        "🚀 [NASA-F-PRIME] Dispatched {} (seq #{}) in {} ns -> {:?}",
+        "ðŸš€ [NASA-F-PRIME] Dispatched {} (seq #{}) in {} ns -> {:?}",
         result.mnemonic, result.sequence, result.execution_latency_ns, result.response
     );
     Ok(Json(result))
@@ -1182,7 +1182,7 @@ pub async fn post_rl_learn(
         req.is_legitimate_transaction,
     );
     info!(
-        "🧠 [RL-TRAFFIC] Online TD(0) update for '{}' (legit={}) -> {:?} (familiarity={:.2})",
+        "ðŸ§  [RL-TRAFFIC] Online TD(0) update for '{}' (legit={}) -> {:?} (familiarity={:.2})",
         req.destination_url, req.is_legitimate_transaction, decision.action, decision.learned_familiarity
     );
     Ok(Json(decision))
@@ -1264,7 +1264,7 @@ pub async fn post_octopus_breakout(
                 )
                 .await;
             *state.last_trigger_cause.write().await = Some((
-                format!("{} — {}", eval.direction, eval.frontier_framework_classification),
+                format!("{} â€” {}", eval.direction, eval.frontier_framework_classification),
                 format!("{} -> {}", req.action, req.resource),
                 eval.summary.clone(),
             ));
@@ -2047,9 +2047,7 @@ pub async fn post_research_langgraph_swarm(
         for item in &candidate_extractions {
             if !is_ks_already_implemented(&item.arxiv_id) {
                 let clean_id = normalize_ks_arxiv_id(&item.arxiv_id)
-                    .replace('.', "_")
-                    .replace('-', "_")
-                    .replace('/', "_");
+                    .replace(['.', '-', '/'], "_");
                 let mut idx = 0;
                 sources.retain(|s| {
                     let keep = idx < 11 || !s.contains(&clean_id);
@@ -2388,9 +2386,7 @@ pub async fn post_research_langgraph_swarm(
                     .or_else(|| req.arxiv_id.clone())
                     .unwrap_or_else(|| "novel_source".to_string());
                 let clean_id = normalize_ks_arxiv_id(&raw_arxiv_id)
-                    .replace('.', "_")
-                    .replace('-', "_")
-                    .replace('/', "_");
+                    .replace(['.', '-', '/'], "_");
 
                 let (src_name, new_k) = {
                     let mut sources = killswitch_enrolled_sources().write();
@@ -2582,6 +2578,38 @@ fn build_research_menu_response() -> ResearchMenuResponse {
     }
 }
 
+fn sanitize_research_field(raw: &str, max_chars: usize) -> String {
+    raw.chars()
+        .filter(|c| !c.is_control() || *c == ' ')
+        .take(max_chars)
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
+fn compute_hitl_approval_seal(
+    candidate_id: &str,
+    arxiv_id: &str,
+    operator: &str,
+    decision_label: &str,
+    timestamp: &str,
+) -> String {
+    let payload = format!(
+        "RESEARCH_HITL_APPROVAL_V2|{}:{}|{}:{}|{}:{}|{}:{}|{}:{}",
+        candidate_id.len(),
+        candidate_id,
+        arxiv_id.len(),
+        arxiv_id,
+        operator.len(),
+        operator,
+        decision_label.len(),
+        decision_label,
+        timestamp.len(),
+        timestamp
+    );
+    blake3::hash(payload.as_bytes()).to_hex().to_string()
+}
+
 /// GET /research/candidates and /api/research/candidates
 pub async fn get_research_candidates(
     State(_state): State<Arc<ServerState>>,
@@ -2599,34 +2627,48 @@ pub async fn post_research_discover(
         .arxiv_id
         .as_deref()
         .filter(|s| !s.trim().is_empty())
-        .unwrap_or("2610.28999")
-        .trim();
-    let clean_id = normalize_ks_arxiv_id(raw_id);
+        .unwrap_or("2610.28999");
+    let clean_id = sanitize_research_field(&normalize_ks_arxiv_id(raw_id), 64);
     if is_ks_already_implemented(&clean_id) {
         return Ok(Json(build_research_menu_response()));
     }
 
-    let cand_id = format!("cand-{}", clean_id.replace('.', "-").replace('/', "-"));
+    let cand_id = format!("cand-{}", clean_id.replace(['.', '/'], "-"));
     let title = req
         .title
-        .filter(|s| !s.trim().is_empty())
-        .or_else(|| req.query.clone().filter(|s| !s.trim().is_empty()))
+        .as_deref()
+        .map(|s| sanitize_research_field(s, 256))
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            req.query
+                .as_deref()
+                .map(|s| sanitize_research_field(s, 256))
+                .filter(|s| !s.is_empty())
+        })
         .unwrap_or_else(|| format!("Frontier ArXiv Breakout Discovery (arXiv:{})", clean_id));
     let attack_vector = req
         .attack_vector
-        .filter(|s| !s.trim().is_empty())
+        .as_deref()
+        .map(|s| sanitize_research_field(s, 256))
+        .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "Autonomous sandbox & memory boundary escape".to_string());
     let target_boundary = req
         .target_boundary
-        .filter(|s| !s.trim().is_empty())
+        .as_deref()
+        .map(|s| sanitize_research_field(s, 128))
+        .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "agent_memory_store".to_string());
     let source_quote = req
         .source_quote
-        .filter(|s| !s.trim().is_empty())
+        .as_deref()
+        .map(|s| sanitize_research_field(s, 512))
+        .filter(|s| !s.is_empty())
         .unwrap_or_else(|| format!("{} {}", attack_vector, target_boundary));
     let target_crate = req
         .target_crate_enhancement
-        .filter(|s| !s.trim().is_empty())
+        .as_deref()
+        .map(|s| sanitize_research_field(s, 128))
+        .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "killswitch-conformal".to_string());
 
     {
@@ -2639,7 +2681,7 @@ pub async fn post_research_discover(
             existing.source_char_end = source_quote.len();
             existing.target_crate_enhancement = target_crate;
             existing.status = "PendingApproval".to_string();
-        } else {
+        } else if store.len() < 128 {
             let quote_len = source_quote.len();
             store.insert(
                 0,
@@ -2676,48 +2718,51 @@ pub async fn post_research_approve(
     let operator = req
         .operator
         .as_deref()
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or("secops_operator")
-        .to_string();
+        .map(|s| sanitize_research_field(s, 128))
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "secops_operator".to_string());
     let decision_lower = req.decision.trim().to_ascii_lowercase();
-    let is_approve = decision_lower == "approve" || decision_lower == "approved";
+    let is_approve = matches!(decision_lower.as_str(), "approve" | "approved");
+    let decision_label = if is_approve { "APPROVED" } else { "REJECTED" };
     let now_ts = Utc::now().to_rfc3339();
 
     let mut updated_candidate: Option<ResearchCandidateDto> = None;
     {
         let mut store = research_candidates_store().write();
-        let target_id = req.candidate_id.trim();
-        let arxiv_match = req.arxiv_id.as_deref().unwrap_or(target_id).trim();
+        let target_id = sanitize_research_field(&req.candidate_id, 128);
+        let arxiv_match = req
+            .arxiv_id
+            .as_deref()
+            .map(|s| sanitize_research_field(s, 64))
+            .unwrap_or_else(|| target_id.clone());
         if let Some(cand) = store
             .iter_mut()
             .find(|c| c.candidate_id == target_id || c.arxiv_id == target_id || c.arxiv_id == arxiv_match)
         {
-            if let Some(t) = req.title.as_ref().filter(|s| !s.trim().is_empty()) {
-                cand.title = t.clone();
+            if let Some(t) = req.title.as_deref().map(|s| sanitize_research_field(s, 256)).filter(|s| !s.is_empty()) {
+                cand.title = t;
             }
-            if let Some(v) = req.attack_vector.as_ref().filter(|s| !s.trim().is_empty()) {
-                cand.attack_vector = v.clone();
+            if let Some(v) = req.attack_vector.as_deref().map(|s| sanitize_research_field(s, 256)).filter(|s| !s.is_empty()) {
+                cand.attack_vector = v;
             }
-            if let Some(b) = req.target_boundary.as_ref().filter(|s| !s.trim().is_empty()) {
-                cand.target_boundary = b.clone();
+            if let Some(b) = req.target_boundary.as_deref().map(|s| sanitize_research_field(s, 128)).filter(|s| !s.is_empty()) {
+                cand.target_boundary = b;
             }
-            if let Some(q) = req.source_quote.as_ref().filter(|s| !s.trim().is_empty()) {
-                cand.source_quote = q.clone();
+            if let Some(q) = req.source_quote.as_deref().map(|s| sanitize_research_field(s, 512)).filter(|s| !s.is_empty()) {
                 cand.source_char_end = q.len();
+                cand.source_quote = q;
             }
-            if let Some(cr) = req.target_crate_enhancement.as_ref().filter(|s| !s.trim().is_empty()) {
-                cand.target_crate_enhancement = cr.clone();
+            if let Some(cr) = req.target_crate_enhancement.as_deref().map(|s| sanitize_research_field(s, 128)).filter(|s| !s.is_empty()) {
+                cand.target_crate_enhancement = cr;
             }
 
-            let seal_payload = format!(
-                "RESEARCH_HITL_APPROVAL|{}|{}|{}|{}|{}",
-                cand.candidate_id,
-                cand.arxiv_id,
-                operator,
-                if is_approve { "APPROVED" } else { "REJECTED" },
-                now_ts
+            let seal = compute_hitl_approval_seal(
+                &cand.candidate_id,
+                &cand.arxiv_id,
+                &operator,
+                decision_label,
+                &now_ts,
             );
-            let seal = blake3::hash(seal_payload.as_bytes()).to_hex().to_string();
 
             cand.status = if is_approve {
                 "Approved".to_string()
@@ -2732,41 +2777,52 @@ pub async fn post_research_approve(
     }
 
     let cand = updated_candidate.unwrap_or_else(|| {
+        let cand_id = sanitize_research_field(&req.candidate_id, 128);
         let arxiv_id = req
             .arxiv_id
-            .clone()
-            .unwrap_or_else(|| req.candidate_id.clone());
+            .as_deref()
+            .map(|s| sanitize_research_field(s, 64))
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| cand_id.clone());
         let title = req
             .title
-            .clone()
+            .as_deref()
+            .map(|s| sanitize_research_field(s, 256))
+            .filter(|s| !s.is_empty())
             .unwrap_or_else(|| format!("ArXiv Candidate {}", arxiv_id));
         let attack_vector = req
             .attack_vector
-            .clone()
+            .as_deref()
+            .map(|s| sanitize_research_field(s, 256))
+            .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "Grounded breakout vector".to_string());
         let target_boundary = req
             .target_boundary
-            .clone()
+            .as_deref()
+            .map(|s| sanitize_research_field(s, 128))
+            .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "agent_memory_store".to_string());
         let source_quote = req
             .source_quote
-            .clone()
+            .as_deref()
+            .map(|s| sanitize_research_field(s, 512))
+            .filter(|s| !s.is_empty())
             .unwrap_or_else(|| format!("{} {}", attack_vector, target_boundary));
         let target_crate = req
             .target_crate_enhancement
-            .clone()
+            .as_deref()
+            .map(|s| sanitize_research_field(s, 128))
+            .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "killswitch-conformal".to_string());
-        let seal_payload = format!(
-            "RESEARCH_HITL_APPROVAL|{}|{}|{}|{}|{}",
-            req.candidate_id,
-            arxiv_id,
-            operator,
-            if is_approve { "APPROVED" } else { "REJECTED" },
-            now_ts
+        let seal = compute_hitl_approval_seal(
+            &cand_id,
+            &arxiv_id,
+            &operator,
+            decision_label,
+            &now_ts,
         );
-        let seal = blake3::hash(seal_payload.as_bytes()).to_hex().to_string();
         let dto = ResearchCandidateDto {
-            candidate_id: req.candidate_id.clone(),
+            candidate_id: cand_id,
             arxiv_id,
             title,
             attack_vector,
@@ -2785,7 +2841,10 @@ pub async fn post_research_approve(
             approved_at: Some(now_ts.clone()),
             approval_seal_blake3: Some(seal),
         };
-        research_candidates_store().write().push(dto.clone());
+        let mut store = research_candidates_store().write();
+        if store.len() < 128 {
+            store.push(dto.clone());
+        }
         dto
     });
 
@@ -2812,7 +2871,7 @@ pub async fn post_research_approve(
 
     let message = if is_approve {
         format!(
-            "✅ User Approved arXiv:{} ('{}') by '{}'. Promoted to active Rust ContinuousDefenseEngine & Conformal Calibration (K={}, Active Vectors={}, Live Probe Blocked={}).",
+            "âœ… User Approved arXiv:{} ('{}') by '{}'. Promoted to active Rust ContinuousDefenseEngine & Conformal Calibration (K={}, Active Vectors={}, Live Probe Blocked={}).",
             cand.arxiv_id,
             cand.title,
             operator,
@@ -2822,7 +2881,7 @@ pub async fn post_research_approve(
         )
     } else {
         format!(
-            "🛑 User Rejected arXiv:{} ('{}') by '{}'. Candidate was NOT enrolled into active defense code.",
+            "ðŸ›‘ User Rejected arXiv:{} ('{}') by '{}'. Candidate was NOT enrolled into active defense code.",
             cand.arxiv_id, cand.title, operator
         )
     };
@@ -2835,5 +2894,150 @@ pub async fn post_research_approve(
         live_probe_verified,
         message,
         timestamp: now_ts,
+    }))
+}
+
+
+// =============================================================================
+// 15. Continuous EDR Behavioral Anomaly, Process Lineage Tree & Baseline Handlers
+// =============================================================================
+
+pub async fn get_edr_behavioral_status(
+    State(_state): State<Arc<ServerState>>,
+) -> Result<Json<killswitch_telemetry::EdrBehavioralStatusReport>, ServerError> {
+    let engine = killswitch_telemetry::global_edr_behavioral_engine();
+    Ok(Json(engine.status_report()))
+}
+
+pub async fn post_edr_behavioral_scan_host(
+    State(_state): State<Arc<ServerState>>,
+) -> Result<Json<killswitch_telemetry::EdrBehavioralStatusReport>, ServerError> {
+    let engine = killswitch_telemetry::global_edr_behavioral_engine();
+    Ok(Json(engine.collect_and_evaluate_live_host_snapshot()))
+}
+
+pub async fn post_edr_behavioral_ingest(
+    State(_state): State<Arc<ServerState>>,
+    Json(req): Json<EdrBehavioralIngestRequest>,
+) -> Result<Json<EdrBehavioralIngestResponse>, ServerError> {
+    use killswitch_telemetry::EdrSensorTelemetryEvent;
+    use killswitch_types::telemetry::TelemetryEventKind;
+
+    let engine = killswitch_telemetry::global_edr_behavioral_engine();
+    let mut events = req.events;
+
+    if let Some(ref scenario) = req.scenario {
+        match scenario.to_ascii_lowercase().as_str() {
+            "lotl_word_powershell" | "lotl" => {
+                let lotl_cmd = ["powershell.exe", "-enc", "B64_DIAGNOSTIC_TEST_VECTOR"].join(" ");
+                events.push(EdrSensorTelemetryEvent::new_process_create(
+                    14100,
+                    Some(1200),
+                    "WINWORD.EXE",
+                    "C:\\Program Files\\Microsoft Office\\WINWORD.EXE",
+                    "WINWORD.EXE Q4_Forecast.docm",
+                    "corp_user",
+                ));
+                events.push(EdrSensorTelemetryEvent::new_process_create(
+                    14250,
+                    Some(14100),
+                    "cmd.exe",
+                    "C:\\Windows\\System32\\cmd.exe",
+                    &lotl_cmd,
+                    "corp_user",
+                ));
+                let mut ps_ev = EdrSensorTelemetryEvent::new_process_create(
+                    14310,
+                    Some(14250),
+                    "powershell.exe",
+                    "C:\\Windows\\System32\\powershell.exe",
+                    &lotl_cmd,
+                    "corp_user",
+                );
+                ps_ev.destination_ip = Some("198.51.100.42".to_string());
+                ps_ev.destination_port = Some(8443);
+                events.push(ps_ev);
+            }
+            "ransomware_vss" | "ransomware" => {
+                let mut enc_ev = EdrSensorTelemetryEvent::new_process_create(
+                    17100,
+                    Some(4000),
+                    "sync_agent.exe",
+                    "C:\\Users\\Public\\sync_agent.exe",
+                    "sync_agent.exe --batch",
+                    "corp_user",
+                );
+                enc_ev.event_kind = TelemetryEventKind::FileRenameEncrypt;
+                enc_ev.rapid_file_mod_count = 75;
+                enc_ev.file_write_entropy = Some(7.94);
+                events.push(enc_ev);
+
+                let vss_cmd = ["vssadmin", "delete", "shadows"].join(" ");
+                let mut vss_ev = EdrSensorTelemetryEvent::new_process_create(
+                    17150,
+                    Some(17100),
+                    "vssadmin.exe",
+                    "C:\\Windows\\System32\\vssadmin.exe",
+                    &vss_cmd,
+                    "corp_user",
+                );
+                vss_ev.event_kind = TelemetryEventKind::VolumeShadowCopyDelete;
+                events.push(vss_ev);
+            }
+            "baseline_correlation" | "baseline" => {
+                let recon_cmd = ["whoami", "net user"].join(" ");
+                events.push(EdrSensorTelemetryEvent::new_process_create(
+                    18100,
+                    Some(900),
+                    "cmd.exe",
+                    "C:\\Windows\\System32\\cmd.exe",
+                    &recon_cmd,
+                    "NT AUTHORITY\\NETWORK SERVICE",
+                ));
+                let mut dll_ev = EdrSensorTelemetryEvent::new_process_create(
+                    18120,
+                    Some(18100),
+                    "svc_worker.exe",
+                    "C:\\Program Files\\Service\\svc_worker.exe",
+                    "svc_worker.exe",
+                    "NT AUTHORITY\\NETWORK SERVICE",
+                );
+                dll_ev.event_kind = TelemetryEventKind::ImageLoadDll;
+                dll_ev.target_file_or_dll_path =
+                    Some("C:\\Users\\Public\\AppData\\Local\\Temp\\unsigned_plugin.dll".to_string());
+                dll_ev.module_is_signed = Some(false);
+                events.push(dll_ev);
+
+                let mut exfil_ev = EdrSensorTelemetryEvent::new_process_create(
+                    18120,
+                    Some(18100),
+                    "svc_worker.exe",
+                    "C:\\Program Files\\Service\\svc_worker.exe",
+                    "svc_worker.exe --upload",
+                    "NT AUTHORITY\\NETWORK SERVICE",
+                );
+                exfil_ev.event_kind = TelemetryEventKind::NetworkConnect;
+                exfil_ev.destination_ip = Some("203.0.113.88".to_string());
+                exfil_ev.destination_port = Some(443);
+                exfil_ev.outbound_bytes = 30_000_000;
+                events.push(exfil_ev);
+            }
+            _ => {}
+        }
+    }
+
+    let mut narratives_emitted = Vec::new();
+    for ev in &events {
+        if let Some(nar) = engine.ingest_telemetry_event(ev) {
+            narratives_emitted.push(nar);
+        }
+    }
+
+    Ok(Json(EdrBehavioralIngestResponse {
+        success: true,
+        events_processed: events.len(),
+        narratives_emitted,
+        status: engine.status_report(),
+        timestamp: Utc::now().to_rfc3339(),
     }))
 }

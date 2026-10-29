@@ -570,7 +570,10 @@ impl ThreatVoter for BehaviorVoter {
                 },
                 confidence: conf,
                 evidence_class: EvidenceClass::Behavior,
-                explanation: format!("[Behavior] Confirmed behavioral telemetry: {}", candidate.detection_reason),
+                explanation: format!(
+                    "[Behavior] Confirmed behavioral telemetry: {}",
+                    candidate.detection_reason
+                ),
                 voter_name: self.name().to_string(),
                 weight: 1.0,
                 timestamp: chrono::Utc::now().to_rfc3339(),

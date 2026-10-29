@@ -198,13 +198,13 @@ impl RlTrafficLearner {
     fn initial_calibrated_weights() -> [[f64; TrafficFeatureVector::DIM]; 4] {
         // Features: [bias, host_entropy, familiarity, proc_trust, taint_level, port_anomaly, ai_breakout]
         [
-            // Action 0: Allow — strongly favored when familiarity & proc_trust are high and breakout/entropy are low
+            // Action 0: Allow â€” strongly favored when familiarity & proc_trust are high and breakout/entropy are low
             [0.35, -1.40, 2.20, 0.90, -0.55, -0.80, -2.80],
-            // Action 1: Audit — favored for moderate familiarity with sensitive taint
+            // Action 1: Audit â€” favored for moderate familiarity with sensitive taint
             [0.20, -0.40, 0.85, 0.40, 0.45, -0.20, -1.20],
-            // Action 2: BlockConnection — favored when unfamiliar destination + high taint or high entropy
+            // Action 2: BlockConnection â€” favored when unfamiliar destination + high taint or high entropy
             [-0.25, 1.35, -1.60, -0.50, 1.25, 0.95, 1.40],
-            // Action 3: HermeticQuarantine — strongly favored when AI breakout signal or CrownJewel exfiltration to untrusted sink
+            // Action 3: HermeticQuarantine â€” strongly favored when AI breakout signal or CrownJewel exfiltration to untrusted sink
             [-0.60, 1.50, -1.90, -0.90, 1.45, 0.85, 3.10],
         ]
     }
@@ -322,7 +322,7 @@ impl RlTrafficLearner {
             {
                 let host_entropy = Self::compute_host_entropy_feature(&row.remote_address);
                 if host_entropy < 0.70 {
-                    // Normal established OS socket — reinforce destination familiarity online
+                    // Normal established OS socket â€” reinforce destination familiarity online
                     let mut entry = self
                         .destinations
                         .entry(row.remote_address.to_ascii_lowercase())
@@ -695,8 +695,10 @@ pub fn query_live_os_process_sockets() -> Vec<OsQueryProcessSocketRow> {
     rows
 }
 
+type KernelTcpSocketEntry = (u16, String, u16, String, String);
+type KernelTcpTableByPid = HashMap<u32, Vec<KernelTcpSocketEntry>>;
 #[cfg(target_os = "windows")]
-fn query_kernel_tcp_table_by_pid() -> HashMap<u32, Vec<(u16, String, u16, String, String)>> {
+fn query_kernel_tcp_table_by_pid() -> KernelTcpTableByPid {
     use std::collections::HashSet;
     use std::net::Ipv4Addr;
 
@@ -727,7 +729,7 @@ fn query_kernel_tcp_table_by_pid() -> HashMap<u32, Vec<(u16, String, u16, String
         ) -> u32;
     }
 
-    let mut map: HashMap<u32, Vec<(u16, String, u16, String, String)>> = HashMap::new();
+    let mut map: KernelTcpTableByPid = HashMap::new();
     unsafe {
         let mut size: u32 = 0;
         let res = GetExtendedTcpTable(
@@ -876,7 +878,7 @@ fn query_kernel_tcp_table_by_pid() -> HashMap<u32, Vec<(u16, String, u16, String
 }
 
 #[cfg(not(target_os = "windows"))]
-fn query_kernel_tcp_table_by_pid() -> HashMap<u32, Vec<(u16, String, u16, String, String)>> {
+fn query_kernel_tcp_table_by_pid() -> KernelTcpTableByPid {
     HashMap::new()
 }
 
