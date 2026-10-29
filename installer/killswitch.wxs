@@ -1,0 +1,28 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+    <Package Name="KillSwitch Security &amp; EDR Agent"
+             Manufacturer="KillSwitch Security"
+             Version="0.1.0"
+             UpgradeCode="7a913d4e-8b52-4c19-a610-9f3e7b2c5d81"
+             Scope="perMachine">
+
+        <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+        <MediaTemplate EmbedCab="yes" />
+
+        <!-- Zero-Touch PATH Law: Strictly rely on application folder files and shortcuts without mutating system environment variables. -->
+        <StandardDirectory Id="ProgramFiles64Folder">
+            <Directory Id="INSTALLFOLDER" Name="KillSwitch">
+                <Component Id="KillSwitchMainExe" Guid="4b1e9705-6fa9-4812-a2eb-6958fb3d14df" Bitness="always64">
+                    <File Id="KillSwitchExe" Source="target\release\killswitch.exe" KeyPath="yes" />
+                </Component>
+                <Component Id="KillSwitchStartExe" Guid="5c2fa816-7eb0-4923-b3fc-7069ac4e25ef" Bitness="always64">
+                    <File Id="StartExe" Source="target\release\start.exe" KeyPath="yes" />
+                </Component>
+            </Directory>
+        </StandardDirectory>
+
+        <Feature Id="ProductFeature" Title="KillSwitch Security Agent" Level="1">
+            <ComponentRef Id="KillSwitchMainExe" />
+            <ComponentRef Id="KillSwitchStartExe" />
+        </Feature>
+    </Package>
+</Wix>

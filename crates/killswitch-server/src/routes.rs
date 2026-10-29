@@ -94,6 +94,13 @@ pub fn build_router(state: Arc<ServerState>) -> Router {
         .route("/api/research/discover", post(handlers::post_research_discover))
         .route("/research/approve", post(handlers::post_research_approve))
         .route("/api/research/approve", post(handlers::post_research_approve))
+        // 15. Continuous EDR Behavioral Anomaly, Stateful Process Lineage Tree & Statistical Baseline
+        .route("/edr/behavioral/status", get(handlers::get_edr_behavioral_status))
+        .route("/api/edr/behavioral/status", get(handlers::get_edr_behavioral_status))
+        .route("/edr/behavioral/ingest", post(handlers::post_edr_behavioral_ingest))
+        .route("/api/edr/behavioral/ingest", post(handlers::post_edr_behavioral_ingest))
+        .route("/edr/behavioral/scan-host", post(handlers::post_edr_behavioral_scan_host))
+        .route("/api/edr/behavioral/scan-host", post(handlers::post_edr_behavioral_scan_host))
         // Middleware Layers (applied bottom-up)
         .layer(axum::middleware::from_fn(middleware::rate_limit_middleware))
         .layer(middleware::cors_layer())

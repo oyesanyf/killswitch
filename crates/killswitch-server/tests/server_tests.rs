@@ -411,3 +411,53 @@ async fn test_research_menu_user_approval_gate_and_code_enforcement() {
     );
     assert!(!verdict.is_clean, "Approved research vector must be actively blocked by Rust code");
 }
+
+
+#[tokio::test]
+async fn test_edr_behavioral_lineage_ioa_and_baseline_narrative_endpoints() {
+    let state = setup_test_server_state();
+    let app = build_router(state);
+
+    // 1. Trigger LotL Word -> cmd -> encoded PowerShell -> external IP chain
+    let req_lotl = Request::builder()
+        .method("POST")
+        .uri("/api/edr/behavioral/ingest")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::json!({
+                "scenario": "lotl_word_powershell"
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let resp_lotl = app.clone().oneshot(req_lotl).await.unwrap();
+    assert_eq!(resp_lotl.status(), StatusCode::OK);
+    let body_lotl = axum::body::to_bytes(resp_lotl.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json_lotl: serde_json::Value = serde_json::from_slice(&body_lotl).unwrap();
+    assert_eq!(json_lotl["success"].as_bool(), Some(true));
+    assert!(!json_lotl["narratives_emitted"].as_array().unwrap().is_empty());
+
+    // 2. Trigger 3-anomaly statistical baseline correlation (service account recon + temp unsigned DLL + 3-sigma egress spike)
+    let req_base = Request::builder()
+        .method("POST")
+        .uri("/api/edr/behavioral/ingest")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::json!({
+                "scenario": "baseline_correlation"
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let resp_base = app.clone().oneshot(req_base).await.unwrap();
+    assert_eq!(resp_base.status(), StatusCode::OK);
+    let body_base = axum::body::to_bytes(resp_base.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json_base: serde_json::Value = serde_json::from_slice(&body_base).unwrap();
+    let narratives = json_base["narratives_emitted"].as_array().unwrap();
+    let final_nar = narratives.last().unwrap();
+    assert!(final_nar["composite_risk_score"].as_f64().unwrap() >= 0.85);
+}

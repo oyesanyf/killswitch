@@ -1656,12 +1656,12 @@ pub fn terminate_all_non_loopback_tcp_sockets() -> usize {
         };
 
         let Some(p_get) =
-            (unsafe { GetProcAddress(h_mod, PCSTR(b"GetTcpTable\0".as_ptr())) })
+            (unsafe { GetProcAddress(h_mod, PCSTR(c"GetTcpTable".as_ptr().cast())) })
         else {
             return 0;
         };
         let Some(p_set) =
-            (unsafe { GetProcAddress(h_mod, PCSTR(b"SetTcpEntry\0".as_ptr())) })
+            (unsafe { GetProcAddress(h_mod, PCSTR(c"SetTcpEntry".as_ptr().cast())) })
         else {
             return 0;
         };
@@ -1738,7 +1738,7 @@ pub fn count_active_non_loopback_tcp_peers() -> (usize, Vec<String>) {
         let Ok(h_mod) = (unsafe { LoadLibraryW(PCWSTR(dll_name.as_ptr())) }) else {
             return (0, Vec::new());
         };
-        let Some(p_get) = (unsafe { GetProcAddress(h_mod, PCSTR(b"GetTcpTable\0".as_ptr())) }) else {
+        let Some(p_get) = (unsafe { GetProcAddress(h_mod, PCSTR(c"GetTcpTable".as_ptr().cast())) }) else {
             return (0, Vec::new());
         };
         let fn_get: FnGetTcpTable = unsafe { std::mem::transmute((p_get as usize) as *const ()) };
@@ -1850,12 +1850,12 @@ pub fn terminate_active_tcp_sockets_for_ips(ips: &[IpAddr]) -> usize {
         };
 
         let Some(p_get) =
-            (unsafe { GetProcAddress(h_mod, PCSTR(b"GetTcpTable\0".as_ptr())) })
+            (unsafe { GetProcAddress(h_mod, PCSTR(c"GetTcpTable".as_ptr().cast())) })
         else {
             return 0;
         };
         let Some(p_set) =
-            (unsafe { GetProcAddress(h_mod, PCSTR(b"SetTcpEntry\0".as_ptr())) })
+            (unsafe { GetProcAddress(h_mod, PCSTR(c"SetTcpEntry".as_ptr().cast())) })
         else {
             return 0;
         };

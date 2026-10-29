@@ -245,7 +245,7 @@ fn freeze_process_win32(
             return Err(KillSwitchError::ProcessOpenFailed { pid, win32_code });
         }
 
-        let ntdll = GetModuleHandleA(b"ntdll.dll\0".as_ptr());
+        let ntdll = GetModuleHandleA(c"ntdll.dll".as_ptr().cast());
         if ntdll.is_null() {
             CloseHandle(handle);
             return Err(KillSwitchError::NtSuspendProcessFailed {
@@ -254,7 +254,7 @@ fn freeze_process_win32(
             });
         }
 
-        let proc = GetProcAddress(ntdll, b"NtSuspendProcess\0".as_ptr());
+        let proc = GetProcAddress(ntdll, c"NtSuspendProcess".as_ptr().cast());
         if proc.is_none() {
             CloseHandle(handle);
             return Err(KillSwitchError::NtSuspendProcessFailed {
@@ -299,7 +299,7 @@ fn resume_process_win32(
             return Err(KillSwitchError::ProcessOpenFailed { pid, win32_code });
         }
 
-        let ntdll = GetModuleHandleA(b"ntdll.dll\0".as_ptr());
+        let ntdll = GetModuleHandleA(c"ntdll.dll".as_ptr().cast());
         if ntdll.is_null() {
             CloseHandle(handle);
             return Err(KillSwitchError::NtResumeProcessFailed {
@@ -308,7 +308,7 @@ fn resume_process_win32(
             });
         }
 
-        let proc = GetProcAddress(ntdll, b"NtResumeProcess\0".as_ptr());
+        let proc = GetProcAddress(ntdll, c"NtResumeProcess".as_ptr().cast());
         if proc.is_none() {
             CloseHandle(handle);
             return Err(KillSwitchError::NtResumeProcessFailed {

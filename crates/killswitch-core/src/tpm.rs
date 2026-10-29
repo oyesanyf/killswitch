@@ -182,7 +182,7 @@ mod win_tpm {
 
     pub fn probe_windows_tpm() -> HardwareTpmProbe {
         unsafe {
-            let h_tbs = LoadLibraryA(b"tbs.dll\0".as_ptr());
+            let h_tbs = LoadLibraryA(c"tbs.dll".as_ptr().cast());
             if h_tbs.is_null() {
                 let fallback_pcr = compute_platform_binding_digest(0, 0, 0);
                 return HardwareTpmProbe {
@@ -202,7 +202,7 @@ mod win_tpm {
             let mut version_str = "Not Detected".to_string();
             let mut if_str = "None".to_string();
 
-            let p_get_info = GetProcAddress(h_tbs, b"Tbsi_GetDeviceInfo\0".as_ptr());
+            let p_get_info = GetProcAddress(h_tbs, c"Tbsi_GetDeviceInfo".as_ptr().cast());
             if !p_get_info.is_null() {
                 let get_info: FnTbsiGetDeviceInfo = std::mem::transmute(p_get_info);
                 let rc = get_info(std::mem::size_of::<TpmDeviceInfo>() as u32, &mut dev_info);
@@ -226,9 +226,9 @@ mod win_tpm {
 
             // Attempt live TPM2_PCR_Read via Tbsi_Context_Create + Tbsip_Submit_Command
             let mut pcr_digest_opt: Option<(String, u32)> = None;
-            let p_ctx_create = GetProcAddress(h_tbs, b"Tbsi_Context_Create\0".as_ptr());
-            let p_submit = GetProcAddress(h_tbs, b"Tbsip_Submit_Command\0".as_ptr());
-            let p_ctx_close = GetProcAddress(h_tbs, b"Tbsip_Context_Close\0".as_ptr());
+            let p_ctx_create = GetProcAddress(h_tbs, c"Tbsi_Context_Create".as_ptr().cast());
+            let p_submit = GetProcAddress(h_tbs, c"Tbsip_Submit_Command".as_ptr().cast());
+            let p_ctx_close = GetProcAddress(h_tbs, c"Tbsip_Context_Close".as_ptr().cast());
 
             if present && !p_ctx_create.is_null() && !p_submit.is_null() && !p_ctx_close.is_null() {
                 let ctx_create: FnTbsiContextCreate = std::mem::transmute(p_ctx_create);
@@ -314,11 +314,11 @@ mod win_tpm {
 
     pub fn dpapi_seal_bytes(plaintext: &[u8], entropy: &[u8]) -> Option<Vec<u8>> {
         unsafe {
-            let h_crypt = LoadLibraryA(b"crypt32.dll\0".as_ptr());
+            let h_crypt = LoadLibraryA(c"crypt32.dll".as_ptr().cast());
             if h_crypt.is_null() {
                 return None;
             }
-            let p_protect = GetProcAddress(h_crypt, b"CryptProtectData\0".as_ptr());
+            let p_protect = GetProcAddress(h_crypt, c"CryptProtectData".as_ptr().cast());
             if p_protect.is_null() {
                 return None;
             }
@@ -360,11 +360,11 @@ mod win_tpm {
 
     pub fn dpapi_unseal_bytes(ciphertext: &[u8], entropy: &[u8]) -> Option<Vec<u8>> {
         unsafe {
-            let h_crypt = LoadLibraryA(b"crypt32.dll\0".as_ptr());
+            let h_crypt = LoadLibraryA(c"crypt32.dll".as_ptr().cast());
             if h_crypt.is_null() {
                 return None;
             }
-            let p_unprotect = GetProcAddress(h_crypt, b"CryptUnprotectData\0".as_ptr());
+            let p_unprotect = GetProcAddress(h_crypt, c"CryptUnprotectData".as_ptr().cast());
             if p_unprotect.is_null() {
                 return None;
             }

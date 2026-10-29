@@ -279,3 +279,115 @@ pub async fn handle_research(
     }
     Ok(())
 }
+
+
+pub async fn handle_edr_behavior(action: &str) -> Result<()> {
+    use killswitch_telemetry::{global_edr_behavioral_engine, EdrSensorTelemetryEvent};
+    use killswitch_types::telemetry::TelemetryEventKind;
+
+    let engine = global_edr_behavioral_engine();
+    let act = action.to_ascii_lowercase();
+
+    if act == "scan" || act == "status" {
+        let _ = engine.collect_and_evaluate_live_host_snapshot();
+    } else if act == "verify-chains" || act == "verify" {
+        let lotl_cmd = ["powershell.exe", "-enc", "B64_DIAGNOSTIC_TEST_VECTOR"].join(" ");
+        // 1. Office -> cmd -> encoded PowerShell -> unfamiliar external IP (LotL chain)
+        let _ = engine.ingest_telemetry_event(&EdrSensorTelemetryEvent::new_process_create(
+            24100,
+            Some(1200),
+            "WINWORD.EXE",
+            "C:\\Program Files\\Microsoft Office\\WINWORD.EXE",
+            "WINWORD.EXE Invoice.docm",
+            "corp_user",
+        ));
+        let _ = engine.ingest_telemetry_event(&EdrSensorTelemetryEvent::new_process_create(
+            24250,
+            Some(24100),
+            "cmd.exe",
+            "C:\\Windows\\System32\\cmd.exe",
+            &lotl_cmd,
+            "corp_user",
+        ));
+        let mut ps_ev = EdrSensorTelemetryEvent::new_process_create(
+            24310,
+            Some(24250),
+            "powershell.exe",
+            "C:\\Windows\\System32\\powershell.exe",
+            &lotl_cmd,
+            "corp_user",
+        );
+        ps_ev.destination_ip = Some("198.51.100.42".to_string());
+        ps_ev.destination_port = Some(8443);
+        let _ = engine.ingest_telemetry_event(&ps_ev);
+
+        // 2. Service account recon + temp unsigned DLL + 3-sigma outbound spike
+        let recon_cmd = ["whoami", "net user"].join(" ");
+        let _ = engine.ingest_telemetry_event(&EdrSensorTelemetryEvent::new_process_create(
+            28100,
+            Some(900),
+            "cmd.exe",
+            "C:\\Windows\\System32\\cmd.exe",
+            &recon_cmd,
+            "NT AUTHORITY\\NETWORK SERVICE",
+        ));
+        let mut dll_ev = EdrSensorTelemetryEvent::new_process_create(
+            28120,
+            Some(28100),
+            "svc_worker.exe",
+            "C:\\Program Files\\Service\\svc_worker.exe",
+            "svc_worker.exe",
+            "NT AUTHORITY\\NETWORK SERVICE",
+        );
+        dll_ev.event_kind = TelemetryEventKind::ImageLoadDll;
+        dll_ev.target_file_or_dll_path =
+            Some("C:\\Users\\Public\\AppData\\Local\\Temp\\unsigned_plugin.dll".to_string());
+        dll_ev.module_is_signed = Some(false);
+        let _ = engine.ingest_telemetry_event(&dll_ev);
+
+        let mut exfil_ev = EdrSensorTelemetryEvent::new_process_create(
+            28120,
+            Some(28100),
+            "svc_worker.exe",
+            "C:\\Program Files\\Service\\svc_worker.exe",
+            "svc_worker.exe --upload",
+            "NT AUTHORITY\\NETWORK SERVICE",
+        );
+        exfil_ev.event_kind = TelemetryEventKind::NetworkConnect;
+        exfil_ev.destination_ip = Some("203.0.113.88".to_string());
+        exfil_ev.destination_port = Some(443);
+        exfil_ev.outbound_bytes = 30_000_000;
+        let _ = engine.ingest_telemetry_event(&exfil_ev);
+    }
+
+    let report = engine.status_report();
+    println!("================================================================================");
+    println!("🛡️  KILLSWITCH CONTINUOUS EDR BEHAVIORAL LINEAGE & BASELINE MONITOR");
+    println!("================================================================================");
+    println!(
+        "  Tracked Process Lineage Nodes: {} | Learned Baseline Profiles: {} | Events Ingested: {}",
+        report.tracked_processes_in_lineage_tree,
+        report.learned_baseline_profiles,
+        report.total_events_ingested
+    );
+    println!(
+        "  MITRE IoA Hits: {} | Lineage Violations: {} | Baseline Deviations: {} | Auto-Containments: {}",
+        report.total_ioa_matches,
+        report.total_lineage_violations,
+        report.total_baseline_deviations,
+        report.automated_containments_triggered
+    );
+    println!("  Active Sensor Hooks: {}", report.active_sensor_hooks.join(" | "));
+    println!("--------------------------------------------------------------------------------");
+    for nar in &report.active_narratives {
+        println!(
+            "  • [{}] Risk={:.2} ({:?}) | Techniques={:?}",
+            nar.narrative_id, nar.composite_risk_score, nar.severity, nar.mitre_techniques
+        );
+        println!("    Lineage: {}", nar.lineage_chain);
+        println!("    Action:  {:?}", nar.containment_action);
+        println!("    Seal:    {}", nar.blake3_narrative_seal);
+    }
+    println!("================================================================================");
+    Ok(())
+}

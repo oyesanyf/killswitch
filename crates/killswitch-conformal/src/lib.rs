@@ -507,10 +507,12 @@ impl LayeredGuardrail {
 
 /// Deterministic projection bridge mapping text prompts to feature vectors in R^{dim}.
 /// Combines character trigram hashing and Shannon entropy for zero-cloud representation extraction.
+/// Input length is capped at 65,536 bytes to prevent algorithmic complexity DoS on large payloads.
 pub fn project_text_to_feature_vector(text: &str, dim: usize) -> Array1<f64> {
     assert!(dim > 0, "Feature dimension must be > 0");
     let mut vec = Array1::zeros(dim);
-    let bytes = text.as_bytes();
+    let raw_bytes = text.as_bytes();
+    let bytes = &raw_bytes[..raw_bytes.len().min(65_536)];
     if bytes.is_empty() {
         return vec;
     }
@@ -549,9 +551,12 @@ pub fn project_text_to_feature_vector(text: &str, dim: usize) -> Array1<f64> {
 pub mod bounds {
     /// Equation (6): Computes overlap weight sum A_{W,L} = \sum_{h=1}^B a_h^2 for W >= L.
     pub fn compute_a_w_l(w: usize, l: usize) -> usize {
-        assert!(w >= l, "Equation (6) assumes W >= L");
-        let sum_squares: usize = (1..l).map(|r| r * r).sum();
-        2 * sum_squares + (w - l + 1) * l * l
+        let safe_l = l.clamp(1, 1000);
+        let safe_w = w.max(safe_l).min(1000);
+        let sum_squares: usize = (1..safe_l).map(|r| r.saturating_mul(r)).sum();
+        2usize
+            .saturating_mul(sum_squares)
+            .saturating_add((safe_w - safe_l + 1).saturating_mul(safe_l.saturating_mul(safe_l)))
     }
 
     /// Equation (7), Theorem 4.3: Persistence-aware stationary false-alarm upper bound under source P_j.
@@ -562,15 +567,15 @@ pub mod bounds {
         mu_0_j: f64,
         n_j: usize,
     ) -> f64 {
-        if tau <= mu_0_j {
+        if tau <= mu_0_j || n_j == 0 || w == 0 || l == 0 {
             return 1.0;
         }
-        let b_j = ((n_j + 1) as f64).ln();
-        let a_wl = compute_a_w_l(w, l) as f64;
-        let lw = (l * w) as f64;
+        let b_j = ((n_j + 1) as f64).ln().max(1e-12);
+        let a_wl = (compute_a_w_l(w, l) as f64).max(1.0);
+        let lw = (l.saturating_mul(w)) as f64;
         let gap = tau - mu_0_j;
         let exponent = -2.0 * lw.powi(2) * gap.powi(2) / (b_j.powi(2) * a_wl);
-        exponent.exp().min(1.0)
+        exponent.exp().clamp(0.0, 1.0)
     }
 
     /// Equation (9), Corollary 4.7: Nearest-source separation detection power lower bound.
@@ -581,13 +586,13 @@ pub mod bounds {
         delta_star: f64,
         max_n_k: usize,
     ) -> f64 {
-        if delta_star <= 0.0 {
+        if delta_star <= 0.0 || max_n_k == 0 || w == 0 || l == 0 || k_sources == 0 {
             return 0.0;
         }
-        let b_max = ((max_n_k + 1) as f64).ln();
+        let b_max = ((max_n_k + 1) as f64).ln().max(1e-12);
         let exponent = -2.0 * (w as f64) * delta_star.powi(2) / b_max.powi(2);
-        let penalty = (l * k_sources) as f64 * exponent.exp();
-        (1.0 - penalty).max(0.0)
+        let penalty = (l.saturating_mul(k_sources)) as f64 * exponent.exp();
+        (1.0 - penalty).clamp(0.0, 1.0)
     }
 }
 
@@ -700,10 +705,10 @@ mod tests {
         assert!((v1.dot(&v1) - 1.0).abs() < 1e-6);
 
         let p_bound = bounds::stationary_false_alarm_bound(10, 3, 2.0, 0.5, 100);
-        assert!(p_bound <= 1.0 && p_bound >= 0.0);
+        assert!((0.0..=1.0).contains(&p_bound));
 
         let power = bounds::nearest_source_power_bound(10, 3, 4, 1.5, 100);
-        assert!(power <= 1.0 && power >= 0.0);
+        assert!((0.0..=1.0).contains(&power));
 
         // Verify dynamic novel research anchor registration & deduplication
         let cal = MultiSourceCalibration::default_calibrated(4, 16);
