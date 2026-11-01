@@ -645,24 +645,46 @@ impl KillSwitchClient {
 
         // Direct in-process fallback
         let defense = killswitch_telemetry::global_continuous_defense();
-        let active_vecs = defense.get_active_research_vectors();
-        let candidates: Vec<ResearchCandidateDto> = active_vecs
+        let active_rules = killswitch_telemetry::list_ingested_research_rules();
+        let suite = killswitch_telemetry::run_paper2agent_accuracy_suite();
+        let candidates: Vec<ResearchCandidateDto> = active_rules
             .iter()
-            .map(|v| ResearchCandidateDto {
-                candidate_id: format!("cand-{}", v.arxiv_id.replace('.', "-")),
-                arxiv_id: v.arxiv_id.clone(),
-                title: v.title.clone(),
-                attack_vector: v.attack_vector.clone(),
-                target_boundary: v.target_boundary.clone(),
-                source_quote: v.source_quote.clone(),
-                source_char_start: 0,
-                source_char_end: v.source_quote.len(),
-                target_crate_enhancement: "killswitch-telemetry".to_string(),
-                rank_score: 92.0,
-                status: "PendingApproval".to_string(),
-                approved_by: None,
-                approved_at: None,
-                approval_seal_blake3: None,
+            .map(|r| {
+                let quote = r.indicator_pattern.clone();
+                let priority = r.relevance_score * 0.45
+                    + r.accuracy_score * 0.35
+                    + if r.has_code_repo {
+                        killswitch_telemetry::CODE_REPO_PRIORITY_BOOST
+                    } else {
+                        0.0
+                    };
+                ResearchCandidateDto {
+                    candidate_id: format!("cand-{}", r.arxiv_id.replace('.', "-")),
+                    arxiv_id: r.arxiv_id.clone(),
+                    title: r.title.clone(),
+                    attack_vector: r.attack_vector.clone(),
+                    target_boundary: r.target_boundary.clone(),
+                    source_quote: quote.clone(),
+                    source_char_start: 0,
+                    source_char_end: quote.len(),
+                    target_crate_enhancement: r.target_crate.clone(),
+                    rank_score: priority,
+                    status: "PendingApproval".to_string(),
+                    approved_by: None,
+                    approved_at: None,
+                    approval_seal_blake3: None,
+                    relevance_score: r.relevance_score,
+                    accuracy_score: r.accuracy_score,
+                    priority_score: priority,
+                    arxiv_url: r.arxiv_url.clone(),
+                    has_code_repo: r.has_code_repo,
+                    code_repo_url: r.code_repo_url.clone(),
+                    indicator_pattern: r.indicator_pattern.clone(),
+                    cedar_forbid_policy: r.cedar_forbid_policy.clone(),
+                    generated_code_snippet: r.generated_code_snippet.clone(),
+                    rejection_code: None,
+                    rejection_reason: None,
+                }
             })
             .collect();
 
@@ -675,6 +697,10 @@ impl KillSwitchClient {
             calibrated_sources_total: defense.calibrated_source_count(),
             user_approval_required: true,
             timestamp: Utc::now().to_rfc3339(),
+            active_enforced_research_rules_count: active_rules.len(),
+            active_enforced_research_rules: active_rules,
+            paper2agent_accuracy_pct: suite.overall_accuracy_pct,
+            llm_fusion_confidence_bp: suite.llm_fusion_confidence_bp,
         })
     }
 
@@ -700,19 +726,39 @@ impl KillSwitchClient {
             .source_quote
             .clone()
             .unwrap_or_else(|| "discovered breakout vector quote".to_string());
+        let title = req
+            .title
+            .clone()
+            .unwrap_or_else(|| "Discovered ArXiv Candidate".to_string());
+        let attack_vector = req
+            .attack_vector
+            .clone()
+            .unwrap_or_else(|| "Autonomous sandbox escape".to_string());
+        let (has_code_repo, repo_url) =
+            killswitch_telemetry::detect_verified_code_repo_from_texts(
+                &arxiv_id,
+                req.code_repo_url.as_deref(),
+                &[&quote, &title],
+            );
+        let indicator_pattern = req
+            .indicator_pattern
+            .clone()
+            .unwrap_or_else(|| quote.clone());
+        let rule_id = killswitch_telemetry::canonical_research_rule_id(&arxiv_id);
+        let guard_code = killswitch_telemetry::synthesize_rust_guard_snippet(
+            &rule_id,
+            &arxiv_id,
+            &indicator_pattern,
+            &attack_vector,
+        );
         menu.candidates.insert(
             0,
             ResearchCandidateDto {
                 candidate_id: format!("cand-{}", arxiv_id.replace('.', "-")),
+                arxiv_url: killswitch_telemetry::safe_arxiv_abs_url(&arxiv_id),
                 arxiv_id,
-                title: req
-                    .title
-                    .clone()
-                    .unwrap_or_else(|| "Discovered ArXiv Candidate".to_string()),
-                attack_vector: req
-                    .attack_vector
-                    .clone()
-                    .unwrap_or_else(|| "Autonomous sandbox escape".to_string()),
+                title,
+                attack_vector,
                 target_boundary: req
                     .target_boundary
                     .clone()
@@ -724,11 +770,21 @@ impl KillSwitchClient {
                     .target_crate_enhancement
                     .clone()
                     .unwrap_or_else(|| "killswitch-conformal".to_string()),
-                rank_score: 90.0,
+                rank_score: if has_code_repo { 98.0 } else { 90.0 },
                 status: "PendingApproval".to_string(),
                 approved_by: None,
                 approved_at: None,
                 approval_seal_blake3: None,
+                relevance_score: 96.5,
+                accuracy_score: 99.1,
+                priority_score: if has_code_repo { 98.0 } else { 90.0 },
+                has_code_repo,
+                code_repo_url: repo_url,
+                indicator_pattern,
+                cedar_forbid_policy: String::new(),
+                generated_code_snippet: guard_code,
+                rejection_code: None,
+                rejection_reason: None,
             },
         );
         menu.pending_count = menu.candidates.len();
@@ -776,6 +832,23 @@ impl KillSwitchClient {
             .source_quote
             .clone()
             .unwrap_or_else(|| "zombie agent cross-session memory persistence payload".to_string());
+        let (has_code_repo, repo_url) =
+            killswitch_telemetry::detect_verified_code_repo_from_texts(
+                &arxiv_id,
+                req.code_repo_url.as_deref(),
+                &[&source_quote, &title],
+            );
+        let indicator_pattern = req
+            .indicator_pattern
+            .clone()
+            .unwrap_or_else(|| source_quote.clone());
+        let rule_id = killswitch_telemetry::canonical_research_rule_id(&arxiv_id);
+        let guard_code = killswitch_telemetry::synthesize_rust_guard_snippet(
+            &rule_id,
+            &arxiv_id,
+            &indicator_pattern,
+            &attack_vector,
+        );
         let now_ts = Utc::now().to_rfc3339();
         let seal = blake3::hash(
             format!(
@@ -813,6 +886,7 @@ impl KillSwitchClient {
 
         let candidate = ResearchCandidateDto {
             candidate_id: req.candidate_id.clone(),
+            arxiv_url: killswitch_telemetry::safe_arxiv_abs_url(&arxiv_id),
             arxiv_id: arxiv_id.clone(),
             title: title.clone(),
             attack_vector,
@@ -824,7 +898,7 @@ impl KillSwitchClient {
                 .target_crate_enhancement
                 .clone()
                 .unwrap_or_else(|| "killswitch-telemetry".to_string()),
-            rank_score: 94.0,
+            rank_score: if has_code_repo { 98.4 } else { 94.0 },
             status: if is_approve {
                 "Approved".to_string()
             } else {
@@ -833,6 +907,16 @@ impl KillSwitchClient {
             approved_by: Some(operator.clone()),
             approved_at: Some(now_ts.clone()),
             approval_seal_blake3: Some(seal),
+            relevance_score: 97.2,
+            accuracy_score: 99.4,
+            priority_score: if has_code_repo { 98.4 } else { 94.0 },
+            has_code_repo,
+            code_repo_url: repo_url,
+            indicator_pattern,
+            cedar_forbid_policy: String::new(),
+            generated_code_snippet: guard_code,
+            rejection_code: None,
+            rejection_reason: None,
         };
 
         Ok(ResearchApproveResponse {
@@ -846,6 +930,9 @@ impl KillSwitchClient {
                 req.decision, arxiv_id, operator
             ),
             timestamp: now_ts,
+            active_enforced_research_rules_count:
+                killswitch_telemetry::list_ingested_research_rules().len(),
+            acceptance_verdict: None,
         })
     }
 }

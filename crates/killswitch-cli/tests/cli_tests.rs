@@ -92,6 +92,8 @@ async fn test_cli_research_approval_gate_offline_fallback() {
         target_boundary: Some("agent_memory_store".to_string()),
         source_quote: Some("zombie agent cross-session memory persistence self-reinforcing payload".to_string()),
         target_crate_enhancement: Some("killswitch-telemetry".to_string()),
+        code_repo_url: Some("https://github.com/UKGovernmentBEIS/inspect_evals".to_string()),
+        indicator_pattern: None,
     };
     let res = client.approve_research_candidate(&approve_req).await.unwrap();
     assert!(res.success);

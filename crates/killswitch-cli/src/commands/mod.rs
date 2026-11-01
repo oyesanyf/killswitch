@@ -209,28 +209,61 @@ pub async fn handle_research(
     match action {
         "list" | "status" | "menu" => {
             let menu = client.get_research_candidates().await?;
+            let suite = killswitch_telemetry::run_paper2agent_accuracy_suite();
             println!("\n================================================================================");
-            println!("🔬 KILLSWITCH ARXIV & LANGEXTRACT RESEARCH MENU (USER APPROVAL GATE)");
+            println!("🔬 KILLSWITCH ARXIV & LANGEXTRACT RESEARCH MENU (USER APPROVAL GATE + PAPER2AGENT)");
             println!("================================================================================");
-            println!("  Mandatory User Approval: {}", menu.user_approval_required);
-            println!("  Pending Approval Count:  {}", menu.pending_count);
-            println!("  Approved Count:          {}", menu.approved_count);
-            println!("  Rejected Count:          {}", menu.rejected_count);
-            println!("  Active Vectors in Code:  {}", menu.active_research_vectors_count);
-            println!("  Conformal Sources (K):   {}", menu.calibrated_sources_total);
+            println!("  Mandatory User Approval:   {}", menu.user_approval_required);
+            println!("  Pending Approval Count:    {}", menu.pending_count);
+            println!("  Approved Count:            {}", menu.approved_count);
+            println!("  Rejected Count:            {}", menu.rejected_count);
+            println!("  Active Vectors in Code:    {}", menu.active_research_vectors_count);
+            println!("  Enforced 2025-2026 Rules:  {}", menu.active_enforced_research_rules_count);
+            println!("  Conformal Sources (K):     {}", menu.calibrated_sources_total);
+            println!(
+                "  Paper2Agent LLM Fusion:    {}/{} Rules Verified | TPR={:.1}% | FPR={:.1}% | Acc={:.1}%",
+                suite.paper2agent_harnesses_passed,
+                suite.total_rules_tested,
+                suite.true_positive_rate_pct,
+                suite.false_positive_rate_pct,
+                suite.overall_accuracy_pct
+            );
             println!("--------------------------------------------------------------------------------");
             for c in &menu.candidates {
                 println!(
-                    "  [{}] arXiv:{} (Rank {:.1}) — {}",
-                    c.status, c.arxiv_id, c.rank_score, c.title
+                    "  [{}] arXiv:{} (Rank {:.1} | Rel {:.1}% | Acc {:.1}%) — {}",
+                    c.status, c.arxiv_id, c.rank_score, c.relevance_score, c.accuracy_score, c.title
                 );
-                println!("      ID: {} | Boundary: {} -> Crate: {}", c.candidate_id, c.target_boundary, c.target_crate_enhancement);
+                println!(
+                    "      ID: {} | Boundary: {} -> Crate: {}",
+                    c.candidate_id, c.target_boundary, c.target_crate_enhancement
+                );
+                if c.has_code_repo && !c.code_repo_url.is_empty() {
+                    println!("      📦 Verified Code Repo (+20pt): {}", c.code_repo_url);
+                }
                 println!("      Vector: {}", c.attack_vector);
-                println!("      Grounded Quote [{}..{}]: \"{}\"", c.source_char_start, c.source_char_end, c.source_quote);
+                println!(
+                    "      Grounded Quote [{}..{}]: \"{}\"",
+                    c.source_char_start, c.source_char_end, c.source_quote
+                );
                 if let Some(seal) = &c.approval_seal_blake3 {
                     println!("      BLAKE3 Approval Seal: {}", seal);
                 }
             }
+            println!("================================================================================\n");
+        }
+        "verify-accuracy" | "accuracy" => {
+            let suite = killswitch_telemetry::run_paper2agent_accuracy_suite();
+            println!("\n================================================================================");
+            println!("🎯 PAPER2AGENT & TRI-EVALUATOR LLM FUSION ACCURACY SUITE");
+            println!("================================================================================");
+            println!("  Status:            {}", suite.status);
+            println!("  Rules Verified:    {}/{}", suite.paper2agent_harnesses_passed, suite.total_rules_tested);
+            println!("  Aggregate TPR:     {:.1}%", suite.true_positive_rate_pct);
+            println!("  Aggregate FPR:     {:.1}%", suite.false_positive_rate_pct);
+            println!("  Accuracy Score:    {:.1}%", suite.overall_accuracy_pct);
+            println!("  Byte-Exact AST:    {}", suite.byte_exact_parity);
+            println!("  LLM Fusion Passed: {} ({} bp)", suite.llm_fusion_consensus_passed, suite.llm_fusion_confidence_bp);
             println!("================================================================================\n");
         }
         "discover" | "stage" => {
@@ -242,6 +275,8 @@ pub async fn handle_research(
                 target_boundary: boundary.map(|s| s.to_string()),
                 source_quote: quote.map(|s| s.to_string()),
                 target_crate_enhancement: crate_target.map(|s| s.to_string()),
+                code_repo_url: None,
+                indicator_pattern: None,
             };
             let menu = client.discover_research_candidate(&req).await?;
             println!(
@@ -261,11 +296,14 @@ pub async fn handle_research(
                 target_boundary: boundary.map(|s| s.to_string()),
                 source_quote: quote.map(|s| s.to_string()),
                 target_crate_enhancement: crate_target.map(|s| s.to_string()),
+                code_repo_url: None,
+                indicator_pattern: None,
             };
             let res = client.approve_research_candidate(&req).await?;
             println!("{}", res.message);
             println!("   Candidate Status:       {}", res.candidate.status);
             println!("   Active Vectors in Code: {}", res.active_research_vectors_count);
+            println!("   Enforced 2025-26 Rules: {}", res.active_enforced_research_rules_count);
             println!("   Conformal Sources (K):  {}", res.calibrated_sources_total);
             println!("   Live Probe Blocked:     {}", res.live_probe_verified);
             if let Some(seal) = res.candidate.approval_seal_blake3 {
@@ -273,13 +311,12 @@ pub async fn handle_research(
             }
         }
         _ => anyhow::bail!(
-            "Unknown research action '{}'. Supported: list, discover, approve, reject",
+            "Unknown research action '{}'. Supported: list, verify-accuracy, discover, approve, reject",
             action
         ),
     }
     Ok(())
 }
-
 
 pub async fn handle_edr_behavior(action: &str) -> Result<()> {
     use killswitch_telemetry::{global_edr_behavioral_engine, EdrSensorTelemetryEvent};
