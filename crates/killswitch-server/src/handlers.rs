@@ -3478,3 +3478,227 @@ pub async fn post_edr_behavioral_ingest(
         timestamp: Utc::now().to_rfc3339(),
     }))
 }
+
+
+// =============================================================================
+// 16. OshoosiClaw Migrated Modules: Oso/AWS R1-R5, Bounded Agents APC,
+//     Database & Executable Tamper Guard, and Cognitive Red-Team HITL
+// =============================================================================
+
+/// GET /api/oso-aws-containment/status
+pub async fn get_oso_aws_containment_status(
+    State(_state): State<Arc<ServerState>>,
+) -> Result<Json<killswitch_telemetry::OsoAwsContainmentStatusReport>, ServerError> {
+    let engine = killswitch_telemetry::global_oso_aws_containment();
+    Ok(Json(engine.status_report()))
+}
+
+/// POST /api/oso-aws-containment/watchdog-verify
+pub async fn post_oso_aws_watchdog_verify(
+    State(_state): State<Arc<ServerState>>,
+    Json(req): Json<OsoAwsWatchdogVerifyRequest>,
+) -> Result<Json<killswitch_telemetry::WatchdogAssessmentReport>, ServerError> {
+    let engine = killswitch_telemetry::OsoAwsContainmentEngine::new(
+        "killswitch-agent-cluster-prod",
+        vec![
+            "task-arm-01".to_string(),
+            "task-arm-02".to_string(),
+            "task-arm-03".to_string(),
+        ],
+        [0x4Bu8; 32],
+    );
+    let mut snapshot = req
+        .snapshot
+        .unwrap_or_else(killswitch_telemetry::default_compliant_containment_snapshot);
+    if req.simulate_policy_swap.unwrap_or(false) {
+        snapshot
+            .attached_iam_policy_arns
+            .remove("arn:aws:iam::123456789012:policy/KillSwitchDenyControlPlane");
+        snapshot
+            .attached_iam_policy_arns
+            .insert("arn:aws:iam::aws:policy/AdministratorAccess".to_string());
+    }
+    let now_unix = Utc::now().timestamp().max(0) as u64;
+    Ok(Json(
+        engine.verify_four_containment_invariants(&snapshot, now_unix),
+    ))
+}
+
+/// POST /api/oso-aws-containment/evaluate-intersection
+pub async fn post_oso_aws_evaluate_intersection(
+    State(_state): State<Arc<ServerState>>,
+    Json(req): Json<OsoAwsIntersectionEvalRequest>,
+) -> Result<Json<killswitch_telemetry::OsoAuthzDecision>, ServerError> {
+    use std::str::FromStr;
+    let engine = killswitch_telemetry::global_oso_aws_containment();
+    let role = killswitch_types::ArmRole::from_str(&req.agent_role)
+        .unwrap_or(killswitch_types::ArmRole::UntrustedDocIngest);
+    let now_unix = Utc::now().timestamp().max(0) as u64;
+
+    let user = killswitch_telemetry::DelegatingUserContext {
+        user_id: req.user_id,
+        tenant_id: req.tenant_id,
+        permissions: req.user_permissions.into_iter().collect(),
+        clearance_level: 2,
+    };
+    let scope = killswitch_telemetry::TaskScopeEnvelope {
+        task_id: req.task_id,
+        session_id: "sess-api".to_string(),
+        allowed_actions: user.permissions.clone(),
+        allowed_resource_prefixes: std::collections::BTreeSet::from([req.resource_id.clone()]),
+        max_rows_per_query: 100,
+        issued_at_unix: now_unix.saturating_sub(60),
+        expires_at_unix: now_unix + 3600,
+    };
+    let decision = engine.evaluate_intersection_authority(
+        &user,
+        &req.agent_id,
+        &role,
+        &scope,
+        &req.action,
+        &req.resource_id,
+        &req.resource_tenant_id,
+        req.requested_rows.unwrap_or(1),
+        None,
+        now_unix,
+    );
+    Ok(Json(decision))
+}
+
+/// GET /api/apc/status
+pub async fn get_apc_status(
+    State(_state): State<Arc<ServerState>>,
+) -> Result<Json<killswitch_telemetry::ApcStatusSummary>, ServerError> {
+    let pdp = killswitch_telemetry::global_apc_pdp();
+    Ok(Json(pdp.status_summary()))
+}
+
+/// POST /api/apc/evaluate
+pub async fn post_apc_evaluate(
+    State(_state): State<Arc<ServerState>>,
+    Json(req): Json<ApcEvaluateRequest>,
+) -> Result<Json<killswitch_telemetry::ApcDecision>, ServerError> {
+    let pdp = killswitch_telemetry::global_apc_pdp();
+    let now_unix = Utc::now().timestamp();
+    let scope = killswitch_telemetry::default_enterprise_apc_scope();
+    let env = killswitch_telemetry::AuthorizationEnvelope::new_root(
+        format!("env-{}", uuid::Uuid::new_v4()),
+        &req.principal_id,
+        &req.actor_id,
+        &req.task_session_id,
+        &pdp.active_policy_version,
+        scope,
+        killswitch_telemetry::DelegationBudgetSpec::default(),
+        now_unix - 60,
+        now_unix + 3600,
+        pdp.signing_key(),
+    );
+    let intent = killswitch_telemetry::IntentSpec {
+        intent_id: "intent-api-default".to_string(),
+        intended_actions: std::collections::BTreeSet::from(["*".to_string()]),
+        intended_resources: std::collections::BTreeSet::from(["*".to_string()]),
+        action_resource_map: std::collections::BTreeMap::new(),
+        mode: killswitch_telemetry::IntentEnforcementMode::Strict,
+    };
+    let action_req = killswitch_telemetry::ApcActionRequest {
+        actor_id: req.actor_id,
+        action: req.action,
+        resource: req.resource,
+        data_classification: req.data_classification,
+        parameters_canonical: "{}".to_string(),
+        task_session_id: req.task_session_id,
+        policy_version: pdp.active_policy_version.clone(),
+        now_unix,
+        requires_approval: false,
+        approval_token: None,
+        is_irreversible: req.is_irreversible.unwrap_or(false),
+        sensitivity_tier: 1,
+        is_cross_domain: false,
+        cost_delta: 0.1,
+    };
+    Ok(Json(pdp.evaluate(&env, &intent, &action_req)))
+}
+
+/// GET /api/tamper-guard/status
+pub async fn get_tamper_guard_status_handler(
+    State(_state): State<Arc<ServerState>>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let status = killswitch_telemetry::get_tamper_guard_status();
+    let agents = killswitch_telemetry::global_agent_process_table().list();
+    Ok(Json(serde_json::json!({
+        "tamper_guard": status,
+        "agent_process_table": agents,
+    })))
+}
+
+/// GET /api/hitl/status
+pub async fn get_hitl_status(
+    State(_state): State<Arc<ServerState>>,
+) -> Result<Json<killswitch_telemetry::CognitiveRedTeamStatus>, ServerError> {
+    Ok(Json(
+        killswitch_telemetry::global_cognitive_redteam().get_status(),
+    ))
+}
+
+/// GET /api/hitl/pending
+pub async fn get_hitl_pending(
+    State(_state): State<Arc<ServerState>>,
+) -> Result<Json<Vec<killswitch_telemetry::CognitiveRedTeamAssessment>>, ServerError> {
+    Ok(Json(
+        killswitch_telemetry::global_cognitive_redteam().get_pending_actions(),
+    ))
+}
+
+/// POST /api/hitl/evaluate
+pub async fn post_hitl_evaluate(
+    State(_state): State<Arc<ServerState>>,
+    Json(node): Json<killswitch_telemetry::PendingExecutionGraphNode>,
+) -> Result<Json<killswitch_telemetry::CognitiveRedTeamAssessment>, ServerError> {
+    Ok(Json(
+        killswitch_telemetry::global_cognitive_redteam().evaluate_pending_action(node),
+    ))
+}
+
+/// POST /api/hitl/approve
+pub async fn post_hitl_approve(
+    State(_state): State<Arc<ServerState>>,
+    Json(req): Json<HitlApproveRequestDto>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    match killswitch_telemetry::global_cognitive_redteam().submit_approval(
+        &req.request_id,
+        &req.operator_id,
+        req.selected_option_index,
+        &req.challenge_nonce,
+        req.confirmation_token.as_deref(),
+    ) {
+        Ok(state) => Ok(Json(serde_json::json!({
+            "success": true,
+            "approval_state": state,
+        }))),
+        Err(err) => Ok(Json(serde_json::json!({
+            "success": false,
+            "error": err,
+        }))),
+    }
+}
+
+/// POST /api/hitl/reject
+pub async fn post_hitl_reject(
+    State(_state): State<Arc<ServerState>>,
+    Json(req): Json<HitlRejectRequestDto>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    match killswitch_telemetry::global_cognitive_redteam().submit_rejection(
+        &req.request_id,
+        &req.operator_id,
+        &req.reason,
+    ) {
+        Ok(state) => Ok(Json(serde_json::json!({
+            "success": true,
+            "approval_state": state,
+        }))),
+        Err(err) => Ok(Json(serde_json::json!({
+            "success": false,
+            "error": err,
+        }))),
+    }
+}

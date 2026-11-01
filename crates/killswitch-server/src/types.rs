@@ -775,3 +775,60 @@ pub struct EdrBehavioralIngestResponse {
     pub status: killswitch_telemetry::EdrBehavioralStatusReport,
     pub timestamp: String,
 }
+
+
+// =============================================================================
+// 16. OshoosiClaw Migrated Modules: Oso/AWS R1-R5, APC, Tamper Guard & HITL
+// =============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OsoAwsWatchdogVerifyRequest {
+    #[serde(default)]
+    pub simulate_policy_swap: Option<bool>,
+    #[serde(default)]
+    pub snapshot: Option<killswitch_telemetry::ContainmentEnvironmentSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OsoAwsIntersectionEvalRequest {
+    pub user_id: String,
+    pub tenant_id: String,
+    pub user_permissions: Vec<String>,
+    pub agent_id: String,
+    pub agent_role: String,
+    pub task_id: String,
+    pub action: String,
+    pub resource_id: String,
+    pub resource_tenant_id: String,
+    #[serde(default)]
+    pub requested_rows: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApcEvaluateRequest {
+    pub principal_id: String,
+    pub actor_id: String,
+    pub action: String,
+    pub resource: String,
+    pub data_classification: String,
+    pub task_session_id: String,
+    #[serde(default)]
+    pub is_irreversible: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HitlApproveRequestDto {
+    pub request_id: String,
+    pub operator_id: String,
+    pub selected_option_index: usize,
+    pub challenge_nonce: String,
+    #[serde(default)]
+    pub confirmation_token: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HitlRejectRequestDto {
+    pub request_id: String,
+    pub operator_id: String,
+    pub reason: String,
+}

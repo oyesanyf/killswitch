@@ -2,9 +2,12 @@
 //!
 //! Enterprise EDR Telemetry, Nonlinear Phase-Lock Lyapunov Divergence Monitor,
 //! Causal and Attack Graphs, Canaries/Watchdog/Honeytokens, Octopus Multi-Ring
-//! Agent Containment, and 100% OpenTelemetry & OpenLineage DLP Data Lineage Engine.
+//! Agent Containment, Oso 3-Way Intersection + AWS R1-R5 Containment KillSwitch,
+//! Bounded Agents APC (`arXiv:2608.15888`), Tamper Guard, Cognitive Red-Team HITL,
+//! and 100% OpenTelemetry & OpenLineage DLP Data Lineage Engine.
 
 pub mod attack;
+pub mod bounded_agents_apc;
 pub mod canary;
 pub mod causal;
 pub mod continuous_defense;
@@ -12,15 +15,25 @@ pub mod correlator;
 pub mod edr_behavioral;
 pub mod honeytokens;
 pub mod octopus;
+pub mod oso_aws_containment;
 pub mod otel_lineage;
 pub mod phaselock;
 pub mod rate_limit_backoff;
 pub mod rl_traffic;
+pub mod tamper_and_process_killswitch;
 pub mod watchdog;
 
 // Re-exports for clean ergonomics
 pub use attack::{
     AttackGraphMatcher, AttackPattern, AttackSequenceEvaluation, AttackStage, ProcessTimelineEvent,
+};
+pub use bounded_agents_apc::{
+    bounded_agents_apc_cedar_policies, classify_action_class, compute_action_hash,
+    compute_hmac_sha256_hex, default_enterprise_apc_scope, global_apc_pdp,
+    resource_pattern_matches, ApcActionRequest, ApcDecision, ApcPolicyDecisionPoint, ApcScope,
+    ApcStatusSummary, ApprovalToken, AuthorizationEnvelope, BudgetState, CompositionChecker,
+    DelegationBudgetSpec, EnvelopeSealedError, EvidenceRecord, EvidenceSink, ExecutedActionEvent,
+    IntentEnforcementMode, IntentSpec, KTupleRestriction, KTupleStep, PairwiseRestriction,
 };
 pub use canary::{CanaryAuditReport, CanaryDecoyFile, CanaryManager};
 pub use causal::{CausalEdge, CausalEdgeKind, CausalNodeType, CausalSecurityGraph};
@@ -51,6 +64,14 @@ pub use octopus::{
     MeshGuard, MeshWatchOutSignal, OperationalContainmentVerdict, TechnicalBreakoutVerdict,
     UnifiedBreakoutEvaluation, VerifiedMeshMessage,
 };
+pub use oso_aws_containment::{
+    action_requires_hitl_step_up, default_compliant_containment_snapshot,
+    global_oso_aws_containment, issue_hitl_step_up_ticket, role_static_capabilities,
+    verify_hitl_step_up_ticket, AgentClusterServiceState, ContainmentEnvironmentSnapshot,
+    DelegatingUserContext, HitlStepUpTicket, KillSwitchTerminationReport, OsoAuthzDecision,
+    OsoAwsContainmentEngine, OsoAwsContainmentStatusReport, RagDocumentChunk, RagFilterResult,
+    RouteTableEntry, SecurityGroupEgressRule, TaskScopeEnvelope, WatchdogAssessmentReport,
+};
 pub use otel_lineage::{
     DatasetRole, DlpClassification, DlpPolicy, EgressVerdict, EndpointLineageEngine, FileKey,
     FileTaintState, LineageEngineConfig, OpenLineageDataset, OpenLineageDatasetFacets, ProcessKey,
@@ -75,5 +96,18 @@ pub use rate_limit_backoff::{
     NetworkProtocol, OpenJevDecisionVoter, OsqueryProcessFact, RateLimitAllowlist,
     RateLimitReleaseEntry, RateLimitVoterEnsemble, ReaBinaryFact, ReteEngine, VoterConsensus,
     VoterVerdict,
+};
+pub use tamper_and_process_killswitch::{
+    begin_database_maintenance_lease, compute_hardened_console_mode,
+    compute_maintenance_auth_token, evaluate_hitl_card, expected_blast_radius_token,
+    flush_console_input, get_tamper_guard_status, global_agent_process_table,
+    global_cognitive_redteam, harden_windows_console, is_console_mode_hardened,
+    is_maintenance_window_active, scan_for_visual_deception, AgentProcess, AgentStatus,
+    BlastRadiusDiff, CognitiveRedTeamAssessment, CognitiveRedTeamInterceptor,
+    CognitiveRedTeamStatus, EdrExecutableTamperGuard, HitlApprovalReceipt, HitlApprovalState,
+    HitlCardEvaluation, HitlDeceptionIndicator, IrreversibleMutationType, IrreversibleStateChange,
+    LocalMySqlTamperGuard, MaintenanceLeaseGuard, MeshTaintLevel, PendingExecutionGraphNode,
+    PolymorphicChallenge, PolymorphicChallengePublic, ProcessTable, StoredPendingHitlAction,
+    TamperCheckOutcome, TamperGuardStatusReport, KILLSWITCH_ACTIVE,
 };
 pub use watchdog::{HardwareWatchdog, MemoryPressureLevel, WatchdogConfig};

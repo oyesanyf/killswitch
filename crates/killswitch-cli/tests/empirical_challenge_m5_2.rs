@@ -93,7 +93,7 @@ fn test_subsystem_diagnostics_live_binary_verify_and_check() {
         stdout_verify
     );
     assert!(
-        stdout_verify.contains("ALL 6 SUBSYSTEM PHASES PASSED"),
+        stdout_verify.contains("ALL 7 SUBSYSTEM PHASES PASSED"),
         "Missing all passed marker in output: {}",
         stdout_verify
     );
@@ -116,8 +116,8 @@ fn test_subsystem_diagnostics_live_binary_verify_and_check() {
     );
     let stdout_check = String::from_utf8_lossy(&output_check.stdout);
     assert!(
-        stdout_check.contains("ALL 6 SUBSYSTEM PHASES PASSED"),
-        "start.exe --check must report all 6 phases passed"
+        stdout_check.contains("ALL 7 SUBSYSTEM PHASES PASSED"),
+        "start.exe --check must report all 7 phases passed"
     );
 
     // 3. CLI help and invalid flag handling
@@ -144,10 +144,10 @@ fn test_subsystem_diagnostics_live_binary_verify_and_check() {
 async fn test_subsystem_diagnostics_in_memory_verifier_contract() {
     let report = SubsystemVerifier::run_all()
         .await
-        .expect("In-memory self-diagnostics must pass all 6 phases");
+        .expect("In-memory self-diagnostics must pass all 7 phases");
 
     assert!(report.all_passed, "All phases must report passed");
-    assert_eq!(report.phases.len(), 6, "Must contain exactly 6 phases");
+    assert_eq!(report.phases.len(), 7, "Must contain exactly 7 phases");
 
     for (idx, phase) in report.phases.iter().enumerate() {
         assert_eq!(

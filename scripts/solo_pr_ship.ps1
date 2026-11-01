@@ -4,6 +4,11 @@ param(
 )
 $ErrorActionPreference = "Stop"
 
+# Process-scoped PATH resolution for Git and GitHub CLI (Zero-Touch Registry/System PATH)
+if (Test-Path "C:\Program Files\Git\cmd") {
+    $env:PATH = "C:\Program Files\Git\cmd;C:\Program Files\Git\bin;C:\Program Files\GitHub CLI;" + $env:PATH
+}
+
 # Guard against recursive hook invocation
 $env:OSOOSI_SKIP_POST_COMMIT_HOOK = "1"
 
@@ -127,7 +132,6 @@ try:
     if isinstance(reviews, list) and any(r and isinstance(r, dict) and r.get('state') == 'APPROVED' for r in reviews):
         print('APPROVED')
     else:
-        # Check if branch protection requires reviews
         prot_req = urllib.request.Request(
             'https://api.github.com/repos/' + repo_slug + '/branches/main/protection',
             headers={'Authorization': 'Bearer ' + token, 'User-Agent': 'KillSwitch-PR-Ship'}
@@ -137,7 +141,6 @@ try:
             print('WAITING')
         except urllib.error.HTTPError as pe:
             if pe.code == 404:
-                # No branch protection, eligible for immediate merge
                 print('APPROVED')
             else:
                 print('WAITING')
@@ -196,7 +199,6 @@ for attempt in range(1, 6):
                 sys.exit(1)
 " "$prNumber" "$repoSlug"
 
-# Switch back to main and pull latest, or sync worktree to origin/main if main is checked out in another worktree
 $checkoutSuccess = $false
 try {
     $out = git checkout main 2>&1
@@ -215,11 +217,9 @@ if (-not $checkoutSuccess) {
     git reset --hard origin/main
 }
 
-# Delete remote branch if still present
 try {
     git push origin --delete $branchName 2>$null
 } catch {
-    # Ignore if already deleted
 }
 
 if (Test-Path "scripts/resolve_open_prs.py") {
