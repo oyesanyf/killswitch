@@ -535,3 +535,125 @@ async fn test_oshoosiclaw_research_accuracy_suite_and_4_gate_endpoints() {
     assert_eq!(json_val["accepted"].as_bool(), Some(false));
     assert_eq!(json_val["rejection_code"].as_str(), Some("RejectedOutdatedResearch"));
 }
+
+
+#[tokio::test]
+async fn test_oshoosiclaw_oso_aws_apc_tamper_and_hitl_endpoints() {
+    let state = setup_test_server_state();
+    let app = build_router(state);
+
+    // 1. GET /api/oso-aws-containment/status
+    let req_oso = Request::builder()
+        .method("GET")
+        .uri("/api/oso-aws-containment/status")
+        .body(Body::empty())
+        .unwrap();
+    let resp_oso = app.clone().oneshot(req_oso).await.unwrap();
+    assert_eq!(resp_oso.status(), StatusCode::OK);
+
+    // 2. POST /api/oso-aws-containment/watchdog-verify (simulate IAM policy swap -> triggers KillSwitch)
+    let req_wd = Request::builder()
+        .method("POST")
+        .uri("/api/oso-aws-containment/watchdog-verify")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::json!({
+                "simulate_policy_swap": true
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let resp_wd = app.clone().oneshot(req_wd).await.unwrap();
+    assert_eq!(resp_wd.status(), StatusCode::OK);
+    let body_wd = axum::body::to_bytes(resp_wd.into_body(), usize::MAX).await.unwrap();
+    let json_wd: serde_json::Value = serde_json::from_slice(&body_wd).unwrap();
+    assert_eq!(json_wd["iam_policy_invariant_ok"].as_bool(), Some(false));
+    assert_eq!(json_wd["kill_switch_engaged"].as_bool(), Some(true));
+
+    // 3. POST /api/apc/evaluate (Bounded Agents APC arXiv:2608.15888)
+    let req_apc = Request::builder()
+        .method("POST")
+        .uri("/api/apc/evaluate")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::json!({
+                "principal_id": "principal-alice",
+                "actor_id": "agent-worker-1",
+                "action": "read_confidential",
+                "resource": "docs/q3-financials",
+                "data_classification": "CONFIDENTIAL",
+                "task_session_id": "sess-apc-test-1"
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let resp_apc = app.clone().oneshot(req_apc).await.unwrap();
+    assert_eq!(resp_apc.status(), StatusCode::OK);
+    let body_apc = axum::body::to_bytes(resp_apc.into_body(), usize::MAX).await.unwrap();
+    let json_apc: serde_json::Value = serde_json::from_slice(&body_apc).unwrap();
+    assert_eq!(json_apc["allowed"].as_bool(), Some(true));
+
+    // Step 2 in same session: send_email -> blocked by C2_COMPOSITION
+    let req_apc2 = Request::builder()
+        .method("POST")
+        .uri("/api/apc/evaluate")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::json!({
+                "principal_id": "principal-alice",
+                "actor_id": "agent-worker-1",
+                "action": "send_email",
+                "resource": "external/email",
+                "data_classification": "PUBLIC",
+                "task_session_id": "sess-apc-test-1"
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let resp_apc2 = app.clone().oneshot(req_apc2).await.unwrap();
+    assert_eq!(resp_apc2.status(), StatusCode::OK);
+    let body_apc2 = axum::body::to_bytes(resp_apc2.into_body(), usize::MAX).await.unwrap();
+    let json_apc2: serde_json::Value = serde_json::from_slice(&body_apc2).unwrap();
+    assert_eq!(json_apc2["allowed"].as_bool(), Some(false));
+    assert_eq!(json_apc2["failed_condition"].as_str(), Some("C2_COMPOSITION"));
+
+    // 4. GET /api/tamper-guard/status
+    let req_tg = Request::builder()
+        .method("GET")
+        .uri("/api/tamper-guard/status")
+        .body(Body::empty())
+        .unwrap();
+    let resp_tg = app.clone().oneshot(req_tg).await.unwrap();
+    assert_eq!(resp_tg.status(), StatusCode::OK);
+    let body_tg = axum::body::to_bytes(resp_tg.into_body(), usize::MAX).await.unwrap();
+    let json_tg: serde_json::Value = serde_json::from_slice(&body_tg).unwrap();
+    assert_eq!(json_tg["tamper_guard"]["console_mode_hardened"].as_bool(), Some(true));
+
+    // 5. POST /api/hitl/evaluate (Cognitive Red-Team HITL auto-veto on deceptive credential dump)
+    let req_hitl = Request::builder()
+        .method("POST")
+        .uri("/api/hitl/evaluate")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::json!({
+                "session_id": "sess-hitl-1",
+                "arm_id": 1,
+                "arm_generation": 1,
+                "agent_id": "worker-1",
+                "correlation_id": "corr-hitl-1",
+                "tool_name": "extract_credentials",
+                "target_resource": "C:\\Windows\\System32\\lsass.exe",
+                "command_args": "--dump",
+                "stated_justification": "Formatting markdown docs",
+                "incoming_taint": "UntrustedExternal",
+                "user_objective": "Format README"
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let resp_hitl = app.clone().oneshot(req_hitl).await.unwrap();
+    assert_eq!(resp_hitl.status(), StatusCode::OK);
+    let body_hitl = axum::body::to_bytes(resp_hitl.into_body(), usize::MAX).await.unwrap();
+    let json_hitl: serde_json::Value = serde_json::from_slice(&body_hitl).unwrap();
+    assert_eq!(json_hitl["auto_vetoed"].as_bool(), Some(true));
+}

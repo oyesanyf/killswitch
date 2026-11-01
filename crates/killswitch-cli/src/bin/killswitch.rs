@@ -4,7 +4,7 @@
 //! boots 100% of the 6 KillSwitch subsystems into a single unified runtime and serves
 //! the Interactive WebUI Dashboard + Local Control API (with automatic port fallback if 3030 is in use).
 //!
-//! Also provides all operator subcommands (`status`, `isolate`, `restore`, `service`, `lineage`, `graph`, `verify`).
+//! Also provides all operator subcommands (`status`, `isolate`, `restore`, `service`, `lineage`, `graph`, `verify`, `containment-suite`).
 
 use std::path::PathBuf;
 use anyhow::Result;
@@ -58,8 +58,14 @@ struct Cli {
     /// Reject a staged ArXiv research candidate by ID (e.g. 2603.02277)
     #[arg(long)]
     research_reject: Option<String>,
+
+    /// Inspect or verify the Continuous EDR Behavioral Anomaly & Process Lineage Engine
     #[arg(long)]
     edr_behavior: bool,
+
+    /// Inspect the OshoosiClaw Migrated Containment & KillSwitch Suite (Oso/AWS R1-R5, APC, Tamper Guard, HITL)
+    #[arg(long)]
+    containment_suite: bool,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -142,11 +148,15 @@ enum Commands {
 
     /// Run the 6-phase in-memory self-diagnostics
     Verify,
+
     /// Inspect or verify the Continuous EDR Behavioral Anomaly & Process Lineage Engine
     EdrBehavior {
         #[arg(default_value = "verify-chains")]
         action: String,
     },
+
+    /// Inspect the OshoosiClaw Migrated Containment & KillSwitch Suite (Oso/AWS R1-R5, APC, Tamper Guard, HITL)
+    ContainmentSuite,
 
     /// Inspect, stage, approve, or reject ArXiv & LangExtract security research candidates
     Research {
@@ -197,6 +207,8 @@ async fn boot_unified_webui_runtime(
         )
         .try_init()
         .ok();
+
+    let _ = killswitch_telemetry::harden_windows_console();
 
     println!(
         r#"
@@ -292,6 +304,11 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
+    if cli.containment_suite {
+        handle_containment_suite().await?;
+        return Ok(());
+    }
+
     if cli.edr_behavior {
         handle_edr_behavior("verify-chains").await?;
         return Ok(());
@@ -353,6 +370,7 @@ async fn main() -> Result<()> {
         }
         Some(Commands::Verify) => handle_verify().await?,
         Some(Commands::EdrBehavior { action }) => handle_edr_behavior(&action).await?,
+        Some(Commands::ContainmentSuite) => handle_containment_suite().await?,
         Some(Commands::Research {
             action,
             id,

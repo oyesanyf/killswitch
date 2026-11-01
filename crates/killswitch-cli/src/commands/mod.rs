@@ -428,3 +428,39 @@ pub async fn handle_edr_behavior(action: &str) -> Result<()> {
     println!("================================================================================");
     Ok(())
 }
+
+
+pub async fn handle_containment_suite() -> Result<()> {
+    let oso_status = killswitch_telemetry::global_oso_aws_containment().status_report();
+    let apc_status = killswitch_telemetry::global_apc_pdp().status_summary();
+    let tamper_status = killswitch_telemetry::get_tamper_guard_status();
+    let hitl_status = killswitch_telemetry::global_cognitive_redteam().get_status();
+
+    println!("\n================================================================================");
+    println!("🛡️  OSHOOSICLAW MIGRATED CONTAINMENT & KILLSWITCH SUITE");
+    println!("================================================================================");
+    println!(
+        "  [1] Oso 3-Way Intersection + AWS R1-R5 Watchdog: Cluster='{}' | DesiredCount={} | Epoch={}",
+        oso_status.cluster_name, oso_status.desired_count, oso_status.generation_epoch
+    );
+    println!(
+        "  [2] Bounded Agents APC (arXiv:2608.15888):       Policy='{}' | CrossSessionLineage={} | EvidenceIntegrity={}",
+        apc_status.active_policy_version,
+        apc_status.enforce_cross_session_lineage,
+        apc_status.evidence_chain_integrity_ok
+    );
+    println!(
+        "  [3] 4-Gate DB & Executable Tamper Guard:         ConsoleHardened={} | ExeDaclHardened={} | MaintWindow={}",
+        tamper_status.console_mode_hardened,
+        tamper_status.exe_dacl_hardened,
+        tamper_status.maintenance_window_active
+    );
+    println!(
+        "  [4] Cognitive Red-Team HITL Interceptor:         Evaluations={} | AutoVetoes={} | Quorums={}",
+        hitl_status.total_evaluations,
+        hitl_status.total_auto_vetoes,
+        hitl_status.total_quorum_completions
+    );
+    println!("================================================================================\n");
+    Ok(())
+}
