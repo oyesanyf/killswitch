@@ -461,3 +461,77 @@ async fn test_edr_behavioral_lineage_ioa_and_baseline_narrative_endpoints() {
     let final_nar = narratives.last().unwrap();
     assert!(final_nar["composite_risk_score"].as_f64().unwrap() >= 0.85);
 }
+
+
+#[tokio::test]
+async fn test_oshoosiclaw_research_accuracy_suite_and_4_gate_endpoints() {
+    let state = setup_test_server_state();
+    let app = build_router(state);
+
+    // 1. POST /api/research/verify-accuracy
+    let req_acc = Request::builder()
+        .method("POST")
+        .uri("/api/research/verify-accuracy")
+        .header("content-type", "application/json")
+        .body(Body::from("{}"))
+        .unwrap();
+    let resp_acc = app.clone().oneshot(req_acc).await.unwrap();
+    assert_eq!(resp_acc.status(), StatusCode::OK);
+    let body_acc = axum::body::to_bytes(resp_acc.into_body(), usize::MAX).await.unwrap();
+    let json_acc: serde_json::Value = serde_json::from_slice(&body_acc).unwrap();
+    assert_eq!(json_acc["status"].as_str(), Some("verified"));
+    assert_eq!(json_acc["true_positive_rate_pct"].as_f64(), Some(100.0));
+    assert_eq!(json_acc["false_positive_rate_pct"].as_f64(), Some(0.0));
+    assert_eq!(json_acc["byte_exact_parity"].as_bool(), Some(true));
+    assert_eq!(json_acc["llm_fusion_consensus_passed"].as_bool(), Some(true));
+    assert!(json_acc["total_rules_tested"].as_u64().unwrap_or(0) >= 4);
+
+    // 2. POST /api/research/novelty-check
+    let req_nov = Request::builder()
+        .method("POST")
+        .uri("/api/research/novelty-check")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::json!({
+                "arxiv_ids": ["arXiv:2402.12345v1", "2610.09167", "2611.99999v1"]
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let resp_nov = app.clone().oneshot(req_nov).await.unwrap();
+    assert_eq!(resp_nov.status(), StatusCode::OK);
+    let body_nov = axum::body::to_bytes(resp_nov.into_body(), usize::MAX).await.unwrap();
+    let json_nov: serde_json::Value = serde_json::from_slice(&body_nov).unwrap();
+    assert_eq!(json_nov["novel_count"].as_u64(), Some(1));
+    assert_eq!(json_nov["already_implemented_count"].as_u64(), Some(2));
+
+    // 3. POST /api/research/validate (rejects outdated 2024 paper)
+    let req_val = Request::builder()
+        .method("POST")
+        .uri("/api/research/validate")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::json!({
+                "rule": {
+                    "rule_id": "ARXIV-DEF-2401.11111",
+                    "arxiv_id": "2401.11111v1",
+                    "title": "Outdated 2024 Preprint",
+                    "attack_vector": "Container escape",
+                    "target_boundary": "container_runtime_privilege",
+                    "extraction_class": "breakout_vector",
+                    "indicator_pattern": "/var/run/docker.sock | nsenter",
+                    "cedar_forbid_policy": "",
+                    "target_crate": "killswitch-telemetry",
+                    "enrolled_at_utc": "2026-10-28T00:00:00Z"
+                }
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let resp_val = app.clone().oneshot(req_val).await.unwrap();
+    assert_eq!(resp_val.status(), StatusCode::OK);
+    let body_val = axum::body::to_bytes(resp_val.into_body(), usize::MAX).await.unwrap();
+    let json_val: serde_json::Value = serde_json::from_slice(&body_val).unwrap();
+    assert_eq!(json_val["accepted"].as_bool(), Some(false));
+    assert_eq!(json_val["rejection_code"].as_str(), Some("RejectedOutdatedResearch"));
+}

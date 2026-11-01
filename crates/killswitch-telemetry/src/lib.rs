@@ -25,9 +25,16 @@ pub use attack::{
 pub use canary::{CanaryAuditReport, CanaryDecoyFile, CanaryManager};
 pub use causal::{CausalEdge, CausalEdgeKind, CausalNodeType, CausalSecurityGraph};
 pub use continuous_defense::{
-    global_continuous_defense, BoundaryDirection, BoundaryInspectionVerdict,
-    BoundaryViolationIncident, BreakoutTaxonomyCategory, ContinuousDefenseEngine,
-    OperationalResilienceReport, OperationalResilienceTracker,
+    canonical_research_rule_id, clear_all_ingested_research_rules,
+    detect_verified_code_repo_from_texts, global_continuous_defense, is_current_research_arxiv_id,
+    list_ingested_research_rules, normalize_base_arxiv_id, register_ingested_research_rule,
+    remove_ingested_research_rule, restore_default_research_rules, run_paper2agent_accuracy_suite,
+    safe_arxiv_abs_url, synthesize_rust_guard_snippet, validate_research_rule_acceptance,
+    BoundaryDirection, BoundaryInspectionVerdict, BoundaryViolationIncident,
+    BreakoutTaxonomyCategory, ContinuousDefenseEngine, IngestedResearchDefenseRule,
+    LlmFusionArmReport, OperationalResilienceReport, OperationalResilienceTracker,
+    Paper2AgentAccuracySuiteResult, ResearchAcceptanceVerdict, RuleAccuracyReport,
+    CODE_REPO_PRIORITY_BOOST,
 };
 pub use correlator::{EventCorrelator, ProcessCorrelationContext};
 pub use edr_behavioral::{

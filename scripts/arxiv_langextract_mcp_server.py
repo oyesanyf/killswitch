@@ -2,13 +2,14 @@
 """
 arxiv_langextract_mcp_server.py
 ======================================================================================
-arXiv Research Discovery, Multi-Factor Article Ranking & Google LangExtract MCP Server
-with Strict Novelty Gating & Codebase Enhancement Verification for Antigravity IDE,
+arXiv Research Discovery, Multi-Factor Article Ranking, Google LangExtract Source Grounding,
+and Paper2Code Production Rust & Cedar Synthesis MCP Server for Antigravity IDE,
 OshoosiClaw, KillSwitch, and AgentOctopus.
 """
 
 from __future__ import annotations
 
+import importlib
 import json
 import logging
 import os
@@ -27,8 +28,14 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from mcp.server.mcpserver import MCPServer
-import langextract as lx
-import arxiv
+try:
+    import langextract as lx
+except ImportError:
+    lx = None  # type: ignore
+try:
+    import arxiv
+except ImportError:
+    arxiv = None  # type: ignore
 
 from arxiv_langextract_feed import (
     BREAKOUT_SIGNATURES,
@@ -47,6 +54,12 @@ from arxiv_langextract_feed import (
     search_and_rank_articles,
     search_breakout_papers,
 )
+import arxiv_paper2code_generator
+
+
+def synthesize_production_rust_and_cedar(paper: dict, extractions: list) -> dict:
+    importlib.reload(arxiv_paper2code_generator)
+    return arxiv_paper2code_generator.synthesize_production_rust_and_cedar(paper, extractions)
 
 server = MCPServer("arxiv-langextract")
 
@@ -63,13 +76,14 @@ for _logger_name in ("arxiv", "httpx", "httpcore", "urllib3", "langextract", "mc
 @server.tool()
 async def langextract_status() -> str:
     """
-    Check the health and configuration status of the arXiv + Google LangExtract MCP server.
+    Check the health and configuration status of the arXiv + Google LangExtract + Paper2Code MCP server.
     Returns installed versions, ranking factor weights, active breakout signature classes,
-    codebase-implemented paper blacklist, and supported target systems.
+    Paper2Code Rust & Cedar synthesis capabilities, and supported target systems.
     """
     return json.dumps({
         "server": "arxiv-langextract",
         "status": "operational",
+        "paper2code_rust_and_cedar_synthesis": "enabled",
         "python_version": sys.version.split()[0],
         "langextract_version": getattr(lx, "__version__", "1.7.1"),
         "arxiv_version": getattr(arxiv, "__version__", "4.0.2"),
@@ -79,6 +93,7 @@ async def langextract_status() -> str:
             "empirical_rigor_max": 20.0,
             "temporal_recency_max": 15.0,
             "novelty_delta_max": 15.0,
+            "code_repo_priority_bonus": 20.0,
             "total_max_score": 100.0,
         },
         "priority_tiers": {
@@ -110,14 +125,8 @@ async def search_and_rank_breakout_articles(
 ) -> str:
     """
     Search arXiv for research articles, extract source-grounded breakout vectors using Google
-    LangExtract, and rank the articles from highest to lowest (0-100 score) based on grounded
-    vector density, threat severity tier, empirical rigor, recency, and codebase novelty.
-
-    Args:
-        query: Search query for arXiv (e.g., 'LLM container sandbox escape', 'agent prompt injection').
-        max_results: Maximum number of candidate papers to retrieve and rank (default: 5).
-        min_score: Optional minimum rank score threshold (0.0 to 100.0) to filter results.
-        only_novel_enhancements: Filter out papers already implemented in the codebase (default: True).
+    LangExtract, rank the articles from highest to lowest (0-100 score), and synthesize
+    production Rust defense code and Cedar policies for each ranked paper.
     """
     try:
         ranked = search_and_rank_articles(
@@ -126,6 +135,10 @@ async def search_and_rank_breakout_articles(
             min_score=float(min_score),
             only_novel_enhancements=bool(only_novel_enhancements),
         )
+        for item in ranked:
+            item["generated_production_code"] = synthesize_production_rust_and_cedar(
+                item, item.get("extractions", [])
+            )
         return json.dumps({
             "query": query,
             "total_ranked": len(ranked),
@@ -146,12 +159,10 @@ async def extract_and_ground_article(
     output_html_path: str = "",
 ) -> str:
     """
-    Fetch a specific arXiv paper by ID (e.g. '2603.02277'), run Google LangExtract 3-class character-interval
-    source grounding, compute its threat rank score, and optionally generate an interactive HTML visualization.
-
-    Args:
-        arxiv_id: The arXiv identifier (e.g., '2603.02277' or '2509.06917').
-        output_html_path: Optional file path to save the interactive LangExtract HTML visualization.
+    Fetch a specific arXiv paper by ID (e.g. '2608.15888' or '2603.02277'), run Google LangExtract
+    3-class character-interval source grounding, compute its threat rank score, synthesize and
+    print the full production Rust defense module + tighten-only AST guard + Cedar policies so
+    you can inspect or port it directly in your IDE, and optionally generate an interactive HTML report.
     """
     try:
         clean_id = normalize_arxiv_id(arxiv_id)
@@ -161,6 +172,8 @@ async def extract_and_ground_article(
 
         extractions, annotated_doc = extract_grounded_breakouts(paper)
         rank_info = compute_article_rank(paper, extractions)
+        paper["code_repo_url"] = rank_info.get("code_repo_url", paper.get("code_repo_url", ""))
+        code_bundle = synthesize_production_rust_and_cedar(paper, extractions)
 
         saved_html = None
         if output_html_path.strip():
@@ -175,6 +188,8 @@ async def extract_and_ground_article(
             "authors": paper["authors"],
             "url": paper["url"],
             "pdf_url": paper["pdf_url"],
+            "has_code_repo": rank_info["has_code_repo"],
+            "code_repo_url": rank_info["code_repo_url"],
             "rank_score": rank_info["total_score"],
             "priority_tier": rank_info["priority_tier"],
             "is_novel_to_codebase": rank_info["is_novel_to_codebase"],
@@ -184,6 +199,8 @@ async def extract_and_ground_article(
             "score_breakdown": rank_info["breakdown"],
             "grounded_extractions": extractions,
             "interactive_html_report": saved_html,
+            "generated_production_code": code_bundle,
+            "printable_code_bundle_markdown": code_bundle["printable_code_bundle_markdown"],
         }, indent=2)
     except Exception as exc:
         return json.dumps({"error": str(exc), "arxiv_id": arxiv_id}, indent=2)
@@ -200,14 +217,9 @@ async def ingest_ranked_articles_to_killswitch(
     server_url: str = "http://127.0.0.1:3030",
 ) -> str:
     """
-    Search and rank arXiv articles (or fetch a specific arXiv ID), extract the grounded breakout
-    vectors from the top-K highest-ranked articles, and submit them to KillSwitch/OshoosiClaw's
-    /api/research/ingest endpoint to verify containment coverage.
-
-    Args:
-        query_or_arxiv_id: Either an arXiv ID (e.g. '2603.02277') or a search query.
-        top_k: Number of top-ranked papers to ingest (default: 3).
-        server_url: Control server URL (default: 'http://127.0.0.1:3030').
+    Search and rank arXiv articles (or fetch a specific arXiv ID), synthesize production Rust
+    defense code and Cedar policies, and submit them to OshoosiClaw/KillSwitch (with automatic
+    local Paper2Code codebase synthesis & verification fallback when the HTTP daemon is offline).
     """
     try:
         q = query_or_arxiv_id.strip()
@@ -220,19 +232,27 @@ async def ingest_ranked_articles_to_killswitch(
                 return json.dumps({"error": f"Paper not found for ID: {clean_q}"}, indent=2)
             exts, _ = extract_grounded_breakouts(paper)
             r_info = compute_article_rank(paper, exts)
+            paper["code_repo_url"] = r_info.get("code_repo_url", paper.get("code_repo_url", ""))
+            code_bundle = synthesize_production_rust_and_cedar(paper, exts)
             selected = [{
                 "rank_position": 1,
                 "arxiv_id": paper["arxiv_id"],
                 "title": paper["title"],
+                "code_repo_url": r_info.get("code_repo_url", ""),
                 "rank_score": r_info["total_score"],
                 "priority_tier": r_info["priority_tier"],
                 "is_novel_to_codebase": r_info["is_novel_to_codebase"],
                 "enhances_codebase": r_info["enhances_codebase"],
                 "extractions": exts,
+                "generated_production_code": code_bundle,
             }]
         else:
             ranked = search_and_rank_articles(query=q, max_results=max(top_k * 2, 5), only_novel_enhancements=True)
             selected = ranked[:max(1, int(top_k))]
+            for item in selected:
+                item["generated_production_code"] = synthesize_production_rust_and_cedar(
+                    item, item.get("extractions", [])
+                )
 
         all_extractions = []
         for item in selected:
@@ -246,22 +266,28 @@ async def ingest_ranked_articles_to_killswitch(
                     "rank_position": a["rank_position"],
                     "arxiv_id": a["arxiv_id"],
                     "title": a["title"],
+                    "code_repo_url": a.get("code_repo_url", ""),
                     "rank_score": a["rank_score"],
                     "priority_tier": a["priority_tier"],
                     "is_novel_to_codebase": a.get("is_novel_to_codebase", True),
                     "vectors_extracted": len(a["extractions"]),
+                    "generated_production_code": a["generated_production_code"],
                 }
                 for a in selected
             ],
             "total_vectors_submitted": len(all_extractions),
             "killswitch_ingestion_result": ingest_resp,
+            "printable_code_bundle_markdown": (
+                selected[0]["generated_production_code"]["printable_code_bundle_markdown"]
+                if selected else ""
+            ),
         }, indent=2)
     except Exception as exc:
         return json.dumps({"error": str(exc)}, indent=2)
 
 
 # =============================================================================
-# Tool 5: rank_arxiv_security_papers (New Antigravity MCP Tool)
+# Tool 5: rank_arxiv_security_papers
 # =============================================================================
 
 @server.tool()
@@ -272,15 +298,9 @@ async def rank_arxiv_security_papers(
     only_novel_enhancements: bool = True,
 ) -> str:
     """
-    Search arXiv, filter strictly to novel papers that enhance the codebase (filtering out
-    already implemented works like arXiv:2610.09167), run 3-class Google LangExtract source
-    grounding, rank papers highest-to-lowest (0-100 score), and return a formatted markdown table.
-
-    Args:
-        query: Search query for arXiv (default: 'LLM agent sandbox escape breakout').
-        top_k: Number of highest-ranked novel papers to return (default: 5).
-        target_system: Filter enhancements by system ('all', 'oshoosiclaw', 'killswitch', 'octopus').
-        only_novel_enhancements: Strict novelty filter rejecting already-implemented papers (default: True).
+    Search arXiv, filter strictly to novel papers that enhance the codebase, run 3-class Google
+    LangExtract source grounding, rank papers highest-to-lowest (0-100 score), synthesize
+    production Rust and Cedar code for each paper, and return a formatted markdown table.
     """
     try:
         ranked_articles, filtered_out = search_and_rank_articles(
@@ -292,17 +312,20 @@ async def rank_arxiv_security_papers(
             return_filtered=True,
         )
 
-        # Build Markdown summary table
         lines = [
-            "| Rank | arXiv ID | Score | Priority Tier | Title | Target Crates Enhanced | Grounded Vectors |",
-            "|:---:|:---:|:---:|:---:|:---|:---|:---:|",
+            "| Rank | arXiv ID | Score | Priority Tier | Title | Code Repo | Target Crates Enhanced |",
+            "|:---:|:---:|:---:|:---:|:---|:---|:---|",
         ]
         for a in ranked_articles:
+            a["generated_production_code"] = synthesize_production_rust_and_cedar(
+                a, a.get("extractions", [])
+            )
             crates_str = ", ".join(c.split()[0] for c in a.get("target_crates_enhanced", [])) or "General"
-            title_trunc = a["title"][:55] + "..." if len(a["title"]) > 55 else a["title"]
+            title_trunc = a["title"][:50] + "..." if len(a["title"]) > 50 else a["title"]
+            repo_str = a.get("code_repo_url") or "N/A"
             lines.append(
                 f"| #{a['rank_position']} | [{a['arxiv_id']}]({a['url']}) | {a['rank_score']}/100 | "
-                f"`{a['priority_tier']}` | {title_trunc} | `{crates_str}` | {a['grounded_vector_count']} |"
+                f"`{a['priority_tier']}` | {title_trunc} | {repo_str} | `{crates_str}` |"
             )
 
         markdown_table = "\n".join(lines)
@@ -321,7 +344,7 @@ async def rank_arxiv_security_papers(
 
 
 # =============================================================================
-# Tool 6: extract_grounded_breakout_vectors (New Antigravity MCP Tool)
+# Tool 6: extract_grounded_breakout_vectors
 # =============================================================================
 
 @server.tool()
@@ -331,13 +354,8 @@ async def extract_grounded_breakout_vectors(
 ) -> str:
     """
     Extracts 3-class source-grounded objects (BreakoutVector, MathematicalFormulation, and
-    DefenseCountermeasure) with exact character intervals from an arXiv paper, and generates
-    an interactive Google LangExtract HTML audit report.
-
-    Args:
-        arxiv_id: The arXiv identifier (e.g., '2603.02277').
-        output_html_path: File path for interactive HTML visualization. If omitted, defaults to
-                          'D:/harfile/OshoosiClaw/target/langextract_audit_<arxiv_id>.html'.
+    DefenseCountermeasure) with exact character intervals from an arXiv paper, synthesizes
+    production Rust defense code and Cedar policies, and generates an interactive HTML report.
     """
     try:
         clean_id = normalize_arxiv_id(arxiv_id)
@@ -347,8 +365,9 @@ async def extract_grounded_breakout_vectors(
 
         extractions, annotated_doc = extract_grounded_breakouts(paper)
         rank_info = compute_article_rank(paper, extractions)
+        paper["code_repo_url"] = rank_info.get("code_repo_url", paper.get("code_repo_url", ""))
+        code_bundle = synthesize_production_rust_and_cedar(paper, extractions)
 
-        # Determine output HTML path
         if not output_html_path.strip():
             target_dir = Path("D:/harfile/OshoosiClaw/target")
             target_dir.mkdir(parents=True, exist_ok=True)
@@ -365,6 +384,7 @@ async def extract_grounded_breakout_vectors(
             "title": paper["title"],
             "published": paper["published"],
             "url": paper["url"],
+            "code_repo_url": rank_info["code_repo_url"],
             "rank_score": rank_info["total_score"],
             "priority_tier": rank_info["priority_tier"],
             "is_novel_to_codebase": rank_info["is_novel_to_codebase"],
@@ -377,13 +397,15 @@ async def extract_grounded_breakout_vectors(
             "breakout_vectors": breakout_vectors,
             "mathematical_formulations": math_formulations,
             "defense_countermeasures": defense_countermeasures,
+            "generated_production_code": code_bundle,
+            "printable_code_bundle_markdown": code_bundle["printable_code_bundle_markdown"],
         }, indent=2)
     except Exception as exc:
         return json.dumps({"error": str(exc), "arxiv_id": arxiv_id}, indent=2)
 
 
 # =============================================================================
-# Tool 7: audit_defense_coverage (New Antigravity MCP Tool)
+# Tool 7: audit_defense_coverage
 # =============================================================================
 
 @server.tool()
@@ -394,11 +416,8 @@ async def audit_defense_coverage(
     """
     Submits grounded extractions from an arXiv paper to active daemons (OshoosiClaw on :3030,
     KillSwitch on :3031) or performs deterministic local verification against the 7-Ring Continuous
-    Reference Monitor, returning a live-probe verification and codebase enhancement gap analysis.
-
-    Args:
-        arxiv_id: arXiv identifier to evaluate (default: '2603.02277').
-        targets: Target systems to audit (default: ['oshoosiclaw', 'killswitch', 'octopus']).
+    Reference Monitor, returning a live-probe verification, codebase enhancement gap analysis,
+    and printable production Rust & Cedar code bundle.
     """
     try:
         clean_id = normalize_arxiv_id(arxiv_id)
@@ -406,12 +425,20 @@ async def audit_defense_coverage(
             targets = ["oshoosiclaw", "killswitch", "octopus"]
 
         audit_res = audit_defense_coverage_multi_target(clean_id, targets=targets)
+        paper = fetch_paper_by_id(clean_id)
+        if paper:
+            exts, _ = extract_grounded_breakouts(paper)
+            r_info = compute_article_rank(paper, exts)
+            paper["code_repo_url"] = r_info.get("code_repo_url", paper.get("code_repo_url", ""))
+            code_bundle = synthesize_production_rust_and_cedar(paper, exts)
+            audit_res["generated_production_code"] = code_bundle
+            audit_res["printable_code_bundle_markdown"] = code_bundle["printable_code_bundle_markdown"]
         return json.dumps(audit_res, indent=2)
     except Exception as exc:
         return json.dumps({"error": str(exc), "arxiv_id": arxiv_id}, indent=2)
 
 
 if __name__ == "__main__":
-    sys.stderr.write("Starting arXiv + Google LangExtract MCP Server on stdio (7 Tools Registered)...\n")
+    sys.stderr.write("Starting arXiv + Google LangExtract + Paper2Code MCP Server on stdio (7 Tools Registered)...\n")
     sys.stderr.flush()
     server.run(transport="stdio")
