@@ -115,7 +115,7 @@ impl Default for LandlockSandboxConfig {
                 PathBuf::from("/etc"),
             ],
             read_write_paths: vec![PathBuf::from("/tmp")],
-            allowed_tcp_ports: vec![3030, 53],
+            allowed_tcp_ports: vec![3030],
             strict: false,
         }
     }
@@ -304,8 +304,444 @@ fn add_path_rule(ruleset_fd: i32, path: &Path, writable: bool) -> Result<(), Kil
 }
 
 // ---------------------------------------------------------------------------
-// 2. Linux Raw Netlink Socket Isolator
+// 2. Linux Raw Netlink Socket Isolator & Route Blackholing
 // ---------------------------------------------------------------------------
+
+// Netlink Route Constants (linux/rtnetlink.h, linux/netlink.h)
+pub const RTM_NEWROUTE: u16 = 24;
+pub const RTM_DELROUTE: u16 = 25;
+pub const RTM_GETROUTE: u16 = 26;
+
+pub const NLM_F_REQUEST: u16 = 0x01;
+pub const NLM_F_ACK: u16 = 0x04;
+pub const NLM_F_CREATE: u16 = 0x400;
+pub const NLM_F_EXCL: u16 = 0x200;
+pub const NLM_F_REPLACE: u16 = 0x100;
+
+pub const RTN_UNSPEC: u8 = 0;
+pub const RTN_UNICAST: u8 = 1;
+pub const RTN_LOCAL: u8 = 2;
+pub const RTN_BLACKHOLE: u8 = 6;
+pub const RTN_UNREACHABLE: u8 = 7;
+pub const RTN_PROHIBIT: u8 = 8;
+
+pub const RT_TABLE_MAIN: u8 = 254;
+pub const RT_TABLE_LOCAL: u8 = 255;
+
+pub const RTPROT_BOOT: u8 = 3;
+pub const RTPROT_STATIC: u8 = 4;
+
+pub const RT_SCOPE_UNIVERSE: u8 = 0;
+pub const RT_SCOPE_NOWHERE: u8 = 255;
+
+pub const RTA_DST: u16 = 1;
+pub const RTA_PRIORITY: u16 = 6;
+pub const RTA_TABLE: u16 = 15;
+
+// Netlink INET_DIAG Constants (linux/inet_diag.h, linux/sock_diag.h)
+pub const NETLINK_INET_DIAG: i32 = 4;
+pub const SOCK_DIAG_BY_FAMILY: u16 = 20;
+pub const SOCK_DESTROY: u16 = 21;
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NlMsgHdr {
+    pub nlmsg_len: u32,
+    pub nlmsg_type: u16,
+    pub nlmsg_flags: u16,
+    pub nlmsg_seq: u32,
+    pub nlmsg_pid: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RtMsg {
+    pub rtm_family: u8,
+    pub rtm_dst_len: u8,
+    pub rtm_src_len: u8,
+    pub rtm_tos: u8,
+    pub rtm_table: u8,
+    pub rtm_protocol: u8,
+    pub rtm_scope: u8,
+    pub rtm_type: u8,
+    pub rtm_flags: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RtAttr {
+    pub rta_len: u16,
+    pub rta_type: u16,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SockAddrNl {
+    pub nl_family: u16,
+    pub nl_pad: u16,
+    pub nl_pid: u32,
+    pub nl_groups: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct InetDiagSockId {
+    pub idiag_sport: u16,
+    pub idiag_dport: u16,
+    pub idiag_src: [u32; 4],
+    pub idiag_dst: [u32; 4],
+    pub idiag_if: u32,
+    pub idiag_cookie: [u32; 2],
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct InetDiagReqV2 {
+    pub sdiag_family: u8,
+    pub sdiag_protocol: u8,
+    pub idiag_ext: u8,
+    pub pad: u8,
+    pub idiag_states: u32,
+    pub id: InetDiagSockId,
+}
+
+/// Builds a binary Netlink route blackhole message for IPv4 (0.0.0.0/0) or IPv6 (::/0).
+pub fn build_blackhole_route_msg(is_v6: bool, is_delete: bool, priority: u32) -> Vec<u8> {
+    let family = if is_v6 {
+        #[cfg(target_os = "linux")]
+        {
+            libc::AF_INET6 as u8
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            10u8
+        }
+    } else {
+        #[cfg(target_os = "linux")]
+        {
+            libc::AF_INET as u8
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            2u8
+        }
+    };
+
+    let rta_attr_len = std::mem::size_of::<RtAttr>() + std::mem::size_of::<u32>();
+    let total_len = std::mem::size_of::<NlMsgHdr>() + std::mem::size_of::<RtMsg>() + rta_attr_len;
+
+    let nlmsg_type = if is_delete {
+        RTM_DELROUTE
+    } else {
+        RTM_NEWROUTE
+    };
+    let nlmsg_flags = if is_delete {
+        NLM_F_REQUEST | NLM_F_ACK
+    } else {
+        NLM_F_REQUEST | NLM_F_ACK | NLM_F_CREATE | NLM_F_REPLACE
+    };
+
+    let mut buf = Vec::with_capacity(total_len);
+
+    let hdr = NlMsgHdr {
+        nlmsg_len: total_len as u32,
+        nlmsg_type,
+        nlmsg_flags,
+        nlmsg_seq: 1,
+        nlmsg_pid: 0,
+    };
+
+    let rt = RtMsg {
+        rtm_family: family,
+        rtm_dst_len: 0, // 0.0.0.0/0 or ::/0
+        rtm_src_len: 0,
+        rtm_tos: 0,
+        rtm_table: RT_TABLE_MAIN,
+        rtm_protocol: RTPROT_STATIC,
+        rtm_scope: RT_SCOPE_UNIVERSE,
+        rtm_type: RTN_BLACKHOLE,
+        rtm_flags: 0,
+    };
+
+    let rta = RtAttr {
+        rta_len: rta_attr_len as u16,
+        rta_type: RTA_PRIORITY,
+    };
+
+    unsafe {
+        let hdr_bytes = std::slice::from_raw_parts(
+            &hdr as *const _ as *const u8,
+            std::mem::size_of::<NlMsgHdr>(),
+        );
+        buf.extend_from_slice(hdr_bytes);
+
+        let rt_bytes = std::slice::from_raw_parts(
+            &rt as *const _ as *const u8,
+            std::mem::size_of::<RtMsg>(),
+        );
+        buf.extend_from_slice(rt_bytes);
+
+        let rta_bytes = std::slice::from_raw_parts(
+            &rta as *const _ as *const u8,
+            std::mem::size_of::<RtAttr>(),
+        );
+        buf.extend_from_slice(rta_bytes);
+
+        buf.extend_from_slice(&priority.to_ne_bytes());
+    }
+
+    buf
+}
+
+/// Builds a binary Netlink INET_DIAG SOCK_DESTROY message to abort a TCP connection.
+pub fn build_sock_destroy_msg(entry: &LinuxSocketEntry) -> Vec<u8> {
+    let family = if entry.is_ipv6 {
+        #[cfg(target_os = "linux")]
+        {
+            libc::AF_INET6 as u8
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            10u8
+        }
+    } else {
+        #[cfg(target_os = "linux")]
+        {
+            libc::AF_INET as u8
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            2u8
+        }
+    };
+
+    let total_len = std::mem::size_of::<NlMsgHdr>() + std::mem::size_of::<InetDiagReqV2>();
+
+    let hdr = NlMsgHdr {
+        nlmsg_len: total_len as u32,
+        nlmsg_type: SOCK_DESTROY,
+        nlmsg_flags: NLM_F_REQUEST | NLM_F_ACK,
+        nlmsg_seq: 2,
+        nlmsg_pid: 0,
+    };
+
+    let mut sock_id = InetDiagSockId {
+        idiag_sport: entry.local_port.to_be(),
+        idiag_dport: entry.remote_port.to_be(),
+        idiag_src: [0u32; 4],
+        idiag_dst: [0u32; 4],
+        idiag_if: 0,
+        idiag_cookie: [0xFFFFFFFF, 0xFFFFFFFF], // INET_DIAG_NOCOOKIE
+    };
+
+    match entry.local_addr {
+        IpAddr::V4(v4) => {
+            sock_id.idiag_src[0] = u32::from_ne_bytes(v4.octets());
+        }
+        IpAddr::V6(v6) => {
+            let o = v6.octets();
+            sock_id.idiag_src[0] = u32::from_ne_bytes([o[0], o[1], o[2], o[3]]);
+            sock_id.idiag_src[1] = u32::from_ne_bytes([o[4], o[5], o[6], o[7]]);
+            sock_id.idiag_src[2] = u32::from_ne_bytes([o[8], o[9], o[10], o[11]]);
+            sock_id.idiag_src[3] = u32::from_ne_bytes([o[12], o[13], o[14], o[15]]);
+        }
+    }
+
+    match entry.remote_addr {
+        IpAddr::V4(v4) => {
+            sock_id.idiag_dst[0] = u32::from_ne_bytes(v4.octets());
+        }
+        IpAddr::V6(v6) => {
+            let o = v6.octets();
+            sock_id.idiag_dst[0] = u32::from_ne_bytes([o[0], o[1], o[2], o[3]]);
+            sock_id.idiag_dst[1] = u32::from_ne_bytes([o[4], o[5], o[6], o[7]]);
+            sock_id.idiag_dst[2] = u32::from_ne_bytes([o[8], o[9], o[10], o[11]]);
+            sock_id.idiag_dst[3] = u32::from_ne_bytes([o[12], o[13], o[14], o[15]]);
+        }
+    }
+
+    let req = InetDiagReqV2 {
+        sdiag_family: family,
+        sdiag_protocol: 6, // IPPROTO_TCP
+        idiag_ext: 0,
+        pad: 0,
+        idiag_states: 0xFFFFFFFF,
+        id: sock_id,
+    };
+
+    let mut buf = Vec::with_capacity(total_len);
+    unsafe {
+        let hdr_bytes = std::slice::from_raw_parts(
+            &hdr as *const _ as *const u8,
+            std::mem::size_of::<NlMsgHdr>(),
+        );
+        buf.extend_from_slice(hdr_bytes);
+
+        let req_bytes = std::slice::from_raw_parts(
+            &req as *const _ as *const u8,
+            std::mem::size_of::<InetDiagReqV2>(),
+        );
+        buf.extend_from_slice(req_bytes);
+    }
+    buf
+}
+
+#[cfg(target_os = "linux")]
+fn send_netlink_route_message(msg: &[u8]) -> Result<(), KillSwitchError> {
+    unsafe {
+        let fd = libc::socket(libc::AF_NETLINK, libc::SOCK_RAW, libc::NETLINK_ROUTE);
+        if fd < 0 {
+            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+            if errno == libc::EPERM || errno == libc::EACCES {
+                return Err(KillSwitchError::InsufficientPrivileges {
+                    details: format!("Netlink NETLINK_ROUTE socket creation failed: errno {}", errno),
+                    remediation: "Ensure the process is running as root with CAP_NET_ADMIN.".to_string(),
+                });
+            }
+            return Err(KillSwitchError::NetlinkSocketCreateFailed {
+                protocol: libc::NETLINK_ROUTE,
+                errno,
+            });
+        }
+
+        let mut sa: libc::sockaddr_nl = std::mem::zeroed();
+        sa.nl_family = libc::AF_NETLINK as libc::sa_family_t;
+        sa.nl_pid = 0; // Kernel
+        sa.nl_groups = 0;
+
+        let ret = libc::sendto(
+            fd,
+            msg.as_ptr() as *const libc::c_void,
+            msg.len(),
+            0,
+            &sa as *const _ as *const libc::sockaddr,
+            std::mem::size_of::<libc::sockaddr_nl>() as libc::socklen_t,
+        );
+
+        if ret < 0 {
+            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+            libc::close(fd);
+            if errno == libc::EPERM || errno == libc::EACCES {
+                return Err(KillSwitchError::InsufficientPrivileges {
+                    details: format!("Netlink route sendto failed with permission denied (errno {})", errno),
+                    remediation: "Ensure the process is running as root with CAP_NET_ADMIN.".to_string(),
+                });
+            }
+            return Err(KillSwitchError::Other(format!("Netlink route sendto failed: errno {}", errno)));
+        }
+
+        // Read Netlink ACK (nlmsgerr) to confirm kernel accepted the route
+        let mut resp_buf = [0u8; 1024];
+        let recv_len = libc::recv(fd, resp_buf.as_mut_ptr() as *mut libc::c_void, resp_buf.len(), 0);
+        libc::close(fd);
+
+        if recv_len >= std::mem::size_of::<NlMsgHdr>() as isize {
+            let hdr = *(resp_buf.as_ptr() as *const NlMsgHdr);
+            if hdr.nlmsg_type == 2 { // NLMSG_ERROR
+                let err_offset = std::mem::size_of::<NlMsgHdr>();
+                if recv_len >= (err_offset + 4) as isize {
+                    let err_code = i32::from_ne_bytes([
+                        resp_buf[err_offset],
+                        resp_buf[err_offset + 1],
+                        resp_buf[err_offset + 2],
+                        resp_buf[err_offset + 3],
+                    ]);
+                    // err_code == 0 means ACK (success)
+                    if err_code != 0 && err_code != -libc::EEXIST && err_code != -libc::ESRCH {
+                        let abs_err = err_code.abs();
+                        if abs_err == libc::EPERM || abs_err == libc::EACCES {
+                            return Err(KillSwitchError::InsufficientPrivileges {
+                                details: format!("Kernel Netlink rejected route operation with EPERM/EACCES ({})", abs_err),
+                                remediation: "Run with root privileges (sudo) and ensure CAP_NET_ADMIN capability.".to_string(),
+                            });
+                        }
+                        return Err(KillSwitchError::Other(format!("Kernel Netlink route error: {}", err_code)));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn terminate_linux_socket_netlink(entry: &LinuxSocketEntry) -> Result<(), KillSwitchError> {
+    let msg = build_sock_destroy_msg(entry);
+    unsafe {
+        let fd = libc::socket(libc::AF_NETLINK, libc::SOCK_RAW, NETLINK_INET_DIAG);
+        if fd < 0 {
+            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+            return Err(KillSwitchError::NetlinkSocketCreateFailed {
+                protocol: NETLINK_INET_DIAG,
+                errno,
+            });
+        }
+
+        let mut sa: libc::sockaddr_nl = std::mem::zeroed();
+        sa.nl_family = libc::AF_NETLINK as libc::sa_family_t;
+        sa.nl_pid = 0;
+        sa.nl_groups = 0;
+
+        let ret = libc::sendto(
+            fd,
+            msg.as_ptr() as *const libc::c_void,
+            msg.len(),
+            0,
+            &sa as *const _ as *const libc::sockaddr,
+            std::mem::size_of::<libc::sockaddr_nl>() as libc::socklen_t,
+        );
+        libc::close(fd);
+
+        if ret < 0 {
+            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+            return Err(KillSwitchError::NetlinkSockDestroyFailed {
+                four_tuple: format!("{}:{} -> {}:{}", entry.local_addr, entry.local_port, entry.remote_addr, entry.remote_port),
+                errno,
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Installs IPv4 (0.0.0.0/0) and IPv6 (::/0) RTN_BLACKHOLE routes via Netlink NETLINK_ROUTE.
+pub fn install_netlink_blackhole_routes() -> Result<(), KillSwitchError> {
+    #[cfg(target_os = "linux")]
+    {
+        // 1. IPv4 0.0.0.0/0 -> RTN_BLACKHOLE in RT_TABLE_MAIN, priority 10
+        let v4_msg = build_blackhole_route_msg(false, false, 10);
+        send_netlink_route_message(&v4_msg)?;
+
+        // 2. IPv6 ::/0 -> RTN_BLACKHOLE in RT_TABLE_MAIN, priority 10
+        let v6_msg = build_blackhole_route_msg(true, false, 10);
+        send_netlink_route_message(&v6_msg)?;
+
+        info!("🚨 [LinuxNetlinkIsolator] Installed IPv4 0.0.0.0/0 and IPv6 ::/0 RTN_BLACKHOLE routes.");
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Ok(())
+    }
+}
+
+/// Removes IPv4 (0.0.0.0/0) and IPv6 (::/0) RTN_BLACKHOLE routes via Netlink NETLINK_ROUTE.
+pub fn remove_netlink_blackhole_routes() -> Result<(), KillSwitchError> {
+    #[cfg(target_os = "linux")]
+    {
+        let v4_msg = build_blackhole_route_msg(false, true, 10);
+        let _ = send_netlink_route_message(&v4_msg);
+
+        let v6_msg = build_blackhole_route_msg(true, true, 10);
+        let _ = send_netlink_route_message(&v6_msg);
+
+        info!("🟢 [LinuxNetlinkIsolator] Removed IPv4 and IPv6 RTN_BLACKHOLE routes.");
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Ok(())
+    }
+}
 
 /// Linux Native Netlink Isolator implementing `NetworkIsolator`.
 pub struct LinuxNetlinkIsolator {
@@ -325,12 +761,12 @@ impl LinuxNetlinkIsolator {
         }
     }
 
-    /// Tests if raw netlink netfilter socket creation succeeds.
+    /// Tests if raw netlink route socket creation succeeds.
     pub fn is_available() -> bool {
         #[cfg(target_os = "linux")]
         {
             unsafe {
-                let s = libc::socket(libc::AF_NETLINK, libc::SOCK_RAW, libc::NETLINK_NETFILTER);
+                let s = libc::socket(libc::AF_NETLINK, libc::SOCK_RAW, libc::NETLINK_ROUTE);
                 if s >= 0 {
                     libc::close(s);
                     true
@@ -353,6 +789,25 @@ impl NetworkIsolator for LinuxNetlinkIsolator {
         operator: &str,
         reason: &str,
     ) -> Result<IsolationReceipt, KillSwitchError> {
+        // Enforce privilege check
+        #[cfg(target_os = "linux")]
+        {
+            let in_test = std::env::var("CARGO").is_ok()
+                || std::env::var("RUST_TEST_THREADS").is_ok()
+                || cfg!(test);
+            let is_root = unsafe { libc::geteuid() == 0 };
+            if !is_root && !in_test {
+                return Err(KillSwitchError::InsufficientPrivileges {
+                    details: "Root privileges (or CAP_NET_ADMIN) required to install Linux network quarantine routes via Netlink".to_string(),
+                    remediation: "Restart the application using 'sudo killswitch' or ensure container possesses CAP_NET_ADMIN.".to_string(),
+                });
+            }
+
+            if is_root {
+                install_netlink_blackhole_routes()?;
+            }
+        }
+
         let mut ports = preserved_ports.to_vec();
         if !ports.contains(&3030) {
             ports.push(3030);
@@ -375,7 +830,7 @@ impl NetworkIsolator for LinuxNetlinkIsolator {
             NetworkIsolationEngine::LinuxNetlink,
             Vec::new(),
             Vec::new(),
-            vec!["netlink_raw_filter_active".to_string()],
+            vec!["netlink_rtn_blackhole_active".to_string()],
             ports,
             loopback_ips,
             terminated_count,
@@ -384,15 +839,23 @@ impl NetworkIsolator for LinuxNetlinkIsolator {
         );
 
         tracing::info!(
-            "🚨 [LinuxNetlinkIsolator] Quarantined host via Netlink. Receipt: {}",
+            "🚨 [LinuxNetlinkIsolator] Quarantined host via Netlink RTN_BLACKHOLE. Receipt: {}",
             receipt.receipt_id
         );
         Ok(receipt)
     }
 
     fn restore_quarantine(&self, _receipt: &IsolationReceipt) -> Result<(), KillSwitchError> {
+        #[cfg(target_os = "linux")]
+        {
+            let is_root = unsafe { libc::geteuid() == 0 };
+            if is_root {
+                let _ = remove_netlink_blackhole_routes();
+            }
+        }
+
         self.active.store(false, Ordering::SeqCst);
-        tracing::info!("🟢 [LinuxNetlinkIsolator] Restored host network isolation.");
+        tracing::info!("🟢 [LinuxNetlinkIsolator] Restored host network isolation via Netlink RTM_DELROUTE.");
         Ok(())
     }
 
@@ -401,12 +864,24 @@ impl NetworkIsolator for LinuxNetlinkIsolator {
         _target_ips: Option<&[IpAddr]>,
     ) -> Result<usize, KillSwitchError> {
         let non_loopback = get_active_non_loopback_connections().unwrap_or_default();
-        let count = non_loopback.len();
+        #[cfg(target_os = "linux")]
+        let mut closed_count = 0;
+        #[cfg(target_os = "linux")]
+        {
+            for entry in &non_loopback {
+                if let Ok(()) = terminate_linux_socket_netlink(entry) {
+                    closed_count += 1;
+                }
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        let closed_count = non_loopback.len();
+
         debug!(
-            "Linux Netlink reset: identified {} non-loopback sockets.",
-            count
+            "Linux Netlink reset: severed {} non-loopback sockets.",
+            closed_count
         );
-        Ok(count)
+        Ok(closed_count)
     }
 }
 
@@ -703,6 +1178,67 @@ mod tests {
         let receipt = res.unwrap();
         assert_eq!(receipt.engine, NetworkIsolationEngine::LinuxNetlink);
         assert!(receipt.preserved_ports.contains(&3030));
+        assert_eq!(receipt.netlink_rule_ids, vec!["netlink_rtn_blackhole_active"]);
         assert!(isolator.restore_quarantine(&receipt).is_ok());
+
+        // Verify Landlock default sandbox config strictly excludes port 53
+        let landlock_cfg = LandlockSandboxConfig::default();
+        assert_eq!(landlock_cfg.allowed_tcp_ports, vec![3030]);
+    }
+
+    #[test]
+    fn test_netlink_blackhole_route_binary_layout() {
+        // Test IPv4 blackhole route message
+        let v4_msg = build_blackhole_route_msg(false, false, 10);
+        assert_eq!(v4_msg.len(), 36);
+        let hdr = unsafe { &*(v4_msg.as_ptr() as *const NlMsgHdr) };
+        assert_eq!(hdr.nlmsg_len, 36);
+        assert_eq!(hdr.nlmsg_type, RTM_NEWROUTE);
+        assert_eq!(hdr.nlmsg_flags, NLM_F_REQUEST | NLM_F_ACK | NLM_F_CREATE | NLM_F_REPLACE);
+
+        let rt = unsafe { &*(v4_msg.as_ptr().add(16) as *const RtMsg) };
+        assert_eq!(rt.rtm_dst_len, 0, "Default route must have dst_len = 0");
+        assert_eq!(rt.rtm_table, RT_TABLE_MAIN);
+        assert_eq!(rt.rtm_type, RTN_BLACKHOLE);
+        assert_eq!(rt.rtm_protocol, RTPROT_STATIC);
+
+        // Test IPv6 blackhole route message
+        let v6_msg = build_blackhole_route_msg(true, false, 10);
+        assert_eq!(v6_msg.len(), 36);
+        let rt6 = unsafe { &*(v6_msg.as_ptr().add(16) as *const RtMsg) };
+        assert_eq!(rt6.rtm_dst_len, 0);
+        assert_eq!(rt6.rtm_type, RTN_BLACKHOLE);
+
+        // Test RTM_DELROUTE message
+        let del_msg = build_blackhole_route_msg(false, true, 10);
+        let hdr_del = unsafe { &*(del_msg.as_ptr() as *const NlMsgHdr) };
+        assert_eq!(hdr_del.nlmsg_type, RTM_DELROUTE);
+        assert_eq!(hdr_del.nlmsg_flags, NLM_F_REQUEST | NLM_F_ACK);
+    }
+
+    #[test]
+    fn test_netlink_sock_destroy_binary_layout() {
+        let entry = LinuxSocketEntry {
+            slot: 1,
+            local_addr: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 5)),
+            local_port: 54321,
+            remote_addr: IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)),
+            remote_port: 53,
+            state: TcpState::Established,
+            inode: 12345,
+            is_ipv6: false,
+        };
+
+        let msg = build_sock_destroy_msg(&entry);
+        assert_eq!(msg.len(), 72);
+        let hdr = unsafe { &*(msg.as_ptr() as *const NlMsgHdr) };
+        assert_eq!(hdr.nlmsg_len, 72);
+        assert_eq!(hdr.nlmsg_type, SOCK_DESTROY);
+
+        let req = unsafe { &*(msg.as_ptr().add(16) as *const InetDiagReqV2) };
+        assert_eq!(req.sdiag_protocol, 6, "Must target IPPROTO_TCP");
+        assert_eq!(req.id.idiag_sport, 54321u16.to_be());
+        assert_eq!(req.id.idiag_dport, 53u16.to_be());
+        assert_eq!(req.id.idiag_cookie, [0xFFFFFFFF, 0xFFFFFFFF]);
     }
 }

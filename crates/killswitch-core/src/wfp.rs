@@ -180,7 +180,7 @@ pub fn try_elevated_delegation(action: &str) -> KillSwitchResult<bool> {
         }
     })?;
 
-    let proc = unsafe { GetProcAddress(h_shell, PCSTR(b"ShellExecuteExW\0".as_ptr())) };
+    let proc = unsafe { GetProcAddress(h_shell, PCSTR(c"ShellExecuteExW".as_ptr() as *const u8)) };
     let fn_shell_execute: FnShellExecuteExW = unsafe {
         std::mem::transmute(proc.ok_or_else(|| KillSwitchError::InsufficientPrivileges {
             details: "ShellExecuteExW not found in shell32.dll".to_string(),
@@ -2193,9 +2193,8 @@ pub fn engage_windows_network_quarantine_with_ports(
         let session = guard.as_ref().ok_or(KillSwitchError::WfpEngineHandleNull)?;
         let ids = session
             .install_hermetic_quarantine_filters("KillSwitch")
-            .map_err(|e| {
+            .inspect_err(|_e| {
                 let _ = session.abort_transaction();
-                e
             })?;
 
         if ids.is_empty() {

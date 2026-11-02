@@ -210,7 +210,7 @@ fn test_darwin_pf_quarantine_rules_structure_and_order() {
     let preserved_ports = vec![DEFAULT_CONTROL_PORT, 53, 67, 68];
     let (rules, syntax) = generate_quarantine_rules("test_killswitch_anchor", &preserved_ports);
 
-    assert!(rules.len() >= 8, "Expected at least 8 generated PF rules");
+    assert!(rules.len() >= 7, "Expected at least 7 generated PF rules");
 
     // Invariant: First rule must be quick pass on lo0
     assert_eq!(rules[0].action, PfAction::Pass);
@@ -236,28 +236,27 @@ fn test_darwin_pf_quarantine_rules_structure_and_order() {
         assert!(r.quick);
     }
 
-    // Invariant: DNS 53 (UDP & TCP) and DHCP 67/68 must be preserved
-    assert!(rules.iter().any(|r| r.dst_port == Some(53) && r.protocol == PfProtocol::Udp));
-    assert!(rules.iter().any(|r| r.dst_port == Some(53) && r.protocol == PfProtocol::Tcp));
-    assert!(rules.iter().any(|r| r.dst_port == Some(67) || r.src_port == Some(67)));
-    assert!(rules.iter().any(|r| r.dst_port == Some(68) || r.src_port == Some(68)));
+    // Invariant: DNS 53 (UDP & TCP) and DHCP 67/68 must strictly NOT be preserved
+    assert!(!rules.iter().any(|r| r.dst_port == Some(53)));
+    assert!(!rules.iter().any(|r| r.dst_port == Some(67) || r.src_port == Some(67)));
+    assert!(!rules.iter().any(|r| r.dst_port == Some(68) || r.src_port == Some(68)));
 
-    // Invariant: Last two rules must be hermetic block drop in & out all
+    // Invariant: Last two rules must be hermetic block drop in & out all with quick: true
     let last_rule_in = &rules[rules.len() - 2];
     let last_rule_out = &rules[rules.len() - 1];
 
     assert_eq!(last_rule_in.action, PfAction::Drop);
     assert_eq!(last_rule_in.direction, PfDirection::In);
-    assert!(!last_rule_in.quick); // Non-quick default block
+    assert!(last_rule_in.quick, "Default in block must have quick: true");
 
     assert_eq!(last_rule_out.action, PfAction::Drop);
     assert_eq!(last_rule_out.direction, PfDirection::Out);
-    assert!(!last_rule_out.quick);
+    assert!(last_rule_out.quick, "Default out block must have quick: true");
 
-    // Verify generated syntax string contains anchor and exact block statements
+    // Verify generated syntax string contains anchor and exact quick block statements
     assert!(syntax.contains("Anchor: test_killswitch_anchor"));
-    assert!(syntax.contains("block drop in all"));
-    assert!(syntax.contains("block drop out all"));
+    assert!(syntax.contains("block drop in quick all"));
+    assert!(syntax.contains("block drop out quick all"));
 }
 
 #[test]

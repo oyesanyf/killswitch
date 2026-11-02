@@ -52,28 +52,28 @@ fn test_f29_macos_pf_anchor_quarantine_rules_generation() {
         "Rule syntax must preserve port 3030"
     );
 
-    // Invariant: DNS 53 and DHCP 67/68 preserved
+    // Invariant: DNS 53 and DHCP 67/68 must strictly NOT be preserved
     assert!(
-        syntax.contains("port 53"),
-        "Rule syntax must preserve DNS 53"
+        !syntax.contains("port 53"),
+        "Rule syntax must not preserve DNS 53"
     );
     assert!(
-        syntax.contains("port 67"),
-        "Rule syntax must preserve DHCP 67"
+        !syntax.contains("port 67"),
+        "Rule syntax must not preserve DHCP 67"
     );
     assert!(
-        syntax.contains("port 68"),
-        "Rule syntax must preserve DHCP 68"
+        !syntax.contains("port 68"),
+        "Rule syntax must not preserve DHCP 68"
     );
 
-    // Invariant: Default hermetic block drop
+    // Invariant: Default hermetic block drop with quick
     assert!(
-        syntax.contains("block drop in all"),
-        "Rule syntax must end with default block drop in"
+        syntax.contains("block drop in quick all"),
+        "Rule syntax must end with default block drop in quick"
     );
     assert!(
-        syntax.contains("block drop out all"),
-        "Rule syntax must end with default block drop out"
+        syntax.contains("block drop out quick all"),
+        "Rule syntax must end with default block drop out quick"
     );
 }
 
@@ -86,7 +86,7 @@ fn test_f29_macos_pf_isolator_lifecycle_and_contract() {
     // Engage quarantine
     let receipt = isolator
         .engage_quarantine(
-            &[DEFAULT_CONTROL_PORT, 53],
+            &[DEFAULT_CONTROL_PORT],
             "sec_admin",
             "Simulated lateral movement threat",
         )
@@ -95,7 +95,6 @@ fn test_f29_macos_pf_isolator_lifecycle_and_contract() {
     assert_eq!(receipt.engine, NetworkIsolationEngine::DarwinPf);
     assert!(receipt.session_id.contains("test_anchor_f29"));
     assert!(receipt.preserved_ports.contains(&DEFAULT_CONTROL_PORT));
-    assert!(receipt.preserved_ports.contains(&53));
     assert!(receipt.preserved_ips.contains(&IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))));
     assert!(receipt.preserved_ips.contains(&IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1))));
     assert_eq!(receipt.engaged_by, "sec_admin");
