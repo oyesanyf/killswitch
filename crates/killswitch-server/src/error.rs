@@ -67,16 +67,24 @@ impl IntoResponse for ServerError {
                 | killswitch_types::errors::KillSwitchError::QuarantinedCaller(_) => {
                     (StatusCode::FORBIDDEN, "CALLER_QUARANTINED")
                 }
+                killswitch_types::errors::KillSwitchError::InsufficientPrivileges { .. } => {
+                    (StatusCode::FORBIDDEN, "INSUFFICIENT_PRIVILEGES")
+                }
+                killswitch_types::errors::KillSwitchError::ZeroFiltersInstalled(_) => {
+                    (StatusCode::INTERNAL_SERVER_ERROR, "ZERO_FILTERS_INSTALLED")
+                }
                 _ => (StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR"),
             },
         };
 
+        let err_msg = self.to_string();
         let body = Json(serde_json::json!({
             "error": {
                 "code": code,
-                "message": self.to_string(),
+                "message": err_msg,
                 "timestamp": chrono::Utc::now().to_rfc3339()
-            }
+            },
+            "message": err_msg
         }));
 
         (status, body).into_response()
