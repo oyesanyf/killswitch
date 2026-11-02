@@ -1336,7 +1336,7 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
         <div>
           <h2 id="card-ring0-title" class="card-title">8. Signed Ring-0 Kernel Driver Loader (ELAM / Minifilter / eBPF) &amp; Distributed Raft/Valkey Consensus</h2>
           <p class="card-desc">
-            <strong>Architectural Scope Disclosure:</strong> KillSwitch is an <em>AI Agent Runtime Containment, Doomsday Network KillSwitch &amp; Cybernetic Governance Control Plane</em>—<strong>not a full enterprise EDR in the traditional kernel-vendor sense</strong> out of the box. This panel manages the fail-closed PE32+ <code>.sys</code> Minifilter/ELAM &amp; Linux <code>EM_BPF</code> <code>.bpf.o</code> binary verifiers and the multi-node Raft + Valkey RESP/AOF distributed consensus engine.
+            <strong>Architectural Positioning &amp; Scope:</strong> KillSwitch is an <em>Agentic EDR &amp; Runtime Governance Kill-Switch (User-Space Behavioral EDR + CAGE/APC Control Plane)</em>: it governs AI agents <strong>before</strong> tool actuation and monitors/contains the host process lineage and network sockets <strong>during</strong> execution. <strong>Do not call it a replacement for a Ring-0 kernel EDR driver (like CrowdStrike or Microsoft Defender) on general corporate laptops</strong>—unless you pair its user-space engine with a real Windows ETW kernel provider subscription / Sysmon feed, a Linux eBPF ring-buffer loader, or the included EV/WHQL-signed Ring-0 minifilter driver.
           </p>
         </div>
         <span id="ring0-posture-badge" class="badge ok">🛡️ Ring-0 Verifier &amp; Raft Quorum Ready</span>
@@ -1348,8 +1348,8 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
 
       <div class="kv-grid">
         <div class="kv-box">
-          <div class="kv-label">Traditional Full Kernel EDR?</div>
-          <div id="r0-trad-edr" class="kv-val">No (Agent Containment + WFP/Landlock + Ring-0 Loader)</div>
+          <div class="kv-label">Architectural Classification</div>
+          <div id="r0-trad-edr" class="kv-val">Agentic EDR &amp; Runtime Governance Kill-Switch (User-Space Behavioral EDR + CAGE/APC Control Plane)</div>
         </div>
         <div class="kv-box">
           <div class="kv-label">Windows PE32+ .sys (/INTEGRITYCHECK)</div>
@@ -3345,8 +3345,8 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
           const tradEl = document.getElementById('r0-trad-edr');
           if (tradEl && r0.classification) {
             tradEl.textContent = r0.classification.is_traditional_full_kernel_edr
-              ? 'Yes (Active Ring-0 Enforced)'
-              : 'No (Agent Containment + WFP/Landlock + Ring-0 Loader)';
+              ? 'Agentic EDR + Active Ring-0 Kernel Driver Enforced'
+              : (r0.classification.primary_classification || 'Agentic EDR & Runtime Governance Kill-Switch (User-Space Behavioral EDR + CAGE/APC Control Plane)');
           }
 
           const peEl = document.getElementById('r0-pe-status');

@@ -932,10 +932,14 @@ impl SubsystemVerifier {
         let status = r0_mgr.status_report();
         if !status
             .classification
-            .traditional_edr_disclaimer
-            .contains("NOT a full enterprise EDR")
+            .primary_classification
+            .contains("Agentic EDR & Runtime Governance Kill-Switch")
+            || !status
+                .classification
+                .traditional_edr_disclaimer
+                .contains("Ring-0 kernel EDR driver (like CrowdStrike or Microsoft Defender)")
         {
-            bail!("Missing traditional EDR disclaimer in Ring0DriverStatusReport");
+            bail!("Missing Agentic EDR & Runtime Governance Kill-Switch classification or Ring-0 kernel EDR disclaimer in Ring0DriverStatusReport");
         }
 
         let seq = status.last_verified_frame_seq + 1;
