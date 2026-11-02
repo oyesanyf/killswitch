@@ -1682,6 +1682,10 @@ pub const KNOWN_VERIFIED_REPO_MAP: &[(&str, &str)] = &[
         "https://github.com/uiuc-kang-lab/AdaptiveAttackAgent",
     ),
     ("2511.10720", "https://github.com/sleeepeer/PISanitizer"),
+    (
+        "2606.12320",
+        "https://github.com/google/cybernetic-agent-governance-engine",
+    ),
     ("2601.11893", "https://github.com/ethz-spylab/agentdojo"),
     ("2604.20496", "https://github.com/cedar-policy/cedar-spec"),
     ("2610.20437", "https://github.com/NVIDIA/garak"),
@@ -2038,6 +2042,20 @@ pub fn check_paper_to_code_semantic_domain_alignment(
         ));
     }
 
+    let is_cage = title_lc.contains("cybernetic-agent-governance-engine")
+        || title_lc.contains("five-plane reference architecture")
+        || repo_lc.contains("cybernetic-agent-governance-engine")
+        || base_id == "2606.12320";
+    if is_cage
+        && rule.target_boundary != "runtime_actuation_pep_boundary"
+        && rule.target_boundary != "governance_kernel_boundary"
+    {
+        return Err(format!(
+            "Semantic domain mismatch: Google CAGE target boundary must be 'runtime_actuation_pep_boundary' or 'governance_kernel_boundary', found '{}'",
+            rule.target_boundary
+        ));
+    }
+
     Ok(())
 }
 
@@ -2306,6 +2324,69 @@ pub fn auto_correct_research_rule(rule: &mut IngestedResearchDefenseRule) -> boo
         }
         if rule.arxiv_url != "https://arxiv.org/abs/2603.02277" {
             rule.arxiv_url = "https://arxiv.org/abs/2603.02277".to_string();
+            modified = true;
+        }
+        let canonical_snippet = synthesize_rust_guard_snippet(
+            &rule.rule_id,
+            &rule.arxiv_id,
+            &rule.indicator_pattern,
+            &rule.attack_vector,
+        );
+        if rule.generated_code_snippet != canonical_snippet {
+            rule.generated_code_snippet = canonical_snippet;
+            modified = true;
+        }
+    }
+
+    // Auto-correct 2606.12320 (Google CAGE / Tallam 2026)
+    if base_id == "2606.12320"
+        || title_lc.contains("cybernetic-agent-governance-engine")
+        || title_lc.contains("five-plane reference architecture")
+        || repo_lc.contains("cybernetic-agent-governance-engine")
+    {
+        if rule.rule_id != "ARXIV-DEF-2606.12320" {
+            rule.rule_id = "ARXIV-DEF-2606.12320".to_string();
+            modified = true;
+        }
+        if rule.arxiv_id != "2606.12320v1" && rule.arxiv_id != "2606.12320" {
+            rule.arxiv_id = "2606.12320v1".to_string();
+            modified = true;
+        }
+        let canonical_title = "A Five-Plane Reference Architecture for Runtime Governance of Production AI Agents";
+        if rule.title != canonical_title {
+            rule.title = canonical_title.to_string();
+            modified = true;
+        }
+        if rule.code_repo_url != "https://github.com/google/cybernetic-agent-governance-engine" {
+            rule.code_repo_url = "https://github.com/google/cybernetic-agent-governance-engine".to_string();
+            rule.has_code_repo = true;
+            modified = true;
+        }
+        let canonical_vector = "Runtime autonomous actuation breakout bypassing 8-tier deterministic governance kernel";
+        if rule.attack_vector != canonical_vector {
+            rule.attack_vector = canonical_vector.to_string();
+            modified = true;
+        }
+        if rule.target_boundary != "runtime_actuation_pep_boundary" {
+            rule.target_boundary = "runtime_actuation_pep_boundary".to_string();
+            modified = true;
+        }
+        if rule.target_crate != "killswitch-telemetry::cage_governance" {
+            rule.target_crate = "killswitch-telemetry::cage_governance".to_string();
+            modified = true;
+        }
+        let canonical_indicators = "ctrl_opa_005 | ctrl_conf_001 | ctrl_cbf_dose_001 | fiscal_cap_exceeded | unverified_warrant | uncalibrated_confidence_claim";
+        if rule.indicator_pattern != canonical_indicators {
+            rule.indicator_pattern = canonical_indicators.to_string();
+            modified = true;
+        }
+        let canonical_cedar = "@id(\"ARXIV-DEF-2606.12320\")\nforbid(principal, action, resource) when { context.arxiv_source == \"2606.12320v1\" };";
+        if rule.cedar_forbid_policy != canonical_cedar {
+            rule.cedar_forbid_policy = canonical_cedar.to_string();
+            modified = true;
+        }
+        if rule.arxiv_url != "https://arxiv.org/abs/2606.12320" {
+            rule.arxiv_url = "https://arxiv.org/abs/2606.12320".to_string();
             modified = true;
         }
         let canonical_snippet = synthesize_rust_guard_snippet(
@@ -2647,6 +2728,29 @@ pub fn default_seeded_research_defense_rules() -> Vec<IngestedResearchDefenseRul
                 "2511.10720v1",
                 "prompt_sanitizer_bypass | long_context_injection | payload_splitter | context_hiding",
                 "Long-context prompt injection payload hiding and instruction override",
+            ),
+        },
+        IngestedResearchDefenseRule {
+            rule_id: "ARXIV-DEF-2606.12320".to_string(),
+            arxiv_id: "2606.12320v1".to_string(),
+            title: "A Five-Plane Reference Architecture for Runtime Governance of Production AI Agents".to_string(),
+            attack_vector: "Runtime autonomous actuation breakout bypassing 8-tier deterministic governance kernel".to_string(),
+            target_boundary: "runtime_actuation_pep_boundary".to_string(),
+            extraction_class: "defense_countermeasure".to_string(),
+            indicator_pattern: "ctrl_opa_005 | ctrl_conf_001 | ctrl_cbf_dose_001 | fiscal_cap_exceeded | unverified_warrant | uncalibrated_confidence_claim".to_string(),
+            cedar_forbid_policy: "@id(\"ARXIV-DEF-2606.12320\")\nforbid(principal, action, resource) when { context.arxiv_source == \"2606.12320v1\" };".to_string(),
+            target_crate: "killswitch-telemetry::cage_governance".to_string(),
+            enrolled_at_utc: "2026-10-28T00:00:00Z".to_string(),
+            relevance_score: 99.5,
+            accuracy_score: 99.8,
+            arxiv_url: "https://arxiv.org/abs/2606.12320".to_string(),
+            has_code_repo: true,
+            code_repo_url: "https://github.com/google/cybernetic-agent-governance-engine".to_string(),
+            generated_code_snippet: synthesize_rust_guard_snippet(
+                "ARXIV-DEF-2606.12320",
+                "2606.12320v1",
+                "ctrl_opa_005 | ctrl_conf_001 | ctrl_cbf_dose_001 | fiscal_cap_exceeded | unverified_warrant | uncalibrated_confidence_claim",
+                "Runtime autonomous actuation breakout bypassing 8-tier deterministic governance kernel",
             ),
         },
     ];
@@ -3518,7 +3622,7 @@ mod tests {
         assert!(suite.llm_fusion_consensus_passed);
         assert_eq!(suite.llm_fusion_accuracy_pct, 100.0);
         assert!(suite.llm_fusion_confidence_bp >= 9900);
-        assert_eq!(suite.total_rules_tested, 4);
+        assert_eq!(suite.total_rules_tested, 5);
 
         // 2. Recency Gate: 2024 and older papers are rejected; 2025-2026 are accepted
         assert!(!is_current_research_arxiv_id("2403.02277v1"));
@@ -3589,5 +3693,15 @@ mod tests {
         );
         assert!(!v_pisan.is_clean);
         assert!(v_pisan.detected_violations.iter().any(|s| s.contains("2511.10720")));
+
+        let v_cage = engine.inspect_boundary(
+            "actuation_request",
+            "runtime_actuation_pep_boundary",
+            "agent requested tool call with fiscal_cap_exceeded and unverified_warrant",
+            None,
+            3,
+        );
+        assert!(!v_cage.is_clean);
+        assert!(v_cage.detected_violations.iter().any(|s| s.contains("2606.12320")));
     }
 }

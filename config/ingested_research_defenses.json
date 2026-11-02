@@ -70,5 +70,23 @@
     "has_code_repo": true,
     "code_repo_url": "https://github.com/sleeepeer/PISanitizer",
     "generated_code_snippet": "// [TIGHTEN-ONLY DEFENSE GUARD] - Synthesized from arXiv:2511.10720v1\n// Enforced in: killswitch-telemetry::continuous_defense (Zero-Execution AST)\n// Threat Vector: Long-context prompt injection payload hiding and instruction override\nconst INDICATORS: &[&str] = &[\n        \"prompt_sanitizer_bypass\",\n        \"long_context_injection\",\n        \"payload_splitter\",\n        \"context_hiding\",\n];\nfor &pat in INDICATORS {\n    if inspection_corpus_lc.contains(pat) {\n        tech_res.is_clean = false;\n        tech_res.sandbox_quarantine_required = true;\n        tech_res.detected_vectors.push(\n            format!(\"[ArXiv-Active-Defense:2511.10720v1]: Blocked by rule 'ARXIV-DEF-2511.10720'\")\n        );\n        break;\n    }\n}"
+  },
+  {
+    "rule_id": "ARXIV-DEF-2606.12320",
+    "arxiv_id": "2606.12320v1",
+    "title": "A Five-Plane Reference Architecture for Runtime Governance of Production AI Agents",
+    "attack_vector": "Runtime autonomous actuation breakout bypassing 8-tier deterministic governance kernel",
+    "target_boundary": "runtime_actuation_pep_boundary",
+    "extraction_class": "defense_countermeasure",
+    "indicator_pattern": "ctrl_opa_005 | ctrl_conf_001 | ctrl_cbf_dose_001 | fiscal_cap_exceeded | unverified_warrant | uncalibrated_confidence_claim",
+    "cedar_forbid_policy": "@id(\"ARXIV-DEF-2606.12320\")\nforbid(principal, action, resource) when { context.arxiv_source == \"2606.12320v1\" };",
+    "target_crate": "killswitch-telemetry::cage_governance",
+    "enrolled_at_utc": "2026-10-28T00:00:00Z",
+    "relevance_score": 99.5,
+    "accuracy_score": 99.8,
+    "arxiv_url": "https://arxiv.org/abs/2606.12320",
+    "has_code_repo": true,
+    "code_repo_url": "https://github.com/google/cybernetic-agent-governance-engine",
+    "generated_code_snippet": "// [TIGHTEN-ONLY DEFENSE GUARD] - Synthesized from arXiv:2606.12320v1\n// Enforced in: killswitch-telemetry::continuous_defense (Zero-Execution AST)\n// Threat Vector: Runtime autonomous actuation breakout bypassing 8-tier deterministic governance kernel\nconst INDICATORS: &[&str] = &[\n        \"ctrl_opa_005\",\n        \"ctrl_conf_001\",\n        \"ctrl_cbf_dose_001\",\n        \"fiscal_cap_exceeded\",\n        \"unverified_warrant\",\n        \"uncalibrated_confidence_claim\",\n];\nfor &pat in INDICATORS {\n    if inspection_corpus_lc.contains(pat) {\n        tech_res.is_clean = false;\n        tech_res.sandbox_quarantine_required = true;\n        tech_res.detected_vectors.push(\n            format!(\"[ArXiv-Active-Defense:2606.12320v1]: Blocked by rule 'ARXIV-DEF-2606.12320'\")\n        );\n        break;\n    }\n}"
   }
 ]
