@@ -155,6 +155,11 @@ pub fn build_router(state: Arc<ServerState>) -> Router {
         .route("/api/consensus/status", get(handlers::get_consensus_status))
         .route("/consensus/propose", post(handlers::post_consensus_propose))
         .route("/api/consensus/propose", post(handlers::post_consensus_propose))
+        // 19. Universal Protocol Isolation Catalog & 16-Domain Quarantine Matrix
+        .route("/protocol-catalog", get(handlers::get_protocol_catalog))
+        .route("/api/protocol-catalog", get(handlers::get_protocol_catalog))
+        .route("/protocol-catalog/domain", get(handlers::get_protocol_catalog_domain))
+        .route("/api/protocol-catalog/domain", get(handlers::get_protocol_catalog_domain))
         // Middleware Layers (applied bottom-up)
         .layer(axum::middleware::from_fn(middleware::rate_limit_middleware))
         .layer(middleware::cors_layer())

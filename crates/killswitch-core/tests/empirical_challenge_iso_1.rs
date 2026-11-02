@@ -663,6 +663,7 @@ fn test_adversarial_typed_error_fail_closed_invariants() {
 }
 
 #[test]
+#[allow(clippy::needless_range_loop)]
 fn test_adversarial_fwpm_filter0_byte_isolation_no_clobber() {
     println!("[Adversarial] Testing that every FwpmFilter0 field occupies a strictly isolated byte range...");
 

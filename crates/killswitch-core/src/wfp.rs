@@ -344,6 +344,94 @@ pub const FWPM_LAYER_INBOUND_IPPACKET_V6: WfpGuid = WfpGuid {
     data4: [0x97, 0x1d, 0x26, 0x01, 0x45, 0x9a, 0x91, 0xca],
 };
 
+// 3d08bf4e-45f6-4930-a922-417098e20027
+pub const FWPM_LAYER_DATAGRAM_DATA_V4: WfpGuid = WfpGuid {
+    data1: 0x3d08bf4e,
+    data2: 0x45f6,
+    data3: 0x4930,
+    data4: [0xa9, 0x22, 0x41, 0x70, 0x98, 0xe2, 0x00, 0x27],
+};
+
+// fa45fe2f-3cba-4427-87fc-57b9a4b10d00
+pub const FWPM_LAYER_DATAGRAM_DATA_V6: WfpGuid = WfpGuid {
+    data1: 0xfa45fe2f,
+    data2: 0x3cba,
+    data3: 0x4427,
+    data4: [0x87, 0xfc, 0x57, 0xb9, 0xa4, 0xb1, 0x0d, 0x00],
+};
+
+// 61499990-3cb6-4e84-b950-53b94b6964f3
+pub const FWPM_LAYER_INBOUND_ICMP_ERROR_V4: WfpGuid = WfpGuid {
+    data1: 0x61499990,
+    data2: 0x3cb6,
+    data3: 0x4e84,
+    data4: [0xb9, 0x50, 0x53, 0xb9, 0x4b, 0x69, 0x64, 0xf3],
+};
+
+// 65f9bdff-3b2d-4e5d-b8c6-c720651fe898
+pub const FWPM_LAYER_INBOUND_ICMP_ERROR_V6: WfpGuid = WfpGuid {
+    data1: 0x65f9bdff,
+    data2: 0x3b2d,
+    data3: 0x4e5d,
+    data4: [0xb8, 0xc6, 0xc7, 0x20, 0x65, 0x1f, 0xe8, 0x98],
+};
+
+// 41390100-564c-4b32-bc1d-718048354d7c
+pub const FWPM_LAYER_OUTBOUND_ICMP_ERROR_V4: WfpGuid = WfpGuid {
+    data1: 0x41390100,
+    data2: 0x564c,
+    data3: 0x4b32,
+    data4: [0xbc, 0x1d, 0x71, 0x80, 0x48, 0x35, 0x4d, 0x7c],
+};
+
+// 7fb03b60-7b8d-4dfa-badd-980176fc4e12
+pub const FWPM_LAYER_OUTBOUND_ICMP_ERROR_V6: WfpGuid = WfpGuid {
+    data1: 0x7fb03b60,
+    data2: 0x7b8d,
+    data3: 0x4dfa,
+    data4: [0xba, 0xdd, 0x98, 0x01, 0x76, 0xfc, 0x4e, 0x12],
+};
+
+// d4220bd3-62ce-4f08-ae88-b56e8526df50
+pub const FWPM_LAYER_INBOUND_MAC_FRAME_NATIVE: WfpGuid = WfpGuid {
+    data1: 0xd4220bd3,
+    data2: 0x62ce,
+    data3: 0x4f08,
+    data4: [0xae, 0x88, 0xb5, 0x6e, 0x85, 0x26, 0xdf, 0x50],
+};
+
+// 94c44912-9d6f-4ebf-b995-05ab8a088d1b
+pub const FWPM_LAYER_OUTBOUND_MAC_FRAME_NATIVE: WfpGuid = WfpGuid {
+    data1: 0x94c44912,
+    data2: 0x9d6f,
+    data3: 0x4ebf,
+    data4: [0xb9, 0x95, 0x05, 0xab, 0x8a, 0x08, 0x8d, 0x1b],
+};
+
+// effb7edb-0055-4f9a-a231-4ff8131ad191
+pub const FWPM_LAYER_INBOUND_MAC_FRAME_ETHERNET: WfpGuid = WfpGuid {
+    data1: 0xeffb7edb,
+    data2: 0x0055,
+    data3: 0x4f9a,
+    data4: [0xa2, 0x31, 0x4f, 0xf8, 0x13, 0x1a, 0xd1, 0x91],
+};
+
+// 694673bc-d6db-4870-adee-0acdbdb7f4b2
+pub const FWPM_LAYER_OUTBOUND_MAC_FRAME_ETHERNET: WfpGuid = WfpGuid {
+    data1: 0x694673bc,
+    data2: 0xd6db,
+    data3: 0x4870,
+    data4: [0xad, 0xee, 0x0a, 0xcd, 0xbd, 0xb7, 0xf4, 0xb2],
+};
+
+// fd08948d-a219-4d52-bb98-1a5540ee7b4e
+pub const FWPM_CONDITION_ETHER_TYPE: WfpGuid = WfpGuid {
+    data1: 0xfd08948d,
+    data2: 0xa219,
+    data3: 0x4d52,
+    data4: [0xbb, 0x98, 0x1a, 0x55, 0x40, 0xee, 0x7b, 0x4e],
+};
+
 // b235ae9a-1d64-49b8-a44c-5ff3d9095045
 pub const FWPM_CONDITION_IP_REMOTE_ADDRESS: WfpGuid = WfpGuid {
     data1: 0xb235ae9a,
@@ -992,6 +1080,8 @@ impl WfpDynamicSession {
                 (FWPM_LAYER_ALE_AUTH_CONNECT_V4, "ALE_AUTH_CONNECT_V4", "ALE-Out"),
                 (FWPM_LAYER_OUTBOUND_TRANSPORT_V4, "OUTBOUND_TRANSPORT_V4", "Transport-Out"),
                 (FWPM_LAYER_OUTBOUND_IPPACKET_V4, "OUTBOUND_IPPACKET_V4", "IPPacket-Out"),
+                (FWPM_LAYER_DATAGRAM_DATA_V4, "DATAGRAM_DATA_V4", "Datagram-Out"),
+                (FWPM_LAYER_OUTBOUND_ICMP_ERROR_V4, "OUTBOUND_ICMP_ERROR_V4", "ICMPError-Out"),
             ];
             for (layer, layer_name, tag) in v4_out_layers {
                 let mut cond_lb_out = [FwpmFilterCondition0 {
@@ -1041,6 +1131,7 @@ impl WfpDynamicSession {
                 (FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, "ALE_AUTH_RECV_ACCEPT_V4", "ALE-In"),
                 (FWPM_LAYER_INBOUND_TRANSPORT_V4, "INBOUND_TRANSPORT_V4", "Transport-In"),
                 (FWPM_LAYER_INBOUND_IPPACKET_V4, "INBOUND_IPPACKET_V4", "IPPacket-In"),
+                (FWPM_LAYER_INBOUND_ICMP_ERROR_V4, "INBOUND_ICMP_ERROR_V4", "ICMPError-In"),
             ];
             for (layer, layer_name, tag) in v4_in_layers {
                 let mut cond_lb_in = [FwpmFilterCondition0 {
@@ -1093,6 +1184,8 @@ impl WfpDynamicSession {
                 (FWPM_LAYER_ALE_AUTH_CONNECT_V6, "ALE_AUTH_CONNECT_V6", "ALE-Out"),
                 (FWPM_LAYER_OUTBOUND_TRANSPORT_V6, "OUTBOUND_TRANSPORT_V6", "Transport-Out"),
                 (FWPM_LAYER_OUTBOUND_IPPACKET_V6, "OUTBOUND_IPPACKET_V6", "IPPacket-Out"),
+                (FWPM_LAYER_DATAGRAM_DATA_V6, "DATAGRAM_DATA_V6", "Datagram-Out"),
+                (FWPM_LAYER_OUTBOUND_ICMP_ERROR_V6, "OUTBOUND_ICMP_ERROR_V6", "ICMPError-Out"),
             ];
             for (layer, layer_name, tag) in v6_out_layers {
                 let mut cond_lb_out = [FwpmFilterCondition0 {
@@ -1142,6 +1235,7 @@ impl WfpDynamicSession {
                 (FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6, "ALE_AUTH_RECV_ACCEPT_V6", "ALE-In"),
                 (FWPM_LAYER_INBOUND_TRANSPORT_V6, "INBOUND_TRANSPORT_V6", "Transport-In"),
                 (FWPM_LAYER_INBOUND_IPPACKET_V6, "INBOUND_IPPACKET_V6", "IPPacket-In"),
+                (FWPM_LAYER_INBOUND_ICMP_ERROR_V6, "INBOUND_ICMP_ERROR_V6", "ICMPError-In"),
             ];
             for (layer, layer_name, tag) in v6_in_layers {
                 let mut cond_lb_in = [FwpmFilterCondition0 {
@@ -1276,7 +1370,7 @@ impl WfpDynamicSession {
                 }
             }
 
-            // 4. CATCH-ALL BLOCK FILTERS ACROSS ALL 12 LAYERS (Weight = 1)
+            // 4. CATCH-ALL BLOCK FILTERS ACROSS ALL 22 KERNEL LAYERS (Weight = 1)
             let block_layers = [
                 (FWPM_LAYER_ALE_AUTH_CONNECT_V4, "ALE_AUTH_CONNECT_V4", "Block-All-Outbound-ALE-v4"),
                 (FWPM_LAYER_ALE_AUTH_CONNECT_V6, "ALE_AUTH_CONNECT_V6", "Block-All-Outbound-ALE-v6"),
@@ -1290,6 +1384,16 @@ impl WfpDynamicSession {
                 (FWPM_LAYER_OUTBOUND_IPPACKET_V6, "OUTBOUND_IPPACKET_V6", "Block-All-IPPacket-Out-v6"),
                 (FWPM_LAYER_INBOUND_IPPACKET_V4, "INBOUND_IPPACKET_V4", "Block-All-IPPacket-In-v4"),
                 (FWPM_LAYER_INBOUND_IPPACKET_V6, "INBOUND_IPPACKET_V6", "Block-All-IPPacket-In-v6"),
+                (FWPM_LAYER_DATAGRAM_DATA_V4, "DATAGRAM_DATA_V4", "Block-All-Datagram-Out-v4"),
+                (FWPM_LAYER_DATAGRAM_DATA_V6, "DATAGRAM_DATA_V6", "Block-All-Datagram-Out-v6"),
+                (FWPM_LAYER_OUTBOUND_ICMP_ERROR_V4, "OUTBOUND_ICMP_ERROR_V4", "Block-All-ICMPError-Out-v4"),
+                (FWPM_LAYER_OUTBOUND_ICMP_ERROR_V6, "OUTBOUND_ICMP_ERROR_V6", "Block-All-ICMPError-Out-v6"),
+                (FWPM_LAYER_INBOUND_ICMP_ERROR_V4, "INBOUND_ICMP_ERROR_V4", "Block-All-ICMPError-In-v4"),
+                (FWPM_LAYER_INBOUND_ICMP_ERROR_V6, "INBOUND_ICMP_ERROR_V6", "Block-All-ICMPError-In-v6"),
+                (FWPM_LAYER_OUTBOUND_MAC_FRAME_NATIVE, "OUTBOUND_MAC_FRAME_NATIVE", "Block-All-MAC-Out-Native"),
+                (FWPM_LAYER_INBOUND_MAC_FRAME_NATIVE, "INBOUND_MAC_FRAME_NATIVE", "Block-All-MAC-In-Native"),
+                (FWPM_LAYER_OUTBOUND_MAC_FRAME_ETHERNET, "OUTBOUND_MAC_FRAME_ETHERNET", "Block-All-MAC-Out-Ethernet"),
+                (FWPM_LAYER_INBOUND_MAC_FRAME_ETHERNET, "INBOUND_MAC_FRAME_ETHERNET", "Block-All-MAC-In-Ethernet"),
             ];
 
             for (layer, layer_name, filter_name) in block_layers {
@@ -1302,6 +1406,35 @@ impl WfpDynamicSession {
                     &mut [],
                 ) {
                     filter_ids.push(id);
+                }
+            }
+
+            // 5. EXPLICIT HARDWARE & QUANTUM CONTROL ETHERTYPE BLOCK FILTERS (Layer-2)
+            for ethertype in [0x88E5u16, 0x88F7u16, 0x8809u16, 0xAEFEu16] {
+                let mut cond_et = [FwpmFilterCondition0 {
+                    field_key: FWPM_CONDITION_ETHER_TYPE,
+                    match_type: FWP_MATCH_EQUAL,
+                    _pad: 0,
+                    condition_value: FwpConditionValue0 {
+                        type_: FWP_UINT16,
+                        _pad: 0,
+                        value: ethertype as usize,
+                    },
+                }];
+                for (layer, layer_name, tag) in [
+                    (FWPM_LAYER_OUTBOUND_MAC_FRAME_NATIVE, "OUTBOUND_MAC_FRAME_NATIVE", "Native"),
+                    (FWPM_LAYER_OUTBOUND_MAC_FRAME_ETHERNET, "OUTBOUND_MAC_FRAME_ETHERNET", "Ethernet"),
+                ] {
+                    if let Ok(id) = install_filter(
+                        &format!("Block-EtherType-0x{:04X}-{}", ethertype, tag),
+                        layer,
+                        layer_name,
+                        FWP_ACTION_BLOCK,
+                        5,
+                        &mut cond_et,
+                    ) {
+                        filter_ids.push(id);
+                    }
                 }
             }
 
@@ -2527,8 +2660,8 @@ mod tests {
     }
 
     #[test]
-    fn test_12_layer_guids_integrity() {
-        let all_12_layers = [
+    fn test_all_22_layer_guids_integrity() {
+        let all_22_layers = [
             FWPM_LAYER_ALE_AUTH_CONNECT_V4,
             FWPM_LAYER_ALE_AUTH_CONNECT_V6,
             FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4,
@@ -2541,15 +2674,31 @@ mod tests {
             FWPM_LAYER_OUTBOUND_IPPACKET_V6,
             FWPM_LAYER_INBOUND_IPPACKET_V4,
             FWPM_LAYER_INBOUND_IPPACKET_V6,
+            FWPM_LAYER_DATAGRAM_DATA_V4,
+            FWPM_LAYER_DATAGRAM_DATA_V6,
+            FWPM_LAYER_OUTBOUND_ICMP_ERROR_V4,
+            FWPM_LAYER_OUTBOUND_ICMP_ERROR_V6,
+            FWPM_LAYER_INBOUND_ICMP_ERROR_V4,
+            FWPM_LAYER_INBOUND_ICMP_ERROR_V6,
+            FWPM_LAYER_OUTBOUND_MAC_FRAME_NATIVE,
+            FWPM_LAYER_INBOUND_MAC_FRAME_NATIVE,
+            FWPM_LAYER_OUTBOUND_MAC_FRAME_ETHERNET,
+            FWPM_LAYER_INBOUND_MAC_FRAME_ETHERNET,
         ];
 
-        // All 12 layers must be distinct
-        for i in 0..all_12_layers.len() {
-            assert_ne!(all_12_layers[i], WfpGuid::default(), "Layer {i} must not be zeroed GUID");
-            for j in (i + 1)..all_12_layers.len() {
-                assert_ne!(all_12_layers[i], all_12_layers[j], "Layers {i} and {j} must be distinct GUIDs");
+        // All 22 layers must be distinct and non-zero
+        for i in 0..all_22_layers.len() {
+            assert_ne!(all_22_layers[i], WfpGuid::default(), "Layer {i} must not be zeroed GUID");
+            for j in (i + 1)..all_22_layers.len() {
+                assert_ne!(all_22_layers[i], all_22_layers[j], "Layers {i} and {j} must be distinct GUIDs");
             }
         }
+
+        // Verify condition GUIDs
+        assert_ne!(FWPM_CONDITION_ETHER_TYPE, WfpGuid::default());
+        assert_ne!(FWPM_CONDITION_IP_PROTOCOL, WfpGuid::default());
+        assert_ne!(FWPM_CONDITION_IP_REMOTE_ADDRESS, WfpGuid::default());
+        assert_ne!(FWPM_CONDITION_IP_LOCAL_ADDRESS, WfpGuid::default());
     }
 
     #[test]

@@ -74,6 +74,12 @@ It runs without requiring external OS CLI wrapper tools (`netsh`, `iptables`, `n
 - **10-Node Cyclic LangGraph State Machine**: Deterministic cyclic transitions (`Monitoring` → `IngestingSignals` → `CorrelatingEdrAndOctopus` → `AdjudicatingZeroFalsePositive` → `OptionalOllamaReasoning` → `EngagingContainment` → `IsolatedHealthProbing` → `DisarmingAndRestoring`) with BLAKE3-chained execution trace verification.
 - **Standalone Containment Boundary Guards**: Constant-time HMAC-SHA256 verification and monotonic epoch advancement across local agent containment rings.
 
+### 5. 16-Domain Universal Protocol Catalog & 256 IANA IP Protocol Kernel Quarantine
+- **Universal 16-Domain Defense Spectrum**: Exhaustive protocol coverage across Classical Internet, Industrial SCADA, IoT/Embedded, Automotive, Aerospace/Avionics, Financial HFT, Telecom 5G/6G, A/V Broadcast, Post-Quantum Encrypted, Quantum Key Distribution (QKD), Quantum Network Control, Quantum Hardware Telemetry, Cryogenic Superconducting, Atomic Trapped-Ion, Direct Hardware Bus, and Optical Photonic domains.
+- **Exhaustive 256 IANA IP Protocol Neutralization (`0..=255`)**: Zero uncontained IP protocol fallbacks—kernel-level blocking across all 256 protocol numbers (including GRE, ESP, AH, SCTP, IPv6-in-IPv4 tunnels, and reserved ranges).
+- **Direct Layer-2 EtherType Neutralization**: Blocks non-IP lateral channels including MACsec (`0x88E5`), PTP/White Rabbit (`0x88F7`), SyncE (`0x8809`), and eCPRI (`0xAEFE`).
+- **Loopback 3030 / Active Port Invariant**: Complete preservation of local dashboard communication (`127.0.0.1` and `::1`) during full quarantine.
+
 ---
 
 ## 📦 Workspace Architecture (8 Rust Crates)
@@ -245,3 +251,50 @@ To extend state checkpointing (`engine.rs`), CAGE/APC atomic fiscal spend caps, 
 4. **CLI & REST API**:
    - CLI: `killswitch.exe --distributed-consensus`
    - REST: `GET /api/consensus/status` and `POST /api/consensus/propose`
+
+---
+
+## 🌐 16-Domain Universal Protocol Catalog & 256 IANA IP Protocol Quarantine Isolation
+
+KillSwitch provides an exhaustive, kernel-enforced protocol containment boundary that covers the entire spectrum of modern digital communications—from legacy fieldbuses and high-frequency trading feeds to post-quantum tunnels and quantum hardware control buses:
+
+### 1. 16 Defense Domains Covered
+1. **Classical Internet**: Standard web, data transport, routing, and remote administration protocols (HTTP, HTTPS, SSH, DNS, NTP, BGP, OSPF, Telnet, FTP, TFTP, etc.).
+2. **Industrial SCADA**: Mission-critical ICS, power grid, and process control systems (Modbus TCP, DNP3, IEC 60870-5-104, EtherNet/IP, PROFINET, BACnet, OPC UA).
+3. **IoT & Embedded**: Constrained smart devices, building automation, and home networks (MQTT, CoAP, Zigbee IP, 6LoWPAN, Thread, Matter, mDNS).
+4. **Automotive & Vehicular**: In-vehicle Ethernet, diagnostics, and CAN bus bridging (SOME/IP, DoIP, CAN-over-IP).
+5. **Aerospace & Avionics**: Spacecraft, satellite, and avionics flight-control networks (ARINC 664 / AFDX, SpaceWire-over-IP, SpacePacket).
+6. **Financial High-Frequency**: Low-latency capital markets and exchange order execution (FIX, ITCH, OUCH, FAST, CME MDP 3.0).
+7. **Telecom & 5G/6G Core**: Mobile cellular packet core and radio access networks (GTP-U, PFCP, NGAP, Diameter, MAP, eCPRI).
+8. **Audio/Visual & Media Broadcast**: Real-time uncompressed media production and low-latency streaming (SMPTE ST 2110, NDI, Dante, AES67, Ravenna, RTP/SRTP, SIP).
+9. **Post-Quantum Encrypted**: Next-generation quantum-resistant cryptographic tunnels (Kyber/ML-KEM IKEv2, Dilithium/ML-DSA TLS 1.3, SPHINCS+ WireGuard).
+10. **Quantum Key Distribution (QKD)**: Quantum physical layer key-exchange protocols (ETSI GS QKD 014, ETSI GS QKD 004, Q3P, QKD Key Management Layer).
+11. **Quantum Network Control**: Distributed entanglement routing, quantum teleportation, and simulation fabrics (QNE Quantum Network Explorer, QIA, QuNetSim, SeQUeNCe).
+12. **Quantum Hardware Telemetry**: Quantum control rack instrumentation, AWG controllers, and digitizers (Qblox Cluster, Zurich Instruments LabOne, Keysight Quantum, Bluefors, Oxford Triton).
+13. **Cryogenic Superconducting**: Dilution refrigerator qubit control and cQED microwave pulse lines (Cryo-CMOS SPI, cQED Pulse Stream, Microwave Flux Bias).
+14. **Atomic & Trapped-Ion**: Optical optical pumping, Raman gates, laser acousto-optic modulators, and ion trap RF drives (Ion Trap RF Drive, AOM/EOM Laser Control, PMT/EMCCD Readout).
+15. **Direct Hardware Bus**: Laboratory measurement instruments, particle accelerator networks, and high-speed interconnects (PCIe-over-IP, CXL Fabric, SCPI IEEE 488.2, EPICS Channel Access).
+16. **Optical & Photonic**: DWDM optical transport, wavelength-selective switches, and coherent transceivers (ROADM WSS Control, Optical Channel Monitor, Coherent Transceiver Telemetry).
+
+### 2. Complete 256 IANA IP Protocol Neutralization (`0..=255`)
+- In addition to standard Layer-4 TCP (`6`) and UDP (`17`), KillSwitch kernel isolation strictly neutralizes all 256 IANA assigned and unassigned IP protocol numbers (`0` HOPOPT, `1` ICMP, `2` IGMP, `4` IPv4 encapsulation, `41` IPv6-in-IPv4 tunnels, `47` GRE, `50` ESP, `51` AH, `58` ICMPv6, `89` OSPF, `132` SCTP, ..., `255` Reserved).
+- **Windows**: WFP rules registered across all 22 kernel layers (Datagram Data V4/V6, ICMP Error V4/V6, ALE Auth Connect/Accept V4/V6, Outbound/Inbound Transport V4/V6, and IP Packet V4/V6).
+- **Linux**: Netlink blackhole routing (`RTN_BLACKHOLE`) drops all protocol traffic at the kernel route lookup stage with zero packet-handling overhead.
+- **macOS**: Packet Filter (`/dev/pf`) quarantine anchor rule `block drop in/out quick proto any` neutralizes all protocol framing at the wire interface.
+
+### 3. Layer-2 EtherType Neutralization
+Blocks sub-IP lateral evasion techniques by enforcing kernel-level Layer-2 MAC frame and Ethernet filtering on key high-risk non-IP EtherTypes:
+- `0x88E5`: MACsec (IEEE 802.1AE MAC Security)
+- `0x88F7`: PTP (IEEE 1588 Precision Time Protocol & White Rabbit)
+- `0x8809`: Slow Protocols (IEEE 802.3ad LACP & Synchronous Ethernet / SyncE)
+- `0xAEFE`: eCPRI (O-RAN 5G/6G fronthaul payload)
+
+### 4. Preserved Loopback Exception (Control Port Invariant)
+All kernel quarantine mechanisms dynamically install an explicit high-priority permit exception for IPv4 `127.0.0.1` and IPv6 `::1` matching the active control server port (`3030` or custom `-p <port>`). The plain-English WebUI and REST API remain 100% responsive and operable by the human operator under full emergency lockdown.
+
+### 5. WebUI Quarantine Matrix & REST API
+- **Interactive WebUI**: Includes an interactive **16-Domain Universal Protocol Quarantine Matrix** with live status badge (`256/256 IP Protocols Neutralized`), 16 interactive domain filter pills, live text search, and detailed per-protocol port/layer/vector metadata.
+- **REST API Endpoints**:
+  - `GET /api/protocol-catalog` (and `/protocol-catalog`): Returns complete catalog summary, domain metadata, total protocol counts, and all protocol definitions.
+  - `GET /api/protocol-catalog/domain?domain=<name_or_index>`: Filters protocol definitions by domain name or numeric ID (1..16).
+

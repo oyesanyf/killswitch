@@ -9,6 +9,7 @@ pub mod errors;
 pub mod graph;
 pub mod identity;
 pub mod octopus;
+pub mod protocol;
 pub mod status;
 pub mod telemetry;
 
@@ -59,6 +60,12 @@ pub use graph::{
 // Re-export service types
 pub mod service;
 pub use service::{ServiceConfig, ServiceError, ServiceState, ServiceStatus};
+
+// Re-export universal protocol catalog & taxonomy
+pub use protocol::{
+    OsiLayer, ProtocolDefinition, ProtocolDomain, ProtocolVectorType,
+    UniversalProtocolCatalog, ALL_DOMAINS,
+};
 
 #[cfg(test)]
 mod integration_tests {

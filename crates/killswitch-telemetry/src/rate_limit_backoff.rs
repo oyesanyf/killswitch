@@ -41,6 +41,21 @@ pub enum NetworkProtocol {
     Smtp,
     SmbRdp,
     Icmp,
+    Macsec,
+    Ptp,
+    SyncE,
+    Ecpri,
+    Sip,
+    RtpSrtp,
+    Webrtc,
+    Mqtt,
+    ZeroMq,
+    Scpi,
+    Epics,
+    QkdControl,
+    QuantumEntanglement,
+    QuantumTeleportation,
+    RawIp,
 }
 
 impl NetworkProtocol {
@@ -56,11 +71,19 @@ impl NetworkProtocol {
                 Some(445) | Some(3389) => Self::SmbRdp,
                 Some(80) | Some(443) | Some(3030) | Some(8080) | Some(8443) => Self::HttpHttps,
                 Some(50051) => Self::Grpc,
+                Some(1883) | Some(8883) => Self::Mqtt,
+                Some(5555) | Some(5556) => Self::ZeroMq,
+                Some(5025) => Self::Scpi,
+                Some(5060) | Some(5061) => Self::Sip,
+                Some(5064) | Some(5065) | Some(5075) | Some(5076) => Self::Epics,
                 _ => Self::Tcp,
             },
             "udp" => match dst_port {
                 Some(53) => Self::Dns,
                 Some(443) | Some(8443) => Self::Quic,
+                Some(319) | Some(320) => Self::Ptp,
+                Some(5060) | Some(5061) => Self::Sip,
+                Some(5004) | Some(5005) => Self::RtpSrtp,
                 _ => Self::Udp,
             },
             "quic" | "http3" | "h3" => Self::Quic,
@@ -71,6 +94,21 @@ impl NetworkProtocol {
             "smtp" => Self::Smtp,
             "smb" | "rdp" | "smb/rdp" | "smbrdp" => Self::SmbRdp,
             "icmp" | "ping" => Self::Icmp,
+            "macsec" => Self::Macsec,
+            "ptp" | "ieee1588" | "whiterabbit" => Self::Ptp,
+            "synce" => Self::SyncE,
+            "ecpri" => Self::Ecpri,
+            "sip" => Self::Sip,
+            "rtp" | "srtp" | "rtpsrtp" => Self::RtpSrtp,
+            "webrtc" => Self::Webrtc,
+            "mqtt" => Self::Mqtt,
+            "zmq" | "zeromq" => Self::ZeroMq,
+            "scpi" => Self::Scpi,
+            "epics" => Self::Epics,
+            "qkd" | "qkdcontrol" | "bb84" | "e91" => Self::QkdControl,
+            "entanglement" => Self::QuantumEntanglement,
+            "teleportation" => Self::QuantumTeleportation,
+            "raw" | "rawip" => Self::RawIp,
             _ => {
                 if let Some(port) = dst_port {
                     match port {
@@ -80,6 +118,12 @@ impl NetworkProtocol {
                         445 | 3389 => Self::SmbRdp,
                         80 | 443 | 3030 | 8080 | 8443 => Self::HttpHttps,
                         50051 => Self::Grpc,
+                        1883 | 8883 => Self::Mqtt,
+                        5555 | 5556 => Self::ZeroMq,
+                        5025 => Self::Scpi,
+                        5060 | 5061 => Self::Sip,
+                        5064 | 5065 | 5075 | 5076 => Self::Epics,
+                        319 | 320 => Self::Ptp,
                         _ => Self::Tcp,
                     }
                 } else {
@@ -90,17 +134,36 @@ impl NetworkProtocol {
     }
 
     /// Base Retransmission Timeout (RTO) floor in milliseconds:
-    /// - 200ms for transport layer (Tcp, Udp, Quic, Dns, Icmp)
-    /// - 500ms for application layer (HttpHttps, Grpc, WebSocket, Ssh, Smtp, SmbRdp)
+    /// - 200ms for transport layer (Tcp, Udp, Quic, Dns, Icmp, Macsec, Ptp, SyncE, Ecpri, RawIp)
+    /// - 500ms for application layer (HttpHttps, Grpc, WebSocket, Ssh, Smtp, SmbRdp, etc.)
     pub const fn base_rto_floor_ms(&self) -> u64 {
         match self {
-            Self::Tcp | Self::Udp | Self::Quic | Self::Dns | Self::Icmp => 200,
+            Self::Tcp
+            | Self::Udp
+            | Self::Quic
+            | Self::Dns
+            | Self::Icmp
+            | Self::Macsec
+            | Self::Ptp
+            | Self::SyncE
+            | Self::Ecpri
+            | Self::RawIp => 200,
             Self::HttpHttps
             | Self::Grpc
             | Self::WebSocket
             | Self::Ssh
             | Self::Smtp
-            | Self::SmbRdp => 500,
+            | Self::SmbRdp
+            | Self::Sip
+            | Self::RtpSrtp
+            | Self::Webrtc
+            | Self::Mqtt
+            | Self::ZeroMq
+            | Self::Scpi
+            | Self::Epics
+            | Self::QkdControl
+            | Self::QuantumEntanglement
+            | Self::QuantumTeleportation => 500,
         }
     }
 
@@ -118,6 +181,7 @@ impl NetworkProtocol {
             Self::Smtp => status == 421 || status == 450 || status == 451 || status == 452,
             Self::SmbRdp => status == 0xC000005E || status == 429 || status == 503,
             Self::Icmp => status == 3 || status == 4,
+            _ => status == 429 || status == 503 || status == 1,
         }
     }
 
@@ -134,6 +198,21 @@ impl NetworkProtocol {
             Self::Smtp => "SMTP",
             Self::SmbRdp => "SMB/RDP",
             Self::Icmp => "ICMP",
+            Self::Macsec => "MACsec",
+            Self::Ptp => "PTP/IEEE1588",
+            Self::SyncE => "SyncE",
+            Self::Ecpri => "eCPRI",
+            Self::Sip => "SIP",
+            Self::RtpSrtp => "RTP/SRTP",
+            Self::Webrtc => "WebRTC",
+            Self::Mqtt => "MQTT",
+            Self::ZeroMq => "ZeroMQ",
+            Self::Scpi => "SCPI",
+            Self::Epics => "EPICS",
+            Self::QkdControl => "QKD Control",
+            Self::QuantumEntanglement => "Quantum Entanglement",
+            Self::QuantumTeleportation => "Quantum Teleportation",
+            Self::RawIp => "Raw IP",
         }
     }
 }
