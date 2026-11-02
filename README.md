@@ -23,8 +23,8 @@ It runs without requiring external OS CLI wrapper tools (`netsh`, `iptables`, `n
   - **Instantly severs all established external TCP sockets** (`SetTcpEntry` `MIB_TCP_STATE_DELETE_TCB`) so active AI command-and-control or upload streams are terminated mid-packet.
   - **Suspends untrusted processes in RAM** (`NtSuspendProcess` / `SIGSTOP`) while strictly preserving `127.0.0.1` loopback so the human operator stays in complete control at `http://127.0.0.1:3030` (or custom `-p <port>`).
 
-### 2. Local Rogue AI Agent Breakout Prevention (`killswitch-telemetry::octopus`)
-- Built-in **18-Arm Octopus AI Agent Containment Mesh** (`ArmContainmentRing` & `BreakoutDefenseCoordinator`) enforces mathematical and cryptographic boundaries around local AI agents:
+### 2. Standalone Local Rogue AI Agent Breakout Prevention (`killswitch-telemetry`)
+- Built-in **Standalone AI Agent Containment Rings** (`ArmContainmentRing` & `BreakoutDefenseCoordinator`) enforce mathematical and cryptographic boundaries around local AI agents:
   - **Mathematical SSRF & Internal Network Blocking (`validate_egress_url`)**: Blocks AI agents from probing local routers/LAN (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), cloud instance metadata (`169.254.169.254`), link-local, CGNAT, and IPv4-mapped IPv6 addresses.
   - **Sandbox Path Traversal Defense (`validate_sandbox_path`)**: Rejects `..`, drive letters (`:`), UNC paths (`\\`), percent-encoded traversal (`%2e`, `%2f`, `%5c`, `%00`), and NTFS Alternate Data Streams before any path join.
   - **Autonomous Limb Severing & Monotonic Epoch Advancement**: If an AI agent triggers behavioral, technical, operational, or data breakout detectors, KillSwitch **severs that agent arm**, revokes its HMAC-SHA256 capability token, and advances its generation epoch (`N -> N + 1`) so stale or hijacked agent handles are immediately rejected.
@@ -72,7 +72,7 @@ It runs without requiring external OS CLI wrapper tools (`netsh`, `iptables`, `n
 ### 4. Zero-False-Positive Multi-Voter Adjudication & 10-Node LangGraph Orchestrator
 - **Depth-5 Process Ancestry & Critical OS Anchor Immunity**: Hardcoded immunity for PIDs `0`, `1`, `4`, the agent itself, up to 5 parent generations, and critical system/developer processes (`explorer.exe`, `svchost.exe`, `lsass.exe`, `csrss.exe`, `WindowServer`, `systemd`, shells, browsers, IDEs).
 - **10-Node Cyclic LangGraph State Machine**: Deterministic cyclic transitions (`Monitoring` → `IngestingSignals` → `CorrelatingEdrAndOctopus` → `AdjudicatingZeroFalsePositive` → `OptionalOllamaReasoning` → `EngagingContainment` → `IsolatedHealthProbing` → `DisarmingAndRestoring`) with BLAKE3-chained execution trace verification.
-- **Octopus 18-Arm Containment Mesh**: Constant-time HMAC-SHA256 inter-agent verification and monotonic epoch advancement across 18 specialized defense arms.
+- **Standalone Containment Boundary Guards**: Constant-time HMAC-SHA256 verification and monotonic epoch advancement across local agent containment rings.
 
 ---
 

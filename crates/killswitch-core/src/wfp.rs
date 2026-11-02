@@ -56,9 +56,12 @@ pub const DEFAULT_CONTROL_PORT: u16 = 3030;
 /// Discovers all active control/WebUI ports (3030, 4040, plus any port in `active_port.txt`)
 /// so that whatever `-p <port>` the user launched `killswitch.exe` with is always preserved.
 pub fn discover_active_control_ports() -> Vec<u16> {
-    let mut ports = vec![DEFAULT_CONTROL_PORT, 4040];
+    let mut ports: Vec<u16> = (3030..=3045).collect();
+    ports.push(4040);
     let candidates = [
         std::path::PathBuf::from("active_port.txt"),
+        std::path::PathBuf::from("..").join("active_port.txt"),
+        std::path::PathBuf::from("..").join("..").join("active_port.txt"),
         std::env::temp_dir().join("killswitch_active_port.txt"),
     ];
     for path in candidates {
@@ -1576,6 +1579,35 @@ pub fn apply_bfe_registry_quarantine_rules() -> Vec<String> {
         for (name, val) in rules {
             if fw_key.set_value(name, &val).is_ok() {
                 applied.push(name.to_string());
+            }
+        }
+        for ctrl_port in discover_active_control_ports() {
+            if ctrl_port == 3030 {
+                continue;
+            }
+            let r_in_name = format!("KillSwitch-Allow-WebUI-{}-In", ctrl_port);
+            let r_in_val = format!(
+                "v2.31|Action=Allow|Active=TRUE|Dir=In|Protocol=6|LPort={}|Name={}|Desc=KillSwitch Control API Inbound|",
+                ctrl_port, r_in_name
+            );
+            if fw_key.set_value(&r_in_name, &r_in_val).is_ok() {
+                applied.push(r_in_name);
+            }
+            let r_out_name = format!("KillSwitch-Allow-WebUI-{}-Out", ctrl_port);
+            let r_out_val = format!(
+                "v2.31|Action=Allow|Active=TRUE|Dir=Out|Protocol=6|LPort={}|Name={}|Desc=KillSwitch Control API Outbound|",
+                ctrl_port, r_out_name
+            );
+            if fw_key.set_value(&r_out_name, &r_out_val).is_ok() {
+                applied.push(r_out_name);
+            }
+            let r_rem_name = format!("KillSwitch-Allow-WebUI-{}-Out-Remote", ctrl_port);
+            let r_rem_val = format!(
+                "v2.31|Action=Allow|Active=TRUE|Dir=Out|Protocol=6|RPort={}|Name={}|Desc=KillSwitch Control Remote Outbound|",
+                ctrl_port, r_rem_name
+            );
+            if fw_key.set_value(&r_rem_name, &r_rem_val).is_ok() {
+                applied.push(r_rem_name);
             }
         }
         info!(

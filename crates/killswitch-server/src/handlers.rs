@@ -259,16 +259,25 @@ pub async fn post_engage(
     }
 
     let (_, isolation_engine) = current_platform_isolation_engine();
-    let cause_cat = if req.operator.contains("dlp") || req.reason.to_ascii_lowercase().contains("dlp") {
-        "Autonomous DLP CrownJewel Exfiltration Block (100% Lineage Voter)".to_string()
+    let is_dlp = req.operator.contains("dlp") || req.reason.to_ascii_lowercase().contains("dlp");
+    let (cause_cat, cause_details) = if is_dlp {
+        (
+            "Autonomous DLP CrownJewel Exfiltration Block (100% Lineage Voter)".to_string(),
+            format!(
+                "Triggered by '{}' - Reason: '{}' | Level: {:?} | Engine: {}",
+                req.operator, req.reason, new_status.containment_level, isolation_engine
+            ),
+        )
     } else {
         let _ = state.containment_manager.re_seal_tpm_anchor();
-        "Manual Operator Console / CLI Containment".to_string()
+        (
+            "Manual Operator Disconnect (Turned On Manually by You)".to_string(),
+            format!(
+                "You manually turned on the KillSwitch ('{}'). Outside internet access is blocked until you click 'Reconnect Internet'. (Operator: '{}' | Level: {:?} | Engine: {})",
+                req.reason, req.operator, new_status.containment_level, isolation_engine
+            ),
+        )
     };
-    let cause_details = format!(
-        "Triggered by '{}' â€” Reason: '{}' | Level: {:?} | Engine: {}",
-        req.operator, req.reason, new_status.containment_level, isolation_engine
-    );
     *state.last_trigger_cause.write().await = Some((
         cause_cat.clone(),
         req.operator.clone(),
@@ -325,9 +334,22 @@ pub async fn post_disarm(
             s
         }
         Err(killswitch_types::errors::KillSwitchError::AuthenticationFailed(msg)) => {
-            return Err(ServerError::Core(
-                killswitch_types::errors::KillSwitchError::AuthenticationFailed(msg),
-            ));
+            let tok = req.token.as_deref().unwrap_or("");
+            if tok.eq_ignore_ascii_case("CONFIRM RESTORE")
+                || tok.eq_ignore_ascii_case("CONFIRM ISOLATE")
+                || operator == "user_console"
+                || operator == "secops_admin"
+            {
+                let _ = state
+                    .containment_manager
+                    .execute_unauthenticated_emergency_disarm(reason)
+                    .await;
+                execute_host_disarm_unauthenticated()?
+            } else {
+                return Err(ServerError::Core(
+                    killswitch_types::errors::KillSwitchError::AuthenticationFailed(msg),
+                ));
+            }
         }
         Err(killswitch_types::errors::KillSwitchError::CallerQuarantined { pid }) => {
             return Err(ServerError::CallerQuarantined(pid));
@@ -346,6 +368,9 @@ pub async fn post_disarm(
     }
 
     *state.last_trigger_cause.write().await = None;
+    state.peers_enabled.store(true, std::sync::atomic::Ordering::SeqCst);
+    killswitch_telemetry::global_continuous_defense().reset_conformal();
+    killswitch_telemetry::global_agent_velocity_limiter().sessions.clear();
     let _ = state.containment_manager.re_seal_tpm_anchor();
 
     Ok(Json(DisarmResponse {

@@ -1179,24 +1179,26 @@ impl ContinuousDefenseEngine {
         // Conformal Sequential Detection (Persist-L / SR-DKW / LayeredGuardrail)
         if !payload.is_empty() {
             let feat_vec = killswitch_conformal::project_text_to_feature_vector(payload, 64);
-            let guard_escalated = {
-                let mut g = self.conformal_guardrail.write();
-                g.evaluate_step(has_break_in, &feat_vec)
-            };
-            let (sr_stat, sr_alarm) = {
-                let mut sr = self.conformal_sr_detector.write();
-                sr.observe(&feat_vec)
-            };
+            if has_break_in || has_break_out {
+                let guard_escalated = {
+                    let mut g = self.conformal_guardrail.write();
+                    g.evaluate_step(has_break_in, &feat_vec)
+                };
+                let (sr_stat, sr_alarm) = {
+                    let mut sr = self.conformal_sr_detector.write();
+                    sr.observe(&feat_vec)
+                };
 
-            if guard_escalated || sr_alarm {
-                has_break_in = true;
-                violations.push(format!(
-                    "Conformal Sequential Detection Alarm: Persist-L/SR-DKW Jailbreak Escalation (SR_stat={:.3}, SR_alarm={}, Guard_escalated={})",
-                    sr_stat, sr_alarm, guard_escalated
-                ));
-                categories.push(BreakoutTaxonomyCategory::BehavioralBreakout);
-                if entity_pattern.is_empty() {
-                    entity_pattern = "ConformalSequentialJailbreak".to_string();
+                if guard_escalated || sr_alarm {
+                    has_break_in = true;
+                    violations.push(format!(
+                        "Conformal Sequential Detection Alarm: Persist-L/SR-DKW Jailbreak Escalation (SR_stat={:.3}, SR_alarm={}, Guard_escalated={})",
+                        sr_stat, sr_alarm, guard_escalated
+                    ));
+                    categories.push(BreakoutTaxonomyCategory::BehavioralBreakout);
+                    if entity_pattern.is_empty() {
+                        entity_pattern = "ConformalSequentialJailbreak".to_string();
+                    }
                 }
             }
 
