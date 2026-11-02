@@ -636,7 +636,6 @@ impl MacOsPfIsolator {
         rules: &[PfRuleSpec],
     ) -> Result<u32> {
         use std::ffi::CString;
-        use std::os::unix::fs::OpenOptionsExt;
 
         let dev_c = CString::new(self.device_path.to_str().unwrap_or(PF_DEVICE_PATH))
             .map_err(|e| KillSwitchError::Other(e.to_string()))?;
