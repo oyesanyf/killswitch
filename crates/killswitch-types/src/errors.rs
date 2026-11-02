@@ -47,6 +47,12 @@ pub enum KillSwitchError {
         win32_code: u32,
     },
 
+    #[error("Administrative elevation required: {details}. Remediation: {remediation}")]
+    InsufficientPrivileges { details: String, remediation: String },
+
+    #[error("Windows network quarantine engagement failed: zero kernel WFP filters were installed ({0})")]
+    ZeroFiltersInstalled(String),
+
     // -------------------------------------------------------------------------
     // 2. Linux Netlink & Landlock Kernel Control Errors
     // -------------------------------------------------------------------------
