@@ -252,7 +252,7 @@ async fn boot_unified_webui_runtime(
 ================================================================================
  [1/6] Core Engine:    State Ledger & Native WFP / Tarpit Containment
  [2/6] Adjudication:   Zero-False-Positive Engine & WinTrust Validator
- [3/6] Telemetry:      DLP Lineage Engine & Octopus 18-Arm Defense Mesh
+ [3/6] Telemetry:      DLP Lineage Engine & Standalone Breakout Defense
  [4/6] Orchestrator:   10-Node Cyclic LangGraph & BLAKE3 Trace Checkpointer
  [5/6] WebUI & Server: Local Axum Control API & Interactive WebUI ({}:{})
  [6/6] Service:        Cross-Platform Native OS Service Lifecycle

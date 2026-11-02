@@ -3,7 +3,7 @@
 //! Boots 100% of the KillSwitch subsystems into a single cohesive runtime:
 //! 1. Core Containment Engine & BLAKE3 State Ledger
 //! 2. Zero-False-Positive Adjudicator & WinTrust Verifier
-//! 3. OpenTelemetry / DLP Lineage Engine & Octopus 18-Arm Rings
+//! 3. OpenTelemetry / DLP Lineage Engine & Standalone Breakout Defense
 //! 4. 10-Node Cyclic LangGraph Orchestrator & Durable Checkpointer
 //! 5. Local Axum HTTP API Server (127.0.0.1:3030)
 //! 6. Native Cross-Platform OS Service Lifecycle Manager
@@ -148,7 +148,7 @@ impl UnifiedRuntime {
         info!("🛡️ [LOADER] Booting Phase 2: Zero-False-Positive Adjudication Engine");
         let adjudicator = Arc::new(ZeroFalsePositiveAdjudicator::new());
 
-        info!("🛡️ [LOADER] Booting Phase 3: Telemetry, DLP Lineage Engine & Octopus 18-Arm Mesh");
+        info!("🛡️ [LOADER] Booting Phase 3: Telemetry, DLP Lineage Engine & Standalone Breakout Defense");
         let lineage_engine = Arc::new(EndpointLineageEngine::new_in_memory());
         let arm_registry = Arc::new(ArmRingRegistry::new(b"killswitch_master_octopus_seed_00"));
         let event_correlator = Arc::new(EventCorrelator::default());
