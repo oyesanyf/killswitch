@@ -199,10 +199,8 @@ impl KillChainHostManager {
         let active_network_rules = Vec::new();
 
         let mut preserved_ports = crate::wfp::discover_active_control_ports();
-        for &p in &[DEFAULT_CONTROL_PORT, 53, 67, 68, 546, 547] {
-            if !preserved_ports.contains(&p) {
-                preserved_ports.push(p);
-            }
+        if !preserved_ports.contains(&DEFAULT_CONTROL_PORT) {
+            preserved_ports.push(DEFAULT_CONTROL_PORT);
         }
 
         // Stage 2: Network Quarantine (if level requires network isolation)
@@ -520,7 +518,7 @@ pub fn execute_host_disarm_unauthenticated() -> Result<KillChainStatus> {
         processes_frozen_count: 0,
         processes_tarpitted_count: 0,
         kernel_lockdown_active: false,
-        allowlisted_ports: vec![DEFAULT_CONTROL_PORT, 53, 67, 68, 546, 547],
+        allowlisted_ports: vec![DEFAULT_CONTROL_PORT],
         quarantined_interfaces: Vec::new(),
         frozen_pids: Vec::new(),
         tarpitted_pids: Vec::new(),
