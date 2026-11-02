@@ -832,3 +832,34 @@ pub struct HitlRejectRequestDto {
     pub operator_id: String,
     pub reason: String,
 }
+
+// =============================================================================
+// 17. Google CAGE Governance PEP DTOs (Google CAGE, Tallam 2026 arXiv:2606.12320)
+// =============================================================================
+
+pub use killswitch_telemetry::{
+    CageEvaluationRequest, CageEvaluationResponse, CageKernelStatusReport,
+    CompiledSubstrateArtifact, GovernanceTraceEvent, TraceConformanceReport,
+};
+
+/// Flexible ingress payload accepting either a raw JSON array of trace events or `{ "trace": [...] }`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum CageVerifyTracePayload {
+    Array(Vec<killswitch_telemetry::GovernanceTraceEvent>),
+    Object {
+        trace: Vec<killswitch_telemetry::GovernanceTraceEvent>,
+        #[serde(default)]
+        requires_warrant: Option<bool>,
+    },
+}
+
+impl CageVerifyTracePayload {
+    pub fn into_trace(self) -> Vec<killswitch_telemetry::GovernanceTraceEvent> {
+        match self {
+            Self::Array(t) => t,
+            Self::Object { trace, .. } => trace,
+        }
+    }
+}
+

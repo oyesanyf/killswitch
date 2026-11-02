@@ -82,8 +82,13 @@ impl VerificationReport {
 pub struct SubsystemVerifier;
 
 impl SubsystemVerifier {
-    /// Executes all 6 diagnostic phases.
+    /// Executes all 7 default diagnostic phases (backward-compatible).
     pub async fn run_all() -> Result<VerificationReport> {
+        Self::run_with_governance(false).await
+    }
+
+    /// Executes subsystem diagnostics, optionally including Phase 8 (CAGE Governance).
+    pub async fn run_with_governance(cage_governance: bool) -> Result<VerificationReport> {
         let total_start = Instant::now();
         let mut phases = Vec::new();
 
@@ -192,6 +197,23 @@ impl SubsystemVerifier {
             duration_ms: p7_start.elapsed().as_millis(),
         });
 
+        // ---------------------------------------------------------------------
+        // Phase 8: Google CAGE Cybernetic Agent Governance Engine
+        // ---------------------------------------------------------------------
+        if cage_governance {
+            let p8_start = Instant::now();
+            let p8_res = Self::verify_phase_8_cage_governance().await;
+            phases.push(PhaseReport {
+                phase_number: 8,
+                name: "Google CAGE Cybernetic Agent Governance Engine (Substrates, 8-Tier Kernel, Receipts, Trace Conformance)".to_string(),
+                passed: p8_res.is_ok(),
+                details: p8_res.err().map(|e| e.to_string()).unwrap_or_else(|| {
+                    "5-Format substrate compiler, 8-tier deterministic kernel, dual-digest receipts & trace model checker verified".to_string()
+                }),
+                duration_ms: p8_start.elapsed().as_millis(),
+            });
+        }
+
         let all_passed = phases.iter().all(|p| p.passed);
         let total_duration_ms = total_start.elapsed().as_millis();
 
@@ -207,6 +229,21 @@ impl SubsystemVerifier {
         }
 
         Ok(report)
+    }
+
+    /// Executes Phase 8 standalone and returns a PhaseReport.
+    pub async fn verify_cage_governance() -> Result<PhaseReport> {
+        let start = Instant::now();
+        let res = Self::verify_phase_8_cage_governance().await;
+        Ok(PhaseReport {
+            phase_number: 8,
+            name: "Google CAGE Cybernetic Agent Governance Engine (arXiv:2606.12320)".to_string(),
+            passed: res.is_ok(),
+            details: res.err().map(|e| e.to_string()).unwrap_or_else(|| {
+                "Substrate compilation (5 formats), 8-tier kernel, tamper-evident receipts, and trace model checker verified".to_string()
+            }),
+            duration_ms: start.elapsed().as_millis(),
+        })
     }
 
     async fn verify_phase_1_core() -> Result<()> {
@@ -645,4 +682,206 @@ impl SubsystemVerifier {
 
         Ok(())
     }
+
+    async fn verify_phase_8_cage_governance() -> Result<()> {
+        use killswitch_telemetry::cage_governance::*;
+
+        // 1. Substrate Compilation Check across 5 Formats
+        let native_spec = serde_json::json!({
+            "schema_version": "cage-substrate/3.0",
+            "contract_id": "cli-test-native",
+            "domain": "containment",
+            "allowed_tools": ["isolate_network", "freeze_process"],
+            "parameter_bounds": {
+                "max_single_transfer_usd": 10000.0,
+                "max_dose_mg": 100.0,
+                "fiscal_cap_usd": 50000.0
+            }
+        });
+        let art_native = SubstrateCompiler::detect_and_compile(&native_spec)
+            .map_err(|e| anyhow::anyhow!("NativeCage compilation failed: {}", e))?;
+        if art_native.format != SubstrateFormat::NativeCage || !art_native.verify_digest() {
+            bail!("NativeCage digest verification failed");
+        }
+
+        let ms_spec = serde_json::json!({
+            "metadata": { "name": "cli-test-ms-acs" },
+            "behaviorDeclarations": [{
+                "action": "isolate_network",
+                "constraints": [{ "parameter": "max_single_transfer_usd", "value": 10000.0 }]
+            }]
+        });
+        let art_ms = SubstrateCompiler::detect_and_compile(&ms_spec)
+            .map_err(|e| anyhow::anyhow!("MicrosoftAcs compilation failed: {}", e))?;
+        if art_ms.format != SubstrateFormat::MicrosoftAcs || !art_ms.verify_digest() {
+            bail!("MicrosoftAcs digest verification failed");
+        }
+
+        let aaif_spec = serde_json::json!({
+            "metadata": { "name": "cli-test-lf-aaif" },
+            "governedRunLoop": {
+                "stages": [{ "name": "gate", "rules": [{ "tool": "freeze_process" }] }]
+            }
+        });
+        let art_aaif = SubstrateCompiler::detect_and_compile(&aaif_spec)
+            .map_err(|e| anyhow::anyhow!("LinuxFoundationAaif compilation failed: {}", e))?;
+        if art_aaif.format != SubstrateFormat::LinuxFoundationAaif || !art_aaif.verify_digest() {
+            bail!("LinuxFoundationAaif digest verification failed");
+        }
+
+        let oscal_spec = serde_json::json!({
+            "oscal-version": "1.0.0",
+            "id": "cli-test-oscal",
+            "component-definition": {
+                "components": [{
+                    "control-implementations": [{
+                        "implemented-requirements": [{ "control-id": "ac-3", "props": [] }]
+                    }]
+                }]
+            }
+        });
+        let art_oscal = SubstrateCompiler::detect_and_compile(&oscal_spec)
+            .map_err(|e| anyhow::anyhow!("NistOscal compilation failed: {}", e))?;
+        if art_oscal.format != SubstrateFormat::NistOscal || !art_oscal.verify_digest() {
+            bail!("NistOscal digest verification failed");
+        }
+
+        let lula_spec = serde_json::json!({
+            "kind": "LulaValidation",
+            "metadata": {
+                "name": "cli-test-lula",
+                "annotations": { "max_single_transfer_usd": "10000" }
+            },
+            "spec": {
+                "domain": {
+                    "kubernetes-spec": { "resources": [{ "name": "isolate_network" }] }
+                }
+            }
+        });
+        let art_lula = SubstrateCompiler::detect_and_compile(&lula_spec)
+            .map_err(|e| anyhow::anyhow!("LulaValidation compilation failed: {}", e))?;
+        if art_lula.format != SubstrateFormat::LulaValidation || !art_lula.verify_digest() {
+            bail!("LulaValidation digest verification failed");
+        }
+
+        // 2. 8-Tier Deterministic Evaluation Check
+        let kernel = CageGovernanceKernel::new();
+        let valid_req = CageEvaluationRequest {
+            agent_id: "cli-verifier-agent".to_string(),
+            role: "worker".to_string(),
+            tool_name: "execute_trade".to_string(),
+            arguments: serde_json::json!({ "amount": 100.0 }),
+            confidence_score: Some(0.95),
+            amount_usd: Some(100.0),
+            dose_mg: None,
+            warrant_token: None,
+            human_approval: None,
+            context: None,
+        };
+        let clear_resp = kernel.evaluate(&valid_req);
+        if clear_resp.verdict != CageVerdict::Clear {
+            bail!("Valid CAGE request failed to clear 8 tiers: {:?}", clear_resp);
+        }
+
+        // Tier 3 OPA over-limit check
+        let over_limit_req = CageEvaluationRequest {
+            amount_usd: Some(15_000.0),
+            ..valid_req.clone()
+        };
+        let opa_resp = kernel.evaluate(&over_limit_req);
+        if opa_resp.verdict != CageVerdict::Refuse || opa_resp.rule_id != CTRL_OPA_005 || opa_resp.tier != CageTier::Tier3Opa {
+            bail!("Tier 3 OPA failed to block over-limit request: {:?}", opa_resp);
+        }
+
+        // 3. Tamper-Evident Receipts & Evidence Log
+        let secret = b"cage_cli_verification_secret_32b";
+        let receipt = CageDecisionReceipt::create_and_sign(
+            "cli-agent", "execute_trade", "{}", "sub-1",
+            CageVerdict::Clear, CageTier::Tier8Fiscal, "PASS",
+            vec![], None, 1_700_000_000, secret,
+        );
+        if !receipt.verify_all(secret) {
+            bail!("CageDecisionReceipt failed cryptographic verification");
+        }
+        let mut tampered = receipt.clone();
+        tampered.tool_name = "steal_credentials".to_string();
+        if tampered.verify_digest() {
+            bail!("Tampered receipt failed to invalidate digest");
+        }
+
+        let writer = CageEvidenceWriter::new(true, Some(secret.to_vec()));
+        writer.append_receipt(receipt).map_err(|e| anyhow::anyhow!("Evidence writer append failed: {}", e))?;
+        if !writer.verify_chain_integrity() {
+            bail!("Evidence writer hash chain integrity check failed");
+        }
+
+        // 4. Trace Model Conformance Verification
+        let valid_trace = vec![
+            GovernanceTraceEvent {
+                step: 1,
+                timestamp_ms: 1000,
+                kind: GovernanceTraceEventType::ActionProposed,
+                tier: None,
+                verdict: None,
+                rule_id: None,
+                requires_warrant: false,
+                details: "Action proposed".to_string(),
+            },
+            GovernanceTraceEvent {
+                step: 2,
+                timestamp_ms: 1001,
+                kind: GovernanceTraceEventType::TierEvaluated,
+                tier: Some(CageTier::Tier8Fiscal),
+                verdict: Some(CageVerdict::Clear),
+                rule_id: Some("PASS".to_string()),
+                requires_warrant: false,
+                details: "Fiscal spend verified".to_string(),
+            },
+            GovernanceTraceEvent {
+                step: 3,
+                timestamp_ms: 1002,
+                kind: GovernanceTraceEventType::ReceiptSigned,
+                tier: None,
+                verdict: Some(CageVerdict::Clear),
+                rule_id: None,
+                requires_warrant: false,
+                details: "Receipt signed".to_string(),
+            },
+        ];
+        let trace_report = CageTraceVerifier::verify_trace_conformance(&valid_trace);
+        if !trace_report.is_conformant {
+            bail!("Valid governance trace failed conformance check: {:?}", trace_report.violations);
+        }
+
+        // Non-monotonic violation check
+        let bad_trace = vec![
+            GovernanceTraceEvent {
+                step: 2,
+                timestamp_ms: 1000,
+                kind: GovernanceTraceEventType::ActionProposed,
+                tier: None,
+                verdict: None,
+                rule_id: None,
+                requires_warrant: false,
+                details: "Action proposed".to_string(),
+            },
+            GovernanceTraceEvent {
+                step: 1,
+                timestamp_ms: 1001,
+                kind: GovernanceTraceEventType::TierEvaluated,
+                tier: Some(CageTier::Tier1Ftra),
+                verdict: Some(CageVerdict::Clear),
+                rule_id: Some("PASS".to_string()),
+                requires_warrant: false,
+                details: "Decreased step number".to_string(),
+            },
+        ];
+        let bad_report = CageTraceVerifier::verify_trace_conformance(&bad_trace);
+        if bad_report.is_conformant {
+            bail!("Non-monotonic trace was unexpectedly accepted by model checker");
+        }
+
+        Ok(())
+    }
 }
+

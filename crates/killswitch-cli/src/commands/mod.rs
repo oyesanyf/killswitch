@@ -1,6 +1,6 @@
 //! # CLI Command Handlers & Formatters
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use crate::client::KillSwitchClient;
 use crate::verify::SubsystemVerifier;
 
@@ -464,3 +464,113 @@ pub async fn handle_containment_suite() -> Result<()> {
     println!("================================================================================\n");
     Ok(())
 }
+
+pub async fn handle_cage(
+    client: &KillSwitchClient,
+    action: &str,
+    spec: Option<&str>,
+    tool: Option<&str>,
+    amount: Option<f64>,
+    trace: Option<&str>,
+) -> Result<()> {
+    match action {
+        "status" => {
+            let status = client.get_cage_status().await?;
+            println!("\n================================================================================");
+            println!("🛡️  GOOGLE CAGE GOVERNANCE KERNEL STATUS (arXiv:2606.12320)");
+            println!("================================================================================");
+            println!("  Kernel Status:            {}", if !status.llm_clients_in_kernel { "ACTIVE (Deterministic LLM-Free)" } else { "INACTIVE" });
+            println!("  Active Substrate Digest:  {}", status.substrate_contract_digest);
+            println!("  Active Contract ID:       {}", status.active_contract_id);
+            println!("  Substrate Format:         {:?}", status.substrate_format);
+            println!("  Total Evaluations:        {}", status.total_evaluations);
+            println!("  Clear Verdicts:           {}", status.total_cleared);
+            println!("  Refusal Verdicts:         {}", status.total_refused);
+            println!("  Cumulative Fiscal Spend:  ${:.2} / ${:.2}", status.fiscal_spent_usd, status.fiscal_cap_usd);
+            println!("  Receipts in Evidence Log: {}", status.evidence_receipt_count);
+            println!("================================================================================\n");
+        }
+        "verify" => {
+            let report = SubsystemVerifier::verify_cage_governance().await?;
+            println!("\n================================================================================");
+            println!("🛡️  CAGE GOVERNANCE SELF-DIAGNOSTIC VERIFICATION");
+            println!("================================================================================");
+            println!("  Status:       {}", if report.passed { "PASS" } else { "FAIL" });
+            println!("  Details:      {}", report.details);
+            println!("  Duration:     {} ms", report.duration_ms);
+            println!("================================================================================\n");
+        }
+        "compile" => {
+            let spec_content = if let Some(s) = spec {
+                if std::path::Path::new(s).exists() {
+                    std::fs::read_to_string(s)?
+                } else {
+                    s.to_string()
+                }
+            } else {
+                bail!("Missing --spec parameter with path or specification string");
+            };
+            let artifact = killswitch_telemetry::SubstrateCompiler::detect_and_compile_str(&spec_content)
+                .map_err(|e| anyhow::anyhow!("Compilation failed: {}", e))?;
+            println!("\n================================================================================");
+            println!("🛡️  COMPILED CAGE SUBSTRATE CONTRACT");
+            println!("================================================================================");
+            println!("  Contract ID:     {}", artifact.contract_id);
+            println!("  Detected Format: {:?}", artifact.format);
+            println!("  SHA-256 Digest:  {}", artifact.substrate_contract_digest);
+            println!("  Allowed Tools:   {:?}", artifact.allowed_tools);
+            println!("  Max Transfer:    ${:.2}", artifact.max_single_transfer_usd);
+            println!("  Fiscal Cap:      ${:.2}", artifact.fiscal_cap_usd);
+            println!("  Digest Verified: {}", artifact.verify_digest());
+            println!("================================================================================\n");
+        }
+        "evaluate" => {
+            let tool_name = tool.unwrap_or("execute_trade");
+            let req = killswitch_telemetry::CageEvaluationRequest {
+                agent_id: "cli_operator".to_string(),
+                role: "containment_orchestrator".to_string(),
+                tool_name: tool_name.to_string(),
+                arguments: serde_json::json!({ "amount": amount.unwrap_or(100.0) }),
+                confidence_score: Some(0.95),
+                amount_usd: amount,
+                dose_mg: None,
+                warrant_token: None,
+                human_approval: None,
+                context: None,
+            };
+            let resp = client.evaluate_cage(&req).await?;
+            println!("\n================================================================================");
+            println!("🛡️  CAGE POLICY ENFORCEMENT POINT EVALUATION");
+            println!("================================================================================");
+            println!("  Verdict:        {:?}", resp.verdict);
+            println!("  Tier:           {:?}", resp.tier);
+            println!("  Rule ID:        {}", resp.rule_id);
+            println!("  Details:        {}", resp.error_message.as_deref().unwrap_or("Action cleared all 8 tiers"));
+            println!("  Receipt Digest: {}", resp.receipt.decision_digest);
+            println!("================================================================================\n");
+        }
+        "verify-trace" => {
+            let trace_content = if let Some(t) = trace {
+                if std::path::Path::new(t).exists() {
+                    std::fs::read_to_string(t)?
+                } else {
+                    t.to_string()
+                }
+            } else {
+                bail!("Missing --trace parameter with file path or JSON array");
+            };
+            let events: Vec<killswitch_telemetry::GovernanceTraceEvent> = serde_json::from_str(&trace_content)?;
+            let report = client.verify_cage_trace(&events).await?;
+            println!("\n================================================================================");
+            println!("🛡️  CAGE TRACE MODEL CONFORMANCE REPORT");
+            println!("================================================================================");
+            println!("  Conformant:     {}", report.is_conformant);
+            println!("  Events:         {}", report.total_events);
+            println!("  Violations:     {:?}", report.violations);
+            println!("================================================================================\n");
+        }
+        other => bail!("Unknown CAGE action '{}'. Use status, verify, compile, evaluate, or verify-trace.", other),
+    }
+    Ok(())
+}
+

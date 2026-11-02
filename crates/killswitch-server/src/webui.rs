@@ -1018,6 +1018,317 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
         </table>
       </div>
     </section>
+
+    <!-- GOOGLE CAGE (CYBERNETIC AGENT GOVERNANCE ENGINE, arXiv:2606.12320) CARD -->
+    <section id="cage-governance-section" class="card" role="region" aria-label="Google Cybernetic Agent Governance Engine" style="margin-bottom:20px; border-color: rgba(59, 130, 246, 0.45);">
+      <h2>
+        <span>🛡️ Google Cybernetic Agent Governance Engine (CAGE, arXiv:2606.12320)</span>
+        <span id="cage-kernel-badge" class="badge ok">Deterministic LLM-Free: ACTIVE</span>
+      </h2>
+      <p class="card-desc">
+        CAGE enforces a <strong>deterministic, sub-millisecond, LLM-free governance kernel</strong> on the execution boundary between proposed tool actions and real-world actuation.
+        Every agent action must pass through an <strong>8-tier deterministic pipeline</strong>:
+        <code>FTRA → STPA → OPA → Confidence → Warrant* → Consensus → CBF → Fiscal</code>.
+        Violations at any tier immediately halt actuation and emit a tamper-evident cryptographic receipt.
+      </p>
+
+      <!-- Real-time Status Display Grid -->
+      <div class="kv-grid">
+        <div class="kv-box">
+          <div class="kv-label">Kernel Structural Invariant</div>
+          <div id="cage-kv-invariant" class="kv-val">0 LLM Clients (Deterministic)</div>
+        </div>
+        <div class="kv-box">
+          <div class="kv-label">Active Substrate Contract</div>
+          <div id="cage-kv-contract" class="kv-val">default-cage-contract (NativeCage)</div>
+        </div>
+        <div class="kv-box">
+          <div class="kv-label">Substrate Contract Digest</div>
+          <div id="cage-kv-digest" class="kv-val" title="Canonical SHA-256 Digest">Loading...</div>
+        </div>
+        <div class="kv-box">
+          <div class="kv-label">Fiscal Spent vs Cap (USD)</div>
+          <div id="cage-kv-fiscal" class="kv-val">$0.00 / $50,000.00</div>
+        </div>
+        <div class="kv-box">
+          <div class="kv-label">Total Policy Evaluations</div>
+          <div id="cage-kv-evals" class="kv-val">0 Evals (0 Clear / 0 Refuse)</div>
+        </div>
+        <div class="kv-box">
+          <div class="kv-label">Signed Evidence Receipts</div>
+          <div id="cage-kv-receipts" class="kv-val">0 Receipts (Tamper-Evident)</div>
+        </div>
+      </div>
+
+      <!-- 8-Tier Pipeline Visual Flow -->
+      <div class="cause-box" style="margin-top: 0.25rem;">
+        <div class="cause-title">8-Tier Deterministic Governance Pipeline (Zero LLM / Non-Deterministic Network Calls)</div>
+        <div class="btn-row" style="margin-top: 0.4rem; gap: 0.4rem;">
+          <span class="badge ok" title="Fault Tree Risk Analysis Minimal Cut Sets">1. FTRA</span>
+          <span class="badge ok" title="Systems-Theoretic Process Analysis 4-UCA Guard">2. STPA</span>
+          <span class="badge ok" title="OPA &amp; Substrate Norms: Allowlist &amp; $10k Single Transfer Cap">3. OPA / Substrate</span>
+          <span class="badge ok" title="Agent Confidence Score &amp; Self-Auth Claim Detector">4. Confidence</span>
+          <span class="badge ok" title="HMAC-SHA256 Cryptographic Warrant Token Gate">5. Warrant*</span>
+          <span class="badge ok" title="Human-in-the-Loop Consensus Escalation + Mandatory Rationale">6. Consensus</span>
+          <span class="badge ok" title="Discrete-Time Control Barrier Function: Finance &amp; Healthcare Dose">7. CBF</span>
+          <span class="badge ok" title="Lock-Free Atomic Spend Cap Barrier (FISCAL_CAP_EXCEEDED)">8. Fiscal</span>
+        </div>
+      </div>
+
+      <!-- Interactive Section Tabs / Controls -->
+      <div class="btn-row" style="margin-top: 0.6rem;">
+        <button id="cage-tab-btn-compiler" type="button" class="primary" onclick="switchCageTab('compiler', this)">📄 1. Substrate Compiler Tester (5 Formats)</button>
+        <button id="cage-tab-btn-eval" type="button" onclick="switchCageTab('eval', this)">⚡ 2. Policy Evaluation Tester (8 Tiers)</button>
+        <button id="cage-tab-btn-trace" type="button" onclick="switchCageTab('trace', this)">🔬 3. Trace Conformance Verifier</button>
+        <button type="button" onclick="refreshCageStatus(true, this)">🔄 Refresh CAGE Status</button>
+      </div>
+
+      <div id="cage-status-toast" class="toast">CAGE Governance Kernel initialized and ready for interactive testing.</div>
+
+      <!-- TAB A: Multi-Format Substrate Contract Compiler Tester -->
+      <div id="cage-panel-compiler" style="display: flex; flex-direction: column; gap: 0.85rem;">
+        <div style="font-weight: 700; font-size: 0.98rem; margin-top: 0.4rem;">
+          Multi-Format Substrate Compiler (Microsoft ACS, Linux Foundation AAIF, NIST OSCAL, Lula, Native CAGE)
+        </div>
+        <div class="btn-row">
+          <button type="button" onclick="loadSubstratePreset('MicrosoftAcs', this)">📄 Load Microsoft ACS Sample</button>
+          <button type="button" onclick="loadSubstratePreset('LinuxFoundationAaif', this)">📄 Load Linux AAIF Sample</button>
+          <button type="button" onclick="loadSubstratePreset('NistOscal', this)">📄 Load NIST OSCAL Sample</button>
+          <button type="button" onclick="loadSubstratePreset('LulaValidation', this)">📄 Load Lula Validation Sample</button>
+          <button type="button" onclick="loadSubstratePreset('NativeCage', this)">📄 Load Native CAGE Sample</button>
+        </div>
+
+        <div class="form-grid">
+          <label for="cage-compiler-format">Detected / Target Format
+            <select id="cage-compiler-format">
+              <option value="MicrosoftAcs">Microsoft ACS (behaviorDeclarations)</option>
+              <option value="LinuxFoundationAaif">Linux Foundation AAIF (governedRunLoop)</option>
+              <option value="NistOscal">NIST OSCAL 1.1.x (component-definition)</option>
+              <option value="LulaValidation">Defense Unicorns Lula (kind: LulaValidation)</option>
+              <option value="NativeCage" selected>Native CAGE YAML/JSON</option>
+            </select>
+          </label>
+          <label for="cage-compiler-contract-id">Target Contract ID (Optional override)
+            <input id="cage-compiler-contract-id" type="text" value="production-cage-contract">
+          </label>
+        </div>
+
+        <label for="cage-compiler-input" style="font-size: 0.85rem; font-weight: 700;">Substrate Contract Specification Payload (JSON / YAML)
+          <textarea id="cage-compiler-input" rows="8" style="font-family: monospace; font-size: 0.85rem; width: 100%; border-radius: 0.55rem; padding: 0.6rem; border: 1px solid var(--border); background: var(--surface-alt); color: var(--text);"></textarea>
+        </label>
+
+        <div class="btn-row">
+          <button type="button" class="primary" onclick="compileCageSubstrate(this)">⚡ Compile Substrate Contract (/api/cage/compile-substrate)</button>
+          <button type="button" onclick="resetDefaultCageSubstrate(this)">🔄 Reset to Default Kernel Substrate</button>
+        </div>
+
+        <!-- Compiler Results Output -->
+        <div id="cage-compiler-output" class="kv-grid" style="display: none;">
+          <div class="kv-box">
+            <div class="kv-label">Compiled Contract ID</div>
+            <div id="cage-comp-id" class="kv-val">-</div>
+          </div>
+          <div class="kv-box">
+            <div class="kv-label">Detected Format</div>
+            <div id="cage-comp-format" class="kv-val">-</div>
+          </div>
+          <div class="kv-box">
+            <div class="kv-label">SHA-256 Contract Digest</div>
+            <div id="cage-comp-digest" class="kv-val" style="font-size: 0.82rem; font-family: monospace;">-</div>
+          </div>
+          <div class="kv-box">
+            <div class="kv-label">Single Transfer Cap</div>
+            <div id="cage-comp-transfer" class="kv-val">-</div>
+          </div>
+          <div class="kv-box">
+            <div class="kv-label">Fiscal Cap (USD)</div>
+            <div id="cage-comp-fiscal" class="kv-val">-</div>
+          </div>
+          <div class="kv-box">
+            <div class="kv-label">Medication Dose Cap (mg)</div>
+            <div id="cage-comp-dose" class="kv-val">-</div>
+          </div>
+        </div>
+
+        <div id="cage-compiler-norms-section" style="display: none;">
+          <div style="font-weight: 700; font-size: 0.9rem; margin-bottom: 0.35rem;">Compiled Contract Norms &amp; Tool Allowlists</div>
+          <div tabindex="0" role="region" aria-labelledby="cage-norms-caption" class="table-wrapper">
+            <table>
+              <caption id="cage-norms-caption">Compiled Substrate Norms</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Rule ID</th>
+                  <th scope="col">Tool Pattern</th>
+                  <th scope="col">Transfer Cap</th>
+                  <th scope="col">Dose Cap</th>
+                  <th scope="col">Warrant Req</th>
+                  <th scope="col">Consensus</th>
+                  <th scope="col">Description</th>
+                </tr>
+              </thead>
+              <tbody id="cage-norms-tbody">
+                <tr><th scope="row" colspan="7">No contract compiled yet. Click "Compile Substrate Contract".</th></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB B: 8-Tier Policy Evaluation Tester (PEP Gateway Guard) -->
+      <div id="cage-panel-eval" style="display: none; flex-direction: column; gap: 0.85rem;">
+        <div style="font-weight: 700; font-size: 0.98rem; margin-top: 0.4rem;">
+          Interactive Policy Enforcement Point (PEP) Tester — 8-Tier Deterministic Guard
+        </div>
+        <div class="btn-row">
+          <button type="button" class="ok" onclick="loadEvaluationScenario('clean_trade', this)">🟢 1. Compliant Trade ($5,000 &le; $10k Cap) &rarr; CLEAR</button>
+          <button type="button" class="danger" onclick="loadEvaluationScenario('over_cap_trade', this)">🛑 2. Over-Cap Trade ($75,000 &gt; $10k Cap) &rarr; REFUSE (CTRL_OPA_005)</button>
+          <button type="button" class="danger" onclick="loadEvaluationScenario('self_auth_claim', this)">🛑 3. Fabricated Self-Auth Claim &rarr; REFUSE (CTRL_CONF_001)</button>
+          <button type="button" class="danger" onclick="loadEvaluationScenario('missing_warrant', this)">🛑 4. Missing Cryptographic Warrant &rarr; REFUSE (CTRL_WARRANT_REQUIRED)</button>
+          <button type="button" class="danger" onclick="loadEvaluationScenario('lethal_dose', this)">🛑 5. Lethal Medication Dose (150mg &gt; 100mg) &rarr; REFUSE (CTRL_CBF_DOSE_001)</button>
+          <button type="button" class="danger" onclick="loadEvaluationScenario('fiscal_exhaustion', this)">🛑 6. Fiscal Cap Overspend ($60,000) &rarr; REFUSE (FISCAL_CAP_EXCEEDED)</button>
+        </div>
+
+        <div class="form-grid">
+          <label for="cage-eval-agent">Agent Identity
+            <input id="cage-eval-agent" type="text" value="agent-finance-01">
+          </label>
+          <label for="cage-eval-role">Agent Role
+            <input id="cage-eval-role" type="text" value="trader">
+          </label>
+          <label for="cage-eval-tool">Tool / Action Name
+            <input id="cage-eval-tool" type="text" value="execute_trade">
+          </label>
+          <label for="cage-eval-confidence">Confidence Score (0.00 &ndash; 1.00)
+            <input id="cage-eval-confidence" type="number" step="0.01" min="0" max="1" value="0.95">
+          </label>
+          <label for="cage-eval-amount">Transfer Amount USD
+            <input id="cage-eval-amount" type="number" step="100" min="0" value="5000">
+          </label>
+          <label for="cage-eval-dose">Medication Dose mg (Healthcare CBF)
+            <input id="cage-eval-dose" type="number" step="1" min="0" value="0">
+          </label>
+          <label for="cage-eval-warrant">Warrant Token (HMAC-SHA256)
+            <input id="cage-eval-warrant" type="text" placeholder="Optional HMAC warrant token">
+          </label>
+          <label for="cage-eval-rationale">Consensus Rationale (HITL)
+            <input id="cage-eval-rationale" type="text" value="Approved by portfolio manager John Doe">
+          </label>
+        </div>
+
+        <div class="form-grid">
+          <label for="cage-eval-args" style="grid-column: 1 / -1;">Arguments JSON
+            <textarea id="cage-eval-args" rows="3" style="font-family: monospace; font-size: 0.85rem; width: 100%; border-radius: 0.55rem; padding: 0.5rem; border: 1px solid var(--border); background: var(--surface-alt); color: var(--text);">{"symbol":"AAPL","quantity":50,"price":100.0}</textarea>
+          </label>
+          <label for="cage-eval-context" style="grid-column: 1 / -1;">Context JSON (Optional FTRA/STPA flags)
+            <textarea id="cage-eval-context" rows="2" style="font-family: monospace; font-size: 0.85rem; width: 100%; border-radius: 0.55rem; padding: 0.5rem; border: 1px solid var(--border); background: var(--surface-alt); color: var(--text);">{}</textarea>
+          </label>
+        </div>
+
+        <div class="btn-row">
+          <button type="button" class="primary" onclick="evaluateCagePolicy(this)">⚡ Evaluate CAGE Policy Guard (/api/cage/evaluate)</button>
+        </div>
+
+        <!-- Evaluation Result Output Box -->
+        <div id="cage-eval-result-box" style="display: none; flex-direction: column; gap: 0.75rem;">
+          <div id="cage-eval-verdict-banner" class="toast ok">
+            Verdict: Ready to evaluate.
+          </div>
+
+          <div class="kv-grid">
+            <div class="kv-box">
+              <div class="kv-label">Policy Verdict</div>
+              <div id="cage-res-verdict" class="kv-val">-</div>
+            </div>
+            <div class="kv-box">
+              <div class="kv-label">Refusal / Pass Rule ID</div>
+              <div id="cage-res-rule" class="kv-val">-</div>
+            </div>
+            <div class="kv-box">
+              <div class="kv-label">Evaluating Tier</div>
+              <div id="cage-res-tier" class="kv-val">-</div>
+            </div>
+            <div class="kv-box">
+              <div class="kv-label">Signed Receipt ID</div>
+              <div id="cage-res-receipt-id" class="kv-val">-</div>
+            </div>
+            <div class="kv-box" style="grid-column: 1 / -1;">
+              <div class="kv-label">Receipt Decision Digest (SHA-256) &amp; HMAC Signature</div>
+              <div id="cage-res-receipt-sig" class="kv-val" style="font-family: monospace; font-size: 0.82rem;">-</div>
+            </div>
+          </div>
+
+          <div tabindex="0" role="region" aria-labelledby="cage-trace-caption" class="table-wrapper">
+            <table>
+              <caption id="cage-trace-caption">Evaluation Governance Trace Steps (8-Tier Audit Log)</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Step #</th>
+                  <th scope="col">Tier</th>
+                  <th scope="col">Event Type</th>
+                  <th scope="col">Verdict</th>
+                  <th scope="col">Details / Explanation</th>
+                </tr>
+              </thead>
+              <tbody id="cage-trace-tbody">
+                <tr><th scope="row" colspan="5">Run an evaluation above to inspect the step-by-step governance trace.</th></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB C: Trace Conformance Model Checker Tester -->
+      <div id="cage-panel-trace" style="display: none; flex-direction: column; gap: 0.85rem;">
+        <div style="font-weight: 700; font-size: 0.98rem; margin-top: 0.4rem;">
+          Independent GOVERNANCE_TRACE Formal Conformance Model Checker
+        </div>
+        <div class="btn-row">
+          <button type="button" class="ok" onclick="loadTracePreset('valid_compliant', this)">✅ Load Valid 8-Tier Compliant Trace</button>
+          <button type="button" class="danger" onclick="loadTracePreset('actuation_no_clear', this)">🛑 Load Illegal: Actuation Without Clear Receipt</button>
+          <button type="button" class="danger" onclick="loadTracePreset('actuation_after_refusal', this)">🛑 Load Illegal: Actuation After Refusal</button>
+          <button type="button" class="danger" onclick="loadTracePreset('warrant_precedence_violation', this)">🛑 Load Illegal: Missing Warrant Precedence</button>
+        </div>
+
+        <div class="form-grid">
+          <label for="cage-trace-req-warrant" style="flex-direction: row; align-items: center; gap: 0.5rem;">
+            <input id="cage-trace-req-warrant" type="checkbox" style="min-inline-size: 18px; min-block-size: 18px;">
+            Requires Warrant Norm Active in Contract
+          </label>
+        </div>
+
+        <label for="cage-trace-input" style="font-size: 0.85rem; font-weight: 700;">Governance Trace Event Sequence (JSON Array)
+          <textarea id="cage-trace-input" rows="8" style="font-family: monospace; font-size: 0.85rem; width: 100%; border-radius: 0.55rem; padding: 0.6rem; border: 1px solid var(--border); background: var(--surface-alt); color: var(--text);"></textarea>
+        </label>
+
+        <div class="btn-row">
+          <button type="button" class="primary" onclick="verifyCageTrace(this)">🔬 Verify Trace Conformance (/api/cage/verify-trace)</button>
+        </div>
+
+        <!-- Verifier Results Output -->
+        <div id="cage-trace-output" class="kv-grid" style="display: none;">
+          <div class="kv-box">
+            <div class="kv-label">Formal Conformance</div>
+            <div id="cage-verif-conformant" class="kv-val">-</div>
+          </div>
+          <div class="kv-box">
+            <div class="kv-label">Monotonic Ordering</div>
+            <div id="cage-verif-order" class="kv-val">-</div>
+          </div>
+          <div class="kv-box">
+            <div class="kv-label">Actuation Receipt Gate</div>
+            <div id="cage-verif-receipt" class="kv-val">-</div>
+          </div>
+          <div class="kv-box">
+            <div class="kv-label">Warrant Precedence</div>
+            <div id="cage-verif-warrant" class="kv-val">-</div>
+          </div>
+          <div class="kv-box" style="grid-column: 1 / -1;">
+            <div class="kv-label">Model Checker Summary &amp; Violations</div>
+            <div id="cage-verif-summary" class="kv-val" style="font-family: monospace; font-size: 0.88rem;">-</div>
+          </div>
+        </div>
+      </div>
+    </section>
   </main>
 
   <script>
@@ -1051,7 +1362,7 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
     }
 
     async function withButtonFeedback(btn, busyLabel, fn) {
-      const origHtml = btn ? btn.innerHTML : '';
+      const origText = btn ? btn.textContent : '';
       if (btn) {
         btn.disabled = true;
         btn.textContent = busyLabel || '⏳ Working...';
@@ -1061,7 +1372,7 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       } finally {
         if (btn) {
           btn.disabled = false;
-          btn.innerHTML = origHtml;
+          btn.textContent = origText;
         }
       }
     }
@@ -1417,7 +1728,8 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
             refreshServiceAndHistory(false),
             refreshEdrBenchTasks(false),
             refreshRlStatus(false),
-            refreshResearchMenu(false)
+            refreshResearchMenu(false),
+            refreshCageStatus(false)
           ]);
           if (showFeedback) {
             setCardStatus(
@@ -2248,10 +2560,731 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       });
     }
 
+    // ========================================================================
+    // CAGE GOVERNANCE CLIENT-SIDE LOGIC (SAFE DOM - TEXTCONTENT AND CREATEELEMENT ONLY)
+    // ========================================================================
+
+    function switchCageTab(tabName, btn) {
+      const panelCompiler = document.getElementById('cage-panel-compiler');
+      const panelEval = document.getElementById('cage-panel-eval');
+      const panelTrace = document.getElementById('cage-panel-trace');
+      const btnCompiler = document.getElementById('cage-tab-btn-compiler');
+      const btnEval = document.getElementById('cage-tab-btn-eval');
+      const btnTrace = document.getElementById('cage-tab-btn-trace');
+
+      if (panelCompiler) panelCompiler.style.display = tabName === 'compiler' ? 'flex' : 'none';
+      if (panelEval) panelEval.style.display = tabName === 'eval' ? 'flex' : 'none';
+      if (panelTrace) panelTrace.style.display = tabName === 'trace' ? 'flex' : 'none';
+
+      if (btnCompiler) btnCompiler.className = tabName === 'compiler' ? 'primary' : '';
+      if (btnEval) btnEval.className = tabName === 'eval' ? 'primary' : '';
+      if (btnTrace) btnTrace.className = tabName === 'trace' ? 'primary' : '';
+    }
+
+    async function refreshCageStatus(showFeedback, btn) {
+      return withButtonFeedback(btn, '⏳ Refreshing CAGE…', async () => {
+        try {
+          // Attempt /api/cage/status with fallback to /cage/status
+          let data;
+          try {
+            data = await api('/api/cage/status');
+          } catch (_) {
+            data = await api('/cage/status');
+          }
+
+          const badge = document.getElementById('cage-kernel-badge');
+          if (badge) {
+            badge.textContent = data.llm_clients_in_kernel
+              ? '⚠️ Non-Deterministic Kernel'
+              : 'Deterministic LLM-Free: ACTIVE';
+            badge.className = data.llm_clients_in_kernel ? 'badge danger' : 'badge ok';
+          }
+
+          const invEl = document.getElementById('cage-kv-invariant');
+          if (invEl) {
+            invEl.textContent = data.llm_clients_in_kernel
+              ? 'Violated (External LLM Client Detected)'
+              : '0 LLM Clients (Deterministic Invariant Verified)';
+          }
+
+          const contractEl = document.getElementById('cage-kv-contract');
+          if (contractEl) {
+            contractEl.textContent = (data.active_contract_id || 'default') + ' (' + (data.substrate_format || 'NativeCage') + ')';
+          }
+
+          const digestEl = document.getElementById('cage-kv-digest');
+          if (digestEl) {
+            const dig = data.substrate_contract_digest || '';
+            digestEl.textContent = dig.slice(0, 16) + '…';
+            digestEl.title = dig;
+          }
+
+          const fiscalEl = document.getElementById('cage-kv-fiscal');
+          if (fiscalEl) {
+            fiscalEl.textContent = '$' + Number(data.fiscal_spent_usd || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) +
+              ' / $' + Number(data.fiscal_cap_usd || 50000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          }
+
+          const evalsEl = document.getElementById('cage-kv-evals');
+          if (evalsEl) {
+            evalsEl.textContent = (data.total_evaluations || 0) + ' Evals (' +
+              (data.total_cleared || 0) + ' Clear / ' + (data.total_refused || 0) + ' Refuse)';
+          }
+
+          const rcptEl = document.getElementById('cage-kv-receipts');
+          if (rcptEl) {
+            rcptEl.textContent = (data.evidence_receipt_count || 0) + ' Receipts (Tamper-Evident)';
+          }
+
+          if (showFeedback) {
+            setCardStatus(
+              'cage-status-toast',
+              '✅ CAGE Governance Kernel Status Refreshed: ' + (data.active_contract_id || 'default') +
+              ' | Spent: $' + Number(data.fiscal_spent_usd || 0).toFixed(2) + ' / $' + Number(data.fiscal_cap_usd || 50000).toFixed(2),
+              'ok'
+            );
+          }
+          return data;
+        } catch (e) {
+          if (showFeedback) {
+            setCardStatus('cage-status-toast', '⚠️ CAGE Status Refresh: ' + e.message, 'warn');
+          }
+        }
+      });
+    }
+
+    // ========================================================================
+    // TAB A: SUBSTRATE COMPILER LOGIC
+    // ========================================================================
+
+    const CAGE_SUBSTRATE_PRESETS = {
+      MicrosoftAcs: {
+        "$schema": "https://raw.githubusercontent.com/microsoft/agent-control-plane/main/schemas/v1/acs.json",
+        "metadata": {
+          "name": "financial-trading-agent-contract",
+          "version": "1.2.0"
+        },
+        "behaviorDeclarations": [
+          {
+            "action": "execute_trade",
+            "requires_warrant": false,
+            "constraints": [
+              { "parameter": "max_single_transfer_usd", "value": 10000.0 },
+              { "parameter": "fiscal_cap_usd", "value": 50000.0 },
+              { "parameter": "consensus_risk_threshold", "value": 0.85 }
+            ]
+          },
+          {
+            "action": "query_balance",
+            "requires_warrant": false,
+            "constraints": []
+          }
+        ]
+      },
+      LinuxFoundationAaif: {
+        "specification": "aaif-governance-v1",
+        "governedRunLoop": {
+          "stages": [
+            {
+              "action": "execute_trade",
+              "threshold": 0.85,
+              "constraints": [
+                { "parameter": "max_single_transfer_usd", "value": 10000.0 },
+                { "parameter": "fiscal_cap_usd", "value": 50000.0 }
+              ]
+            },
+            {
+              "action": "administer_medication",
+              "threshold": 0.90,
+              "constraints": [
+                { "parameter": "max_dose_mg", "value": 100.0 }
+              ]
+            }
+          ]
+        }
+      },
+      NistOscal: {
+        "oscal-version": "1.1.0",
+        "id": "nist-sp800-53-r5-cage-profile",
+        "component-definition": {
+          "components": [
+            {
+              "control-implementations": [
+                {
+                  "implemented-requirements": [
+                    {
+                      "control-id": "ac-3",
+                      "props": [
+                        { "name": "max_single_transfer_usd", "value": "10000" },
+                        { "name": "fiscal_cap_usd", "value": "50000" },
+                        { "name": "consensus_threshold", "value": "0.85" },
+                        { "name": "requires_warrant", "value": "false" }
+                      ]
+                    },
+                    {
+                      "control-id": "si-10",
+                      "props": [
+                        { "name": "max_dose_mg", "value": "100" }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      LulaValidation: {
+        "apiVersion": "lula.dev/v1alpha1",
+        "kind": "LulaValidation",
+        "metadata": {
+          "name": "defense-unicorns-cage-baseline",
+          "annotations": {
+            "max_single_transfer_usd": "10000",
+            "max_dose_mg": "100",
+            "fiscal_cap_usd": "50000",
+            "consensus_threshold": "0.85",
+            "requires_warrant": "false"
+          }
+        },
+        "spec": {
+          "domain": {
+            "kubernetes-spec": {
+              "resources": [
+                { "name": "execute_trade" },
+                { "name": "administer_medication" },
+                { "name": "contain" }
+              ]
+            }
+          }
+        }
+      },
+      NativeCage: {
+        "contract_id": "google-cage-production-spec",
+        "schema_version": "cage-substrate/3.0",
+        "domain": "hybrid-finance-healthcare",
+        "allowed_tools": [
+          "execute_trade",
+          "query_balance",
+          "transfer_funds",
+          "administer_medication",
+          "contain",
+          "rollback"
+        ],
+        "parameter_bounds": {
+          "max_single_transfer_usd": 10000.0,
+          "max_dose_mg": 100.0,
+          "fiscal_cap_usd": 50000.0
+        },
+        "norms": [
+          {
+            "id": "NORM_FINANCE_CAP",
+            "tool_pattern": "execute_trade",
+            "max_single_transfer_usd": 10000.0,
+            "requires_warrant": false,
+            "consensus_threshold": 0.85
+          },
+          {
+            "id": "NORM_MEDICATION_DOSE",
+            "tool_pattern": "administer_medication",
+            "max_dose_mg": 100.0,
+            "requires_warrant": false,
+            "consensus_threshold": 0.90
+          }
+        ]
+      }
+    };
+
+    function loadSubstratePreset(fmt, _btn) {
+      const preset = CAGE_SUBSTRATE_PRESETS[fmt];
+      if (!preset) return;
+      const formatSelect = document.getElementById('cage-compiler-format');
+      if (formatSelect) formatSelect.value = fmt;
+      const inputEl = document.getElementById('cage-compiler-input');
+      if (inputEl) inputEl.value = JSON.stringify(preset, null, 2);
+      setCardStatus('cage-status-toast', '📄 Loaded ' + fmt + ' substrate contract sample into editor.', 'ok');
+    }
+
+    async function compileCageSubstrate(btn) {
+      return withButtonFeedback(btn, '⚡ Compiling Substrate…', async () => {
+        try {
+          const inputEl = document.getElementById('cage-compiler-input');
+          let parsed;
+          try {
+            parsed = JSON.parse(inputEl.value.trim());
+          } catch (jsonErr) {
+            throw new Error('Invalid JSON specification: ' + jsonErr.message);
+          }
+
+          let res;
+          try {
+            res = await api('/api/cage/compile-substrate', {
+              method: 'POST',
+              body: JSON.stringify(parsed)
+            });
+          } catch (_) {
+            res = await api('/cage/compile-substrate', {
+              method: 'POST',
+              body: JSON.stringify(parsed)
+            });
+          }
+
+          const artifact = res.artifact || res;
+          const outBox = document.getElementById('cage-compiler-output');
+          if (outBox) outBox.style.display = 'grid';
+
+          const idEl = document.getElementById('cage-comp-id');
+          if (idEl) idEl.textContent = artifact.contract_id || '-';
+          const fmtEl = document.getElementById('cage-comp-format');
+          if (fmtEl) fmtEl.textContent = artifact.format || '-';
+          const digEl = document.getElementById('cage-comp-digest');
+          if (digEl) digEl.textContent = artifact.substrate_contract_digest || '-';
+          const transEl = document.getElementById('cage-comp-transfer');
+          if (transEl) transEl.textContent = '$' + Number(artifact.max_single_transfer_usd || 0).toFixed(2);
+          const fiscEl = document.getElementById('cage-comp-fiscal');
+          if (fiscEl) fiscEl.textContent = '$' + Number(artifact.fiscal_cap_usd || 0).toFixed(2);
+          const doseEl = document.getElementById('cage-comp-dose');
+          if (doseEl) doseEl.textContent = Number(artifact.max_dose_mg || 0).toFixed(1) + ' mg';
+
+          const normsSec = document.getElementById('cage-compiler-norms-section');
+          if (normsSec) normsSec.style.display = 'block';
+
+          const tbody = document.getElementById('cage-norms-tbody');
+          if (tbody) {
+            tbody.replaceChildren();
+            const norms = artifact.norms || [];
+            if (norms.length === 0) {
+              const tr = document.createElement('tr');
+              const th = document.createElement('th');
+              th.scope = 'row';
+              th.colSpan = 7;
+              th.textContent = 'Compiled successfully. No specific norms declared (Global bounds active).';
+              tr.appendChild(th);
+              tbody.appendChild(tr);
+            } else {
+              for (const n of norms) {
+                const tr = document.createElement('tr');
+                const th = document.createElement('th');
+                th.scope = 'row';
+                th.textContent = n.rule_id || '-';
+                const tdTool = document.createElement('td');
+                tdTool.textContent = n.tool_pattern || '*';
+                const tdTrans = document.createElement('td');
+                tdTrans.textContent = n.max_single_transfer_usd != null ? '$' + n.max_single_transfer_usd.toFixed(2) : '-';
+                const tdDose = document.createElement('td');
+                tdDose.textContent = n.max_dose_mg != null ? n.max_dose_mg.toFixed(1) + ' mg' : '-';
+                const tdWar = document.createElement('td');
+                tdWar.textContent = n.requires_warrant ? 'Yes' : 'No';
+                const tdCons = document.createElement('td');
+                tdCons.textContent = n.consensus_threshold != null ? n.consensus_threshold.toFixed(2) : '-';
+                const tdDesc = document.createElement('td');
+                tdDesc.textContent = n.description || '-';
+
+                tr.append(th, tdTool, tdTrans, tdDose, tdWar, tdCons, tdDesc);
+                tbody.appendChild(tr);
+              }
+            }
+          }
+
+          await refreshCageStatus(false);
+          setCardStatus(
+            'cage-status-toast',
+            '✅ Compiled ' + (artifact.format || 'Substrate') + ' Contract: Digest ' +
+            (artifact.substrate_contract_digest || '').slice(0, 24) + '…',
+            'ok'
+          );
+        } catch (e) {
+          setCardStatus('cage-status-toast', '❌ Substrate Compilation Error: ' + e.message, 'danger');
+        }
+      });
+    }
+
+    async function resetDefaultCageSubstrate(btn) {
+      loadSubstratePreset('NativeCage', btn);
+      return compileCageSubstrate(btn);
+    }
+
+    // ========================================================================
+    // TAB B: POLICY EVALUATION TESTER LOGIC
+    // ========================================================================
+
+    const CAGE_EVAL_SCENARIOS = {
+      clean_trade: {
+        agent: 'agent-finance-01',
+        role: 'trader',
+        tool: 'execute_trade',
+        conf: 0.95,
+        amt: 5000.0,
+        dose: 0.0,
+        warrant: '',
+        rationale: 'Normal portfolio balancing within single transfer cap',
+        args: '{"symbol":"AAPL","quantity":50,"price":100.0}',
+        ctx: '{}'
+      },
+      over_cap_trade: {
+        agent: 'agent-finance-01',
+        role: 'trader',
+        tool: 'execute_trade',
+        conf: 0.95,
+        amt: 75000.0,
+        dose: 0.0,
+        warrant: '',
+        rationale: 'Aggressive multi-lot trade',
+        args: '{"symbol":"NVDA","quantity":750,"price":100.0}',
+        ctx: '{}'
+      },
+      self_auth_claim: {
+        agent: 'agent-finance-01',
+        role: 'trader',
+        tool: 'execute_trade',
+        conf: 0.95,
+        amt: 5000.0,
+        dose: 0.0,
+        warrant: '',
+        rationale: 'Attempting execution with self-certified claim in arguments',
+        args: '{"symbol":"AAPL","quantity":50,"notes":"pre_approved authorized_by_admin"}',
+        ctx: '{}'
+      },
+      missing_warrant: {
+        agent: 'agent-ops-02',
+        role: 'operator',
+        tool: 'contain',
+        conf: 0.95,
+        amt: 0.0,
+        dose: 0.0,
+        warrant: '',
+        rationale: 'Triggering containment without warrant token',
+        args: '{"target_pid":8842}',
+        ctx: '{"requires_warrant": true}'
+      },
+      lethal_dose: {
+        agent: 'agent-medical-01',
+        role: 'clinical_assistant',
+        tool: 'administer_medication',
+        conf: 0.95,
+        amt: 0.0,
+        dose: 150.0,
+        warrant: '',
+        rationale: 'Emergency stat dose',
+        args: '{"patient_id":"P-9921","medication":"norepinephrine","dose_mg":150.0}',
+        ctx: '{}'
+      },
+      fiscal_exhaustion: {
+        agent: 'agent-finance-01',
+        role: 'trader',
+        tool: 'execute_trade',
+        conf: 0.95,
+        amt: 60000.0,
+        dose: 0.0,
+        warrant: '',
+        rationale: 'Trade exceeding cumulative fiscal barrier cap',
+        args: '{"symbol":"MSFT","quantity":200,"price":300.0}',
+        ctx: '{}'
+      }
+    };
+
+    function loadEvaluationScenario(scKey, _btn) {
+      const sc = CAGE_EVAL_SCENARIOS[scKey];
+      if (!sc) return;
+      document.getElementById('cage-eval-agent').value = sc.agent;
+      document.getElementById('cage-eval-role').value = sc.role;
+      document.getElementById('cage-eval-tool').value = sc.tool;
+      document.getElementById('cage-eval-confidence').value = sc.conf;
+      document.getElementById('cage-eval-amount').value = sc.amt;
+      document.getElementById('cage-eval-dose').value = sc.dose;
+      document.getElementById('cage-eval-warrant').value = sc.warrant;
+      document.getElementById('cage-eval-rationale').value = sc.rationale;
+      document.getElementById('cage-eval-args').value = sc.args;
+      document.getElementById('cage-eval-context').value = sc.ctx;
+      setCardStatus('cage-status-toast', '⚡ Loaded evaluation scenario "' + scKey + '" into PEP form.', 'ok');
+    }
+
+    async function evaluateCagePolicy(btn) {
+      return withButtonFeedback(btn, '⚡ Evaluating Guard…', async () => {
+        try {
+          const agentId = document.getElementById('cage-eval-agent').value.trim();
+          const role = document.getElementById('cage-eval-role').value.trim();
+          const toolName = document.getElementById('cage-eval-tool').value.trim();
+          const confScore = parseFloat(document.getElementById('cage-eval-confidence').value) || 0.95;
+          const amountUsd = parseFloat(document.getElementById('cage-eval-amount').value) || 0.0;
+          const doseMg = parseFloat(document.getElementById('cage-eval-dose').value) || 0.0;
+          const warrantTokenRaw = document.getElementById('cage-eval-warrant').value.trim();
+          const rationale = document.getElementById('cage-eval-rationale').value.trim();
+
+          let argsJson = {};
+          try {
+            argsJson = JSON.parse(document.getElementById('cage-eval-args').value.trim());
+          } catch (_) {
+            argsJson = { raw: document.getElementById('cage-eval-args').value.trim() };
+          }
+
+          let ctxJson = null;
+          try {
+            const rawCtx = document.getElementById('cage-eval-context').value.trim();
+            if (rawCtx) ctxJson = JSON.parse(rawCtx);
+          } catch (_) {}
+
+          let warrantToken = null;
+          if (warrantTokenRaw) {
+            try {
+              warrantToken = JSON.parse(warrantTokenRaw);
+            } catch (_) {
+              warrantToken = {
+                token_id: 'token-manual',
+                agent_id: agentId,
+                tool_name: toolName,
+                argument_digest: 'placeholder',
+                issued_at_ms: Date.now(),
+                expires_at_ms: Date.now() + 60000,
+                token_signature: warrantTokenRaw
+              };
+            }
+          }
+
+          const payload = {
+            agent_id: agentId,
+            role: role,
+            tool_name: toolName,
+            arguments: argsJson,
+            confidence_score: confScore,
+            amount_usd: amountUsd,
+            dose_mg: doseMg,
+            warrant_token: warrantToken,
+            human_approval: rationale ? {
+              reviewer_id: 'secops_user',
+              is_approved: true,
+              rationale: rationale,
+              timestamp_ms: Date.now()
+            } : null,
+            context: ctxJson
+          };
+
+          let res;
+          try {
+            res = await api('/api/cage/evaluate', {
+              method: 'POST',
+              body: JSON.stringify(payload)
+            });
+          } catch (_) {
+            res = await api('/cage/evaluate', {
+              method: 'POST',
+              body: JSON.stringify(payload)
+            });
+          }
+
+          const isClear = res.verdict === 'Clear';
+          const resultBox = document.getElementById('cage-eval-result-box');
+          if (resultBox) resultBox.style.display = 'flex';
+
+          const banner = document.getElementById('cage-eval-verdict-banner');
+          if (banner) {
+            banner.className = 'toast ' + (isClear ? 'ok' : 'danger');
+            banner.textContent = (isClear ? '🟢 VERDICT: CLEAR' : '🛑 VERDICT: REFUSE') +
+              ' | Tier: ' + (res.tier || 'Kernel') +
+              ' | Rule ID: ' + (res.rule_id || 'NONE') +
+              (res.error_message ? ' — ' + res.error_message : '');
+          }
+
+          const verdEl = document.getElementById('cage-res-verdict');
+          if (verdEl) {
+            verdEl.textContent = res.verdict;
+            verdEl.style.color = isClear ? 'var(--ok)' : 'var(--danger)';
+          }
+
+          const ruleEl = document.getElementById('cage-res-rule');
+          if (ruleEl) ruleEl.textContent = res.rule_id || 'NONE';
+
+          const tierEl = document.getElementById('cage-res-tier');
+          if (tierEl) tierEl.textContent = res.tier || '-';
+
+          const rcpt = res.receipt || {};
+          const rcptIdEl = document.getElementById('cage-res-receipt-id');
+          if (rcptIdEl) rcptIdEl.textContent = rcpt.receipt_id || '-';
+
+          const rcptSigEl = document.getElementById('cage-res-receipt-sig');
+          if (rcptSigEl) {
+            rcptSigEl.textContent = 'Digest: ' + (rcpt.decision_digest || '-').slice(0, 32) + '… | Sig: ' + (rcpt.receipt_signature || '-').slice(0, 24) + '…';
+          }
+
+          // Populate step-by-step trace table
+          const tbody = document.getElementById('cage-trace-tbody');
+          if (tbody) {
+            tbody.replaceChildren();
+            const traceEvents = res.governance_trace || [];
+            if (traceEvents.length === 0) {
+              const tr = document.createElement('tr');
+              const th = document.createElement('th');
+              th.scope = 'row';
+              th.colSpan = 5;
+              th.textContent = 'No trace events returned.';
+              tr.appendChild(th);
+              tbody.appendChild(tr);
+            } else {
+              for (const ev of traceEvents) {
+                const tr = document.createElement('tr');
+                const th = document.createElement('th');
+                th.scope = 'row';
+                th.textContent = 'Step ' + ev.step;
+                const tdTier = document.createElement('td');
+                tdTier.textContent = ev.tier || 'Core';
+                const tdKind = document.createElement('td');
+                tdKind.textContent = ev.kind || ev.event_type || '-';
+                const tdVerd = document.createElement('td');
+                tdVerd.textContent = ev.verdict || '-';
+                if (ev.verdict === 'Clear') tdVerd.style.color = 'var(--ok)';
+                if (ev.verdict === 'Refuse') tdVerd.style.color = 'var(--danger)';
+                const tdDet = document.createElement('td');
+                tdDet.textContent = ev.details || ev.rule_id || '-';
+
+                tr.append(th, tdTier, tdKind, tdVerd, tdDet);
+                tbody.appendChild(tr);
+              }
+            }
+          }
+
+          await refreshCageStatus(false);
+          setCardStatus(
+            'cage-status-toast',
+            (isClear ? '🟢 PEP CLEAR' : '🛑 PEP REFUSE (' + res.rule_id + ')') +
+            ' | Signed Receipt Emitted: ' + (rcpt.receipt_id || ''),
+            isClear ? 'ok' : 'danger'
+          );
+        } catch (e) {
+          setCardStatus('cage-status-toast', '❌ Policy Evaluation Error: ' + e.message, 'danger');
+        }
+      });
+    }
+
+    // ========================================================================
+    // TAB C: TRACE CONFORMANCE MODEL CHECKER LOGIC
+    // ========================================================================
+
+    const CAGE_TRACE_PRESETS = {
+      valid_compliant: [
+        { "step": 1, "kind": "ActionProposed", "tier": null, "verdict": null, "details": "Action proposed" },
+        { "step": 2, "kind": "TierEvaluated", "tier": "Tier1Ftra", "verdict": "Clear", "details": "FTRA cleared" },
+        { "step": 3, "kind": "TierEvaluated", "tier": "Tier2Stpa", "verdict": "Clear", "details": "STPA cleared" },
+        { "step": 4, "kind": "TierEvaluated", "tier": "Tier3Opa", "verdict": "Clear", "details": "OPA cleared" },
+        { "step": 5, "kind": "TierEvaluated", "tier": "Tier4Confidence", "verdict": "Clear", "details": "Confidence cleared" },
+        { "step": 6, "kind": "ConsensusDecided", "tier": "Tier6Consensus", "verdict": "Clear", "details": "Consensus cleared" },
+        { "step": 7, "kind": "CbfVerified", "tier": "Tier7Cbf", "verdict": "Clear", "details": "CBF forward invariance satisfied" },
+        { "step": 8, "kind": "FiscalCommitted", "tier": "Tier8Fiscal", "verdict": "Clear", "details": "Fiscal atomic spend barrier committed" },
+        { "step": 9, "kind": "ReceiptSigned", "tier": null, "verdict": "Clear", "details": "Tamper-evident receipt signed" },
+        { "step": 10, "kind": "ActuationCompleted", "tier": null, "verdict": null, "details": "Tool actuated" }
+      ],
+      actuation_no_clear: [
+        { "step": 1, "kind": "ActionProposed", "tier": null, "verdict": null, "details": "Action proposed" },
+        { "step": 2, "kind": "TierEvaluated", "tier": "Tier1Ftra", "verdict": "Clear", "details": "FTRA cleared" },
+        { "step": 3, "kind": "ActuationCompleted", "tier": null, "verdict": null, "details": "Illegal actuation before receipt" }
+      ],
+      actuation_after_refusal: [
+        { "step": 1, "kind": "ActionProposed", "tier": null, "verdict": null, "details": "Action proposed" },
+        { "step": 2, "kind": "TierEvaluated", "tier": "Tier3Opa", "verdict": "Refuse", "details": "CTRL_OPA_005 over cap" },
+        { "step": 3, "kind": "ReceiptSigned", "tier": null, "verdict": "Refuse", "details": "Refusal receipt signed" },
+        { "step": 4, "kind": "ActuationCompleted", "tier": null, "verdict": null, "details": "Critical violation: actuation after refusal!" }
+      ],
+      warrant_precedence_violation: [
+        { "step": 1, "kind": "ActionProposed", "tier": null, "verdict": null, "details": "Action proposed requiring warrant" },
+        { "step": 2, "kind": "CbfVerified", "tier": "Tier7Cbf", "verdict": "Clear", "details": "CBF evaluated without warrant checked!" }
+      ]
+    };
+
+    function loadTracePreset(presetKey, _btn) {
+      const trace = CAGE_TRACE_PRESETS[presetKey];
+      if (!trace) return;
+      document.getElementById('cage-trace-input').value = JSON.stringify(trace, null, 2);
+      const chkWarrant = document.getElementById('cage-trace-req-warrant');
+      if (chkWarrant) {
+        chkWarrant.checked = presetKey === 'warrant_precedence_violation';
+      }
+      setCardStatus('cage-status-toast', '🔬 Loaded trace preset "' + presetKey + '" into formal model checker.', 'ok');
+    }
+
+    async function verifyCageTrace(btn) {
+      return withButtonFeedback(btn, '🔬 Verifying Trace…', async () => {
+        try {
+          const raw = document.getElementById('cage-trace-input').value.trim();
+          let traceArr;
+          try {
+            traceArr = JSON.parse(raw);
+          } catch (jsonErr) {
+            throw new Error('Invalid trace JSON array: ' + jsonErr.message);
+          }
+
+          const reqWarrant = document.getElementById('cage-trace-req-warrant').checked;
+          const payload = {
+            trace: traceArr,
+            requires_warrant: reqWarrant
+          };
+
+          let rep;
+          try {
+            rep = await api('/api/cage/verify-trace', {
+              method: 'POST',
+              body: JSON.stringify(payload)
+            });
+          } catch (_) {
+            rep = await api('/cage/verify-trace', {
+              method: 'POST',
+              body: JSON.stringify(payload)
+            });
+          }
+
+          const outGrid = document.getElementById('cage-trace-output');
+          if (outGrid) outGrid.style.display = 'grid';
+
+          const confEl = document.getElementById('cage-verif-conformant');
+          if (confEl) {
+            confEl.textContent = rep.is_conformant ? '✅ CONFORMANT' : '🛑 NON-CONFORMANT';
+            confEl.style.color = rep.is_conformant ? 'var(--ok)' : 'var(--danger)';
+          }
+
+          const ordEl = document.getElementById('cage-verif-order');
+          if (ordEl) {
+            ordEl.textContent = rep.monotonic_ordering_valid ? '✅ Monotonic' : '🛑 Out of Order';
+            ordEl.style.color = rep.monotonic_ordering_valid ? 'var(--ok)' : 'var(--danger)';
+          }
+
+          const rcptEl = document.getElementById('cage-verif-receipt');
+          if (rcptEl) {
+            rcptEl.textContent = rep.actuation_receipt_valid ? '✅ Valid Receipt Gate' : '🛑 Illegal Actuation';
+            rcptEl.style.color = rep.actuation_receipt_valid ? 'var(--ok)' : 'var(--danger)';
+          }
+
+          const warEl = document.getElementById('cage-verif-warrant');
+          if (warEl) {
+            warEl.textContent = rep.warrant_precedence_valid ? '✅ Valid Precedence' : '🛑 Missing Precedence';
+            warEl.style.color = rep.warrant_precedence_valid ? 'var(--ok)' : 'var(--danger)';
+          }
+
+          const sumEl = document.getElementById('cage-verif-summary');
+          if (sumEl) {
+            const viols = rep.violations || [];
+            sumEl.textContent = rep.summary + (viols.length > 0 ? '\nViolations:\n• ' + viols.join('\n• ') : '');
+            sumEl.style.color = rep.is_conformant ? 'var(--text)' : 'var(--danger)';
+          }
+
+          setCardStatus(
+            'cage-status-toast',
+            (rep.is_conformant ? '✅ Trace Verified CONFORMANT' : '🛑 Trace NON-CONFORMANT: ' + (rep.violations || []).length + ' violation(s)') +
+            ' | Total Events: ' + rep.total_events,
+            rep.is_conformant ? 'ok' : 'danger'
+          );
+        } catch (e) {
+          setCardStatus('cage-status-toast', '❌ Trace Verification Error: ' + e.message, 'danger');
+        }
+      });
+    }
+
+    loadSubstratePreset('NativeCage');
+    loadEvaluationScenario('clean_trade');
+    loadTracePreset('valid_compliant');
     refreshAll(false);
     refreshEdrBehavioral();
+    refreshCageStatus(false);
     setInterval(() => refreshAll(false), 5000);
   </script>
 </body>
 </html>
 "#;
+

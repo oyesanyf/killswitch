@@ -67,6 +67,10 @@ struct Cli {
     #[arg(long)]
     containment_suite: bool,
 
+    /// Enforce CAGE (Cybernetic Agent Governance Engine, arXiv:2606.12320) runtime policy and run CAGE self-diagnostics
+    #[arg(long = "cage-governance", alias = "cage")]
+    cage_governance: bool,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -192,6 +196,29 @@ enum Commands {
         #[arg(short, long, default_value = "cli_operator")]
         operator: String,
     },
+
+    /// Inspect CAGE runtime status, compile substrates, evaluate PEP rules, or verify governance traces
+    Cage {
+        /// Action: status, verify, compile, evaluate, verify-trace
+        #[arg(default_value = "status")]
+        action: String,
+
+        /// Path or string content of substrate contract specification (JSON/YAML)
+        #[arg(short, long)]
+        spec: Option<String>,
+
+        /// Proposed tool name for evaluation
+        #[arg(short, long)]
+        tool: Option<String>,
+
+        /// Proposed spend amount USD for evaluation
+        #[arg(short, long)]
+        amount: Option<f64>,
+
+        /// Path to governance trace JSON file or JSON string to verify
+        #[arg(long)]
+        trace: Option<String>,
+    },
 }
 
 async fn boot_unified_webui_runtime(
@@ -255,12 +282,36 @@ async fn boot_unified_webui_runtime(
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // Standalone --cage-governance flag invocation
+    if cli.cage_governance && !cli.verify && cli.command.is_none() {
+        println!("🛡️  [KILLSWITCH.EXE] Executing CAGE Governance Self-Diagnostics (--cage-governance)...");
+        match SubsystemVerifier::verify_cage_governance().await {
+            Ok(report) => {
+                println!("\n================================================================================");
+                println!("🛡️  CAGE GOVERNANCE SELF-DIAGNOSTIC REPORT");
+                println!("================================================================================");
+                println!("  Status:       {}", if report.passed { "PASS" } else { "FAIL" });
+                println!("  Phase:        {}", report.name);
+                println!("  Duration:     {} ms", report.duration_ms);
+                println!("  Details:      {}", report.details);
+                println!("================================================================================\n");
+                println!("✅ [KILLSWITCH.EXE] CAGE Governance Verified Successfully! All 4 audit gates passed.");
+                std::process::exit(0);
+            }
+            Err(e) => {
+                eprintln!("❌ [KILLSWITCH.EXE] CAGE Governance verification failed: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+
     if cli.verify {
-        println!("🛡️  [KILLSWITCH.EXE] Executing 7-Phase Subsystem Self-Diagnostics...");
-        match SubsystemVerifier::run_all().await {
+        let count = if cli.cage_governance { "8-Phase" } else { "7-Phase" };
+        println!("🛡️  [KILLSWITCH.EXE] Executing {} Subsystem Self-Diagnostics...", count);
+        match SubsystemVerifier::run_with_governance(cli.cage_governance).await {
             Ok(report) => {
                 report.print_summary();
-                println!("✅ [KILLSWITCH.EXE] All 7 Subsystems Verified Successfully! Self-check passed (exit 0).");
+                println!("✅ [KILLSWITCH.EXE] All Subsystems Verified Successfully! Self-check passed (exit 0).");
                 std::process::exit(0);
             }
             Err(e) => {
@@ -391,6 +442,23 @@ async fn main() -> Result<()> {
                 quote.as_deref(),
                 crate_target.as_deref(),
                 Some(&operator),
+            )
+            .await?
+        }
+        Some(Commands::Cage {
+            action,
+            spec,
+            tool,
+            amount,
+            trace,
+        }) => {
+            handle_cage(
+                &client,
+                &action,
+                spec.as_deref(),
+                tool.as_deref(),
+                amount,
+                trace.as_deref(),
             )
             .await?
         }

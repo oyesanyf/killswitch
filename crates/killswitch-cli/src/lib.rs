@@ -11,3 +11,8 @@ pub mod verify;
 pub use client::KillSwitchClient;
 pub use loader::{UnifiedConfig, UnifiedRuntime};
 pub use verify::{PhaseReport, SubsystemVerifier, VerificationReport};
+
+pub mod verifier {
+    pub use super::verify::*;
+}
+
