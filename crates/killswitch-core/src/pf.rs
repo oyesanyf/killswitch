@@ -366,7 +366,7 @@ pub fn generate_quarantine_rules(
         comment: "Preserve IPv6 loopback ::1".to_string(),
     });
 
-    // 3. Local control port (default 3030)
+    // 3. Local control port (default 3030) strictly restricted to lo0
     let control_port = preserved_ports
         .iter()
         .copied()
@@ -377,99 +377,35 @@ pub fn generate_quarantine_rules(
         action: PfAction::Pass,
         direction: PfDirection::In,
         quick: true,
-        interface: None,
+        interface: Some("lo0".to_string()),
         protocol: PfProtocol::Tcp,
         src: "any".to_string(),
         src_port: None,
         dst: "any".to_string(),
         dst_port: Some(control_port),
         keep_state: true,
-        comment: format!("Allow inbound HTTP/JSON API on port {}", control_port),
+        comment: format!("Allow inbound HTTP/JSON API on port {} on lo0", control_port),
     });
 
     rules.push(PfRuleSpec {
         action: PfAction::Pass,
         direction: PfDirection::Out,
         quick: true,
-        interface: None,
+        interface: Some("lo0".to_string()),
         protocol: PfProtocol::Tcp,
         src: "any".to_string(),
         src_port: Some(control_port),
         dst: "any".to_string(),
         dst_port: None,
         keep_state: true,
-        comment: format!("Allow outbound HTTP/JSON responses from port {}", control_port),
+        comment: format!("Allow outbound HTTP/JSON responses from port {} on lo0", control_port),
     });
 
-    // 4. DNS (UDP/TCP 53) and DHCP (UDP 67, 68) preservation
-    for &port in preserved_ports {
-        if port == control_port {
-            continue;
-        }
-        if port == 53 {
-            // DNS UDP & TCP
-            rules.push(PfRuleSpec {
-                action: PfAction::Pass,
-                direction: PfDirection::Out,
-                quick: true,
-                interface: None,
-                protocol: PfProtocol::Udp,
-                src: "any".to_string(),
-                src_port: None,
-                dst: "any".to_string(),
-                dst_port: Some(53),
-                keep_state: true,
-                comment: "Allow outbound DNS UDP 53".to_string(),
-            });
-            rules.push(PfRuleSpec {
-                action: PfAction::Pass,
-                direction: PfDirection::Out,
-                quick: true,
-                interface: None,
-                protocol: PfProtocol::Tcp,
-                src: "any".to_string(),
-                src_port: None,
-                dst: "any".to_string(),
-                dst_port: Some(53),
-                keep_state: true,
-                comment: "Allow outbound DNS TCP 53".to_string(),
-            });
-        } else if port == 67 || port == 68 {
-            // DHCP
-            rules.push(PfRuleSpec {
-                action: PfAction::Pass,
-                direction: PfDirection::Out,
-                quick: true,
-                interface: None,
-                protocol: PfProtocol::Udp,
-                src: "any".to_string(),
-                src_port: None,
-                dst: "any".to_string(),
-                dst_port: Some(port),
-                keep_state: true,
-                comment: format!("Allow outbound DHCP port {}", port),
-            });
-            rules.push(PfRuleSpec {
-                action: PfAction::Pass,
-                direction: PfDirection::In,
-                quick: true,
-                interface: None,
-                protocol: PfProtocol::Udp,
-                src: "any".to_string(),
-                src_port: Some(port),
-                dst: "any".to_string(),
-                dst_port: None,
-                keep_state: true,
-                comment: format!("Allow inbound DHCP port {}", port),
-            });
-        }
-    }
-
-    // 5. Default block rules
+    // 4. Default block rules (quick: true unconditionally to drop all non-loopback packets)
     rules.push(PfRuleSpec {
         action: PfAction::Drop,
         direction: PfDirection::In,
-        quick: false,
+        quick: true,
         interface: None,
         protocol: PfProtocol::Any,
         src: "any".to_string(),
@@ -483,7 +419,7 @@ pub fn generate_quarantine_rules(
     rules.push(PfRuleSpec {
         action: PfAction::Drop,
         direction: PfDirection::Out,
-        quick: false,
+        quick: true,
         interface: None,
         protocol: PfProtocol::Any,
         src: "any".to_string(),
@@ -646,6 +582,12 @@ impl MacOsPfIsolator {
 
         if fd < 0 {
             let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+            if errno == libc::EACCES || errno == libc::EPERM {
+                return Err(KillSwitchError::InsufficientPrivileges {
+                    details: format!("macOS /dev/pf requires root privileges: errno {}", errno),
+                    remediation: "Restart the application using 'sudo killswitch'.".to_string(),
+                });
+            }
             return Err(KillSwitchError::PfDeviceOpenFailed { errno });
         }
 
@@ -678,6 +620,12 @@ impl MacOsPfIsolator {
             if ret < 0 {
                 let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
                 libc::close(fd);
+                if errno == libc::EACCES || errno == libc::EPERM {
+                    return Err(KillSwitchError::InsufficientPrivileges {
+                        details: format!("macOS /dev/pf ioctl DIOCXBEGIN failed with permission denied: errno {}", errno),
+                        remediation: "Restart the application using 'sudo killswitch'.".to_string(),
+                    });
+                }
                 return Err(KillSwitchError::PfIoctlFailed {
                     cmd: "DIOCXBEGIN",
                     errno,
@@ -704,6 +652,35 @@ impl MacOsPfIsolator {
             };
             pr.rule.quick = if r.quick { 1 } else { 0 };
 
+            // CRITICAL FIX: copy r.interface ("lo0") into pr.rule.ifname
+            if let Some(ref iface) = r.interface {
+                let iface_bytes = iface.as_bytes();
+                let copy_len = iface_bytes.len().min(IFNAMSIZ - 1);
+                pr.rule.ifname[..copy_len].copy_from_slice(&iface_bytes[..copy_len]);
+            }
+
+            // Copy protocol
+            pr.rule.proto = match r.protocol {
+                PfProtocol::Tcp => libc::IPPROTO_TCP as u8,
+                PfProtocol::Udp => libc::IPPROTO_UDP as u8,
+                PfProtocol::Icmp => libc::IPPROTO_ICMP as u8,
+                PfProtocol::Any => 0,
+            };
+
+            // Copy ports
+            if let Some(sp) = r.src_port {
+                pr.rule.src_port.port_start = sp.to_be();
+                pr.rule.src_port.port_end = sp.to_be();
+                pr.rule.src_port.op = 1; // PF_OP_EQ
+            }
+            if let Some(dp) = r.dst_port {
+                pr.rule.dst_port.port_start = dp.to_be();
+                pr.rule.dst_port.port_end = dp.to_be();
+                pr.rule.dst_port.op = 1; // PF_OP_EQ
+            }
+
+            pr.rule.keep_state = if r.keep_state { 1 } else { 0 };
+
             unsafe {
                 let ret = libc::ioctl(fd, DIOCADDRULE, &mut pr);
                 if ret < 0 {
@@ -711,6 +688,12 @@ impl MacOsPfIsolator {
                     // Rollback transaction on error
                     let _ = libc::ioctl(fd, DIOCXROLLBACK, &mut trans);
                     libc::close(fd);
+                    if errno == libc::EACCES || errno == libc::EPERM {
+                        return Err(KillSwitchError::InsufficientPrivileges {
+                            details: format!("macOS /dev/pf ioctl DIOCADDRULE failed with permission denied: errno {}", errno),
+                            remediation: "Restart the application using 'sudo killswitch'.".to_string(),
+                        });
+                    }
                     return Err(KillSwitchError::PfIoctlFailed {
                         cmd: "DIOCADDRULE",
                         errno,
@@ -725,6 +708,12 @@ impl MacOsPfIsolator {
             if ret < 0 {
                 let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
                 libc::close(fd);
+                if errno == libc::EACCES || errno == libc::EPERM {
+                    return Err(KillSwitchError::InsufficientPrivileges {
+                        details: format!("macOS /dev/pf ioctl DIOCXCOMMIT failed with permission denied: errno {}", errno),
+                        remediation: "Restart the application using 'sudo killswitch'.".to_string(),
+                    });
+                }
                 return Err(KillSwitchError::PfIoctlFailed {
                     cmd: "DIOCXCOMMIT",
                     errno,
@@ -757,6 +746,12 @@ impl MacOsPfIsolator {
 
         if fd < 0 {
             let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+            if errno == libc::EACCES || errno == libc::EPERM {
+                return Err(KillSwitchError::InsufficientPrivileges {
+                    details: format!("macOS /dev/pf requires root privileges: errno {}", errno),
+                    remediation: "Restart the application using 'sudo killswitch'.".to_string(),
+                });
+            }
             return Err(KillSwitchError::PfDeviceOpenFailed { errno });
         }
 
@@ -806,13 +801,7 @@ impl NetworkIsolator for MacOsPfIsolator {
         debug!("Generated PF Syntax:\n{}", syntax);
 
         #[cfg(target_os = "macos")]
-        let ticket = match self.execute_ioctl_transaction(&rules) {
-            Ok(t) => t,
-            Err(e) => {
-                warn!("Darwin /dev/pf ioctl unavailable or permission denied: {}. Falling back to clean simulated receipt.", e);
-                1001
-            }
-        };
+        let ticket = self.execute_ioctl_transaction(&rules)?;
 
         #[cfg(not(target_os = "macos"))]
         let ticket = 1001;
@@ -896,30 +885,30 @@ mod tests {
         assert!(syntax.contains("pass quick from 127.0.0.1 to any"));
         assert!(syntax.contains("pass quick from ::1 to any"));
 
-        // Port 3030 must be preserved
-        assert!(syntax.contains("port 3030"));
+        // WebUI control port 3030 must be preserved strictly on lo0
+        assert!(syntax.contains("pass in quick on lo0 proto tcp from any to any port 3030"));
+        assert!(syntax.contains("pass out quick on lo0 proto tcp from any port 3030 to any"));
 
-        // DNS 53 and DHCP 67, 68 must be preserved
-        assert!(syntax.contains("port 53"));
-        assert!(syntax.contains("port 67"));
-        assert!(syntax.contains("port 68"));
+        // DNS 53 and DHCP 67, 68 must strictly NOT be preserved
+        assert!(!syntax.contains("port 53"));
+        assert!(!syntax.contains("port 67"));
+        assert!(!syntax.contains("port 68"));
 
-        // Must end with default block rules
-        assert!(syntax.contains("block drop in all"));
-        assert!(syntax.contains("block drop out all"));
+        // Must end with default block drop rules with quick: true
+        assert!(syntax.contains("block drop in quick all"));
+        assert!(syntax.contains("block drop out quick all"));
     }
 
     #[test]
     fn test_darwin_pf_isolator_engagement_lifecycle() {
         let isolator = MacOsPfIsolator::with_anchor("test_anchor");
         let receipt = isolator
-            .engage_quarantine(&[3030, 53], "test_operator", "Testing Darwin PF")
+            .engage_quarantine(&[3030], "test_operator", "Testing Darwin PF")
             .unwrap();
 
         assert_eq!(receipt.engine, NetworkIsolationEngine::DarwinPf);
         assert!(receipt.session_id.contains("test_anchor"));
         assert!(receipt.preserved_ports.contains(&3030));
-        assert!(receipt.preserved_ports.contains(&53));
         assert!(receipt.preserved_ips.contains(&IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))));
 
         // Verification of rollback
