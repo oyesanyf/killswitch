@@ -1,20 +1,19 @@
-# 🛡️ KillSwitch — Doomsday Endpoint Protection & Autonomous AI Agent Breakout Defense
+# 🛡️ KillSwitch — Agentic EDR & Runtime Governance Kill-Switch (`User-Space Behavioral EDR + CAGE/APC Control Plane`)
 
-**KillSwitch** is a self-contained, zero-external-dependency **Doomsday endpoint protection, AI agent breakout guard, and emergency network containment system** written in **100% pure Rust** for **Windows, macOS, and Linux**.
+**KillSwitch** is a self-contained, zero-external-dependency **Agentic EDR & Runtime Governance Kill-Switch** (or **User-Space Behavioral EDR + CAGE/APC Control Plane**) written in **100% pure Rust** for **Windows, macOS, and Linux**: it **governs AI agents before tool actuation** and **monitors/contains the host process lineage and network sockets during execution**.
 
-It runs **100% independently** without requiring any external EDR, antivirus, or OS CLI wrapper tools (`netsh`, `iptables`, `nft`, `pfctl`, `taskkill`, or `sc.exe`). When started, it automatically launches a **plain-English WebUI Dashboard** in your default browser, explains **what caused the KillSwitch to activate** in clear everyday language, and preserves access to the local dashboard port (`-p 4040` / `3030`) even when the computer is under full internet lockdown.
+It runs without requiring external OS CLI wrapper tools (`netsh`, `iptables`, `nft`, `pfctl`, `taskkill`, or `sc.exe`). When started, it automatically launches a **plain-English WebUI Dashboard** in your default browser, explains **what caused the KillSwitch to activate** in clear everyday language, and preserves access to the local dashboard port (`-p 4040` / `3030`) even when the computer is under full internet lockdown.
 
 > [!IMPORTANT]
-> **Architectural Scope Disclosure — Not a Full EDR in the Traditional Sense**:
-> KillSwitch is an **AI Agent Runtime Containment, Doomsday Network KillSwitch & Cybernetic Governance Control Plane**, **not a full enterprise Endpoint Detection and Response (EDR) agent in the traditional kernel-vendor sense** out of the box.
-> - **In Standalone Mode**: KillSwitch combines live user-mode OS process and socket telemetry (`edr_behavioral.rs`, `rl_traffic.rs`), stateful parent-child process lineage trees, MITRE ATT&CK IoA & Welford statistical baseline anomaly detection, Google CAGE 8-tier deterministic policy enforcement (`cage_governance.rs`), Bounded Agents APC principal chains (`arXiv:2608.15888`), and kernel firewall/sandbox primitives (**Windows WFP** `FwpmFilterAdd0`, **macOS `/dev/pf`**, **Linux Netlink/Landlock**).
-> - **Full Ring-0 Kernel Tamper Immunity (`ring0_driver_loader.rs`)**: Deploying the included Windows Kernel Minifilter/ELAM driver (`drivers/windows/killswitch_minifilter.c` + `.inf`, countersigned with an EV/WHQL certificate for `PsSetCreateProcessNotifyRoutineEx` and `ObRegisterCallbacks` in Ring 0) and pinning the included Linux eBPF LSM object (`drivers/linux/killswitch_ring0.bpf.c` in `/sys/fs/bpf/killswitch/*`) bridges the remaining step for full Ring-0 rootkit tamper immunity.
+> **Architectural Positioning & Scope (`Agentic EDR & Runtime Governance Kill-Switch`)**:
+> - **Do call it an Agentic EDR & Runtime Governance Kill-Switch (or User-Space Behavioral EDR + CAGE/APC Control Plane)**: it governs AI agents *before* tool actuation (via Google CAGE 8-tier deterministic policy enforcement, Bounded Agents APC principal chains `arXiv:2608.15888`, and Oso/AWS R1–R5 intersection containment) and monitors/contains the host process lineage and network sockets *during* execution (via `edr_behavioral.rs`, `otel_lineage.rs`, `rl_traffic.rs`, and kernel firewall quarantine across **Windows WFP** `FwpmFilterAdd0`, **macOS `/dev/pf`**, and **Linux Netlink/Landlock**).
+> - **Do NOT call it a replacement for a Ring-0 kernel EDR driver (like CrowdStrike or Microsoft Defender) on general corporate laptops**—unless you pair its user-space engine with a real **Windows ETW kernel provider subscription / Sysmon feed**, a **Linux eBPF ring-buffer loader** (`drivers/linux/killswitch_ring0.bpf.c` pinned in `/sys/fs/bpf/killswitch/*`), or the included **EV/WHQL-signed Windows Ring-0 Minifilter/ELAM driver** (`drivers/windows/killswitch_minifilter.c` + `.inf` for `PsSetCreateProcessNotifyRoutineEx` and `ObRegisterCallbacks`).
 
 ---
 
 ## 🚨 Doomsday Protection & Autonomous AI Agent Breakout Defense
 
-**KillSwitch** is specifically architected as a **last-line "Doomsday" circuit breaker** against both **external AI swarms/worms attacking over the internet** and **local autonomous AI agents attempting to break out of their sandbox or exfiltrate sensitive data**:
+**KillSwitch** is specifically architected as an **Agentic EDR & Runtime Governance Kill-Switch** and **last-line "Doomsday" circuit breaker** against both **external AI swarms/worms attacking over the internet** and **local autonomous AI agents attempting to break out of their sandbox or exfiltrate sensitive data**:
 
 ### 1. External AI Swarm & Worm Cut-Off (Kernel-Level Physical Air-Gap Simulation)
 - An external AI agent on the internet cannot exploit, command, or exfiltrate data from a machine it cannot reach.
@@ -76,17 +75,18 @@ It runs **100% independently** without requiring any external EDR, antivirus, or
 
 ---
 
-## 📦 Workspace Architecture (7 Rust Crates)
+## 📦 Workspace Architecture (8 Rust Crates)
 
 | Crate | Description |
 | :--- | :--- |
 | `crates/killswitch-types` | Core traits (`NetworkIsolator`, `ProcessFreezer`, `HealthProbeRunner`), DTOs, and error types |
 | `crates/killswitch-core` | Native Windows WFP/BFE, Linux Netlink/Landlock, macOS `/dev/pf`, `NtSuspendProcess`/`SIGSTOP`, 4-tier operator auth, and BLAKE3 state ledger |
 | `crates/killswitch-adjudication` | 3-Voter consensus engine, native WinTrust (`wintrust.dll`) signature/catalog verifier, and Byzantine fraud proofs |
-| `crates/killswitch-telemetry` | 100% OpenTelemetry & OpenLineage DLP Engine, Octopus 18-arm HMAC-SHA256 rings, and PhaseLock correlation |
-| `crates/killswitch-orchestrator` | 10-node cyclic LangGraph orchestrator, durable atomic checkpointer, and dynamic-memory Ollama reasoning |
-| `crates/killswitch-server` | Axum HTTP control server (15 REST endpoints) and embedded plain-English WebUI Dashboard (`GET /` & `GET /ui`) |
-| `crates/killswitch-cli` | Unified loader (`killswitch` / `start`) booting all 6 subsystems, auto-opening the browser, and providing CLI subcommands |
+| `crates/killswitch-conformal` | Distribution-free conformal sequential jailbreak detection (`Persist-L`, `SR-DKW`, `LayeredGuardrail`) |
+| `crates/killswitch-telemetry` | User-Space Behavioral EDR (`edr_behavioral.rs`), CAGE 8-tier governance (`cage_governance.rs`), Bounded Agents APC (`bounded_agents_apc.rs`), Ring-0 driver verifier/loader (`ring0_driver_loader.rs`), Distributed Raft/Valkey consensus (`distributed_consensus.rs`), OpenLineage DLP Engine, and Octopus 18-arm HMAC-SHA256 rings |
+| `crates/killswitch-orchestrator` | 10-node cyclic LangGraph orchestrator, CAGE PEP `@cage_guard`, durable file & distributed Raft/Valkey checkpointer, and dynamic-memory Ollama reasoning |
+| `crates/killswitch-server` | Axum HTTP control server and embedded plain-English WebUI Dashboard (`GET /` & `GET /ui`) |
+| `crates/killswitch-cli` | Unified loader (`killswitch` / `start`) booting all subsystems, auto-opening the browser, and providing CLI subcommands |
 
 ---
 
@@ -107,13 +107,19 @@ Run as **Administrator** (Windows) or `sudo` (macOS/Linux) so kernel firewall fi
 # Or specify a custom port (e.g. 4040):
 .\target\release\killswitch.exe -p 4040
 ```
-- The agent boots all 6 subsystems, writes the bound port to `active_port.txt`, and **automatically opens `http://127.0.0.1:4040` in your default web browser**.
+- The agent boots all subsystems, writes the bound port to `active_port.txt`, and **automatically opens `http://127.0.0.1:4040` in your default web browser**.
 - Even when you click **🚨 Disconnect Internet Now (Turn On KillSwitch)**, `http://127.0.0.1:4040` stays 100% reachable so you can inspect what caused the KillSwitch and click **🟢 Reconnect Internet & Restore Normal Use** at any time.
 
 ### 3. CLI Subcommands
 ```powershell
-# Run the 6-phase in-memory self-diagnostic suite (exits 0 when all 6 phases pass)
+# Run the multi-phase in-memory self-diagnostic suite (exits 0 when all phases pass)
 .\target\release\killswitch.exe --verify
+
+# Verify Google CAGE 8-tier governance kernel & trace conformance
+.\target\release\killswitch.exe --cage-governance
+
+# Verify Ring-0 driver loader (.sys / .bpf.o) & Distributed Raft/Valkey consensus
+.\target\release\killswitch.exe --ring0-driver
 
 # Check current status & what caused the KillSwitch
 .\target\release\killswitch.exe status
@@ -190,7 +196,7 @@ To prevent an attacker or rootkit with local administrator access from tampering
 
 ## 🏛️ Google CAGE (`cybernetic-agent-governance-engine`, Tallam 2026 `arXiv:2606.12320`) 8-Tier Governance Kernel
 
-`killswitch-telemetry::cage_governance` integrates Google's **Cybernetic Agent Governance Engine** (**CAGE**, Apache-2.0) across the execution boundary:
+`killswitch-telemetry::cage_governance` integrates Google's **Cybernetic Agent Governance Engine** (**CAGE**, Apache-2.0) across the pre-actuation execution boundary:
 - **Multi-Format Substrate Contract Compiler (`SubstrateCompiler`)**: Auto-detects and compiles 5 policy specification formats (**Native CAGE**, **Microsoft ACS** `behaviorDeclarations`, **Linux Foundation AAIF** `governedRunLoop`, **NIST OSCAL 1.1.x** `oscal-version`, and **Lula Validation** `kind: LulaValidation`) into deterministic `CompiledSubstrateArtifact`s with bitwise-identical SHA-256 `substrate_contract_digest`.
 - **8-Tier Deterministic LLM-Free Kernel (`CageGovernanceKernel`)**:
   1. `FTRA` (Fault Tree Risk Analysis minimal cut sets)
@@ -207,7 +213,7 @@ To prevent an attacker or rootkit with local administrator access from tampering
 
 ## 🛡️ Signed Kernel-Mode Driver Deployment (`ELAM / Minifilter / eBPF Ring-0 Loading`)
 
-While `edr_behavioral.rs` and `rl_traffic.rs` ingest live user-mode OS process and socket snapshots and model Windows ETW / kernel callback / Linux eBPF telemetry structures with high fidelity, **KillSwitch is not a full enterprise EDR in the traditional kernel-vendor sense out of the box**. Full Ring-0 tamper immunity against kernel rootkits is provided through `killswitch-telemetry::ring0_driver_loader`:
+As an **Agentic EDR & Runtime Governance Kill-Switch (User-Space Behavioral EDR + CAGE/APC Control Plane)**, KillSwitch governs AI agents before tool actuation and monitors/contains the host process lineage and network sockets during execution. **Do not call it a replacement for a Ring-0 kernel EDR driver (like CrowdStrike or Microsoft Defender) on general corporate laptops—unless you pair its user-space engine with a real Windows ETW kernel provider subscription / Sysmon feed, a Linux eBPF ring-buffer loader, or the included EV/WHQL-signed Ring-0 minifilter driver** via `killswitch-telemetry::ring0_driver_loader`:
 
 1. **Windows Kernel Minifilter, ELAM & `ObRegisterCallbacks` (`drivers/windows/killswitch_minifilter.c` & `.inf`)**:
    - Registers `FltRegisterFilter` at Altitude `385200` (`FSFilter Anti-Virus`), `PsSetCreateProcessNotifyRoutineEx` for Ring-0 process creation lineage, and `ObRegisterCallbacks` to strip `PROCESS_TERMINATE (0x0001)` and `PROCESS_VM_WRITE (0x0020)` handles targeting `killswitch.exe` and `lsass.exe`.

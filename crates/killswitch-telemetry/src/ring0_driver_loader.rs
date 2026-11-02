@@ -2,11 +2,14 @@
 //!
 //! Bridges the gap between user-mode telemetry/containment and full Ring-0 kernel tamper immunity:
 //! 1. **Explicit Architectural Scope Classification (`EdrArchitectureClassification`)**:
-//!    - Transparently documents that KillSwitch is an **AI Agent Runtime Containment, Doomsday
-//!      Network KillSwitch & Cybernetic Governance Control Plane**—not a traditional enterprise
-//!      kernel-vendor EDR out of the box—while providing the complete Ring-0 driver loader,
-//!      binary verifier, and kernel communication bridge for deployments that provision an
-//!      EV/WHQL-countersigned Windows `.sys` Minifilter/ELAM driver or root-pinned Linux eBPF object.
+//!    - Defines KillSwitch as an **Agentic EDR & Runtime Governance Kill-Switch (or User-Space
+//!      Behavioral EDR + CAGE/APC Control Plane)** that governs AI agents *before* tool actuation
+//!      and monitors/contains the host process lineage and network sockets *during* execution.
+//!    - Transparently states that it should NOT be called a replacement for a Ring-0 kernel EDR
+//!      driver (like CrowdStrike or Microsoft Defender) on general corporate laptops—unless its
+//!      user-space engine is paired with a real Windows ETW kernel provider subscription / Sysmon
+//!      feed, a Linux eBPF ring-buffer loader, or the included EV/WHQL-signed Windows `.sys`
+//!      Minifilter/ELAM driver.
 //! 2. **Fail-Closed Windows PE32+ `.sys` Minifilter & ELAM Verifier (`verify_windows_pe_sys_binary`)**:
 //!    - Parses real PE32+ headers (`MZ`, `PE\0\0`, `IMAGE_OPTIONAL_HEADER64`), enforces
 //!      `IMAGE_SUBSYSTEM_NATIVE (1)` and `IMAGE_DLLCHARACTERISTICS_FORCE_INTEGRITY (0x0080)`
@@ -82,8 +85,8 @@ impl Default for EdrArchitectureClassification {
     fn default() -> Self {
         Self {
             is_traditional_full_kernel_edr: false,
-            primary_classification: "AI Agent Runtime Containment, Doomsday Network KillSwitch & Cybernetic Governance Control Plane".to_string(),
-            traditional_edr_disclaimer: "KillSwitch is NOT a full enterprise EDR in the traditional kernel-vendor sense out of the box. In standalone mode, it combines user-mode OS process/socket telemetry, stateful process lineage trees, MITRE ATT&CK IoA & Welford statistical anomaly detection, Google CAGE 8-tier governance, and kernel-level firewall/sandbox primitives (Windows WFP, macOS /dev/pf, Linux Netlink/Landlock). Full Ring-0 tamper immunity against kernel rootkits requires deploying the included Windows Minifilter/ELAM driver (countersigned with an EV/WHQL certificate for PsSetCreateProcessNotifyRoutineEx and ObRegisterCallbacks) or pinning the included Linux eBPF LSM object in /sys/fs/bpf/killswitch.".to_string(),
+            primary_classification: "Agentic EDR & Runtime Governance Kill-Switch (User-Space Behavioral EDR + CAGE/APC Control Plane)".to_string(),
+            traditional_edr_disclaimer: "KillSwitch is an Agentic EDR & Runtime Governance Kill-Switch (or User-Space Behavioral EDR + CAGE/APC Control Plane): it governs AI agents before tool actuation and monitors/contains the host process lineage and network sockets during execution. Do NOT call it a replacement for a Ring-0 kernel EDR driver (like CrowdStrike or Microsoft Defender) on general corporate laptops—unless you pair its user-space engine with a real Windows ETW kernel provider subscription / Sysmon feed, a Linux eBPF ring-buffer loader, or the included EV/WHQL-signed Ring-0 minifilter driver.".to_string(),
             active_standalone_capabilities: vec![
                 "Kernel Network Quarantine (Windows WFP FwpmFilterAdd0, macOS /dev/pf, Linux Netlink/Landlock)".to_string(),
                 "Live User-Mode Process & Socket Lineage Tree (edr_behavioral.rs & rl_traffic.rs)".to_string(),
@@ -1092,8 +1095,16 @@ mod tests {
         let report = global_ring0_manager().status_report();
         assert!(report
             .classification
+            .primary_classification
+            .contains("Agentic EDR & Runtime Governance Kill-Switch"));
+        assert!(report
+            .classification
+            .primary_classification
+            .contains("User-Space Behavioral EDR + CAGE/APC Control Plane"));
+        assert!(report
+            .classification
             .traditional_edr_disclaimer
-            .contains("NOT a full enterprise EDR in the traditional kernel-vendor sense"));
+            .contains("Do NOT call it a replacement for a Ring-0 kernel EDR driver (like CrowdStrike or Microsoft Defender)"));
         assert_eq!(report.minifilter_altitude, "385200");
         assert_eq!(report.communication_port, r"\KillSwitchRing0Port");
     }
