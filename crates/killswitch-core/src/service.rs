@@ -382,17 +382,20 @@ pub fn notify_systemd(message: &str) -> bool {
     if let Ok(socket_path) = std::env::var("NOTIFY_SOCKET") {
         #[cfg(unix)]
         {
+            use std::ffi::OsStr;
+            use std::os::unix::ffi::OsStrExt;
             use std::os::unix::net::UnixDatagram;
             if let Ok(sock) = UnixDatagram::unbound() {
-                let path = if socket_path.starts_with('@') {
+                let bytes = if socket_path.starts_with('@') {
                     // Abstract socket (replace '@' with '\0')
-                    let mut bytes = socket_path.into_bytes();
-                    bytes[0] = 0;
-                    bytes
+                    let mut b = socket_path.into_bytes();
+                    b[0] = 0;
+                    b
                 } else {
                     socket_path.into_bytes()
                 };
-                let _ = sock.send_to(message.as_bytes(), &path);
+                let os_path = std::path::Path::new(OsStr::from_bytes(&bytes));
+                let _ = sock.send_to(message.as_bytes(), os_path);
                 return true;
             }
         }
