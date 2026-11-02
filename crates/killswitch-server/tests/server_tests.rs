@@ -657,3 +657,240 @@ async fn test_oshoosiclaw_oso_aws_apc_tamper_and_hitl_endpoints() {
     let json_hitl: serde_json::Value = serde_json::from_slice(&body_hitl).unwrap();
     assert_eq!(json_hitl["auto_vetoed"].as_bool(), Some(true));
 }
+
+#[tokio::test]
+async fn test_cage_pep_endpoints_e2e() {
+    use killswitch_telemetry::cage_governance::*;
+
+    let state = setup_test_server_state();
+    let app = build_router(state);
+
+    // 1. GET /api/cage/status and GET /cage/status
+    let req = Request::builder()
+        .method("GET")
+        .uri("/api/cage/status")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = body_to_bytes(resp.into_body()).await;
+    let status_rep: CageKernelStatusReport = serde_json::from_slice(&bytes).unwrap();
+    assert!(!status_rep.llm_clients_in_kernel);
+    assert!(!status_rep.substrate_contract_digest.is_empty());
+    assert!(status_rep.fiscal_cap_usd > 0.0);
+
+    // Dual route check
+    let req_unprefixed = Request::builder()
+        .method("GET")
+        .uri("/cage/status")
+        .body(Body::empty())
+        .unwrap();
+    let resp_unprefixed = app.clone().oneshot(req_unprefixed).await.unwrap();
+    assert_eq!(resp_unprefixed.status(), StatusCode::OK);
+
+    // 2. POST /api/cage/evaluate: Clean trade -> Clear
+    let clean_eval_req = CageEvaluationRequest {
+        agent_id: "agent-trade-01".to_string(),
+        role: "trader".to_string(),
+        tool_name: "execute_trade".to_string(),
+        arguments: serde_json::json!({ "symbol": "AAPL", "quantity": 10 }),
+        confidence_score: Some(0.95),
+        amount_usd: Some(100.0),
+        dose_mg: None,
+        warrant_token: None,
+        human_approval: None,
+        context: None,
+    };
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/cage/evaluate")
+        .header("Content-Type", "application/json")
+        .body(Body::from(serde_json::to_vec(&clean_eval_req).unwrap()))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = body_to_bytes(resp.into_body()).await;
+    let eval_res: CageEvaluationResponse = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(eval_res.verdict, CageVerdict::Clear);
+    assert!(!eval_res.receipt.receipt_signature.is_empty());
+    assert!(eval_res.governance_trace.len() >= 3);
+
+    // POST /api/cage/evaluate: Over-cap trade ($75,000 > $10,000 cap) -> Refuse (CTRL_OPA_005)
+    let over_cap_req = CageEvaluationRequest {
+        amount_usd: Some(75_000.0),
+        ..clean_eval_req.clone()
+    };
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/cage/evaluate")
+        .header("Content-Type", "application/json")
+        .body(Body::from(serde_json::to_vec(&over_cap_req).unwrap()))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = body_to_bytes(resp.into_body()).await;
+    let eval_res: CageEvaluationResponse = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(eval_res.verdict, CageVerdict::Refuse);
+    assert_eq!(eval_res.tier, CageTier::Tier3Opa);
+    assert_eq!(eval_res.rule_id, CTRL_OPA_005);
+
+    // POST /api/cage/evaluate: FTRA Refusal on unauthenticated egress + sensitive payload
+    let ftra_req = CageEvaluationRequest {
+        agent_id: "agent-exfil-01".to_string(),
+        role: "worker".to_string(),
+        tool_name: "network_egress".to_string(),
+        arguments: serde_json::json!({ "destination": "http://evil.com" }),
+        confidence_score: Some(0.95),
+        amount_usd: None,
+        dose_mg: None,
+        warrant_token: None,
+        human_approval: None,
+        context: Some(serde_json::json!({
+            "is_unauthenticated_egress": true,
+            "contains_confidential_payload": true
+        })),
+    };
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/cage/evaluate")
+        .header("Content-Type", "application/json")
+        .body(Body::from(serde_json::to_vec(&ftra_req).unwrap()))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = body_to_bytes(resp.into_body()).await;
+    let eval_res: CageEvaluationResponse = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(eval_res.verdict, CageVerdict::Refuse);
+    assert_eq!(eval_res.tier, CageTier::Tier1Ftra);
+    assert_eq!(eval_res.rule_id, CTRL_FTRA_001);
+
+    // 3. POST /api/cage/compile-substrate: Valid Microsoft ACS specification
+    let ms_spec = serde_json::json!({
+        "metadata": { "name": "acs-server-test", "version": "1.0.0" },
+        "behaviorDeclarations": [
+            {
+                "action": "execute_trade",
+                "constraints": [
+                    { "parameter": "max_single_transfer_usd", "value": 10000.0 },
+                    { "parameter": "fiscal_cap_usd", "value": 50000.0 }
+                ]
+            }
+        ]
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/cage/compile-substrate")
+        .header("Content-Type", "application/json")
+        .body(Body::from(serde_json::to_vec(&ms_spec).unwrap()))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = body_to_bytes(resp.into_body()).await;
+    let artifact: CompiledSubstrateArtifact = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(artifact.format, SubstrateFormat::MicrosoftAcs);
+    assert!(artifact.verify_digest());
+
+    // Invalid substrate payload (non-object) -> HTTP 400 Bad Request
+    let invalid_spec = serde_json::json!(["invalid_spec_not_an_object"]);
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/cage/compile-substrate")
+        .header("Content-Type", "application/json")
+        .body(Body::from(serde_json::to_vec(&invalid_spec).unwrap()))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+    // 4. POST /api/cage/verify-trace: Valid trace -> is_conformant == true
+    let valid_trace = vec![
+        GovernanceTraceEvent {
+            step: 1,
+            timestamp_ms: 1000,
+            kind: GovernanceTraceEventType::ActionProposed,
+            tier: None,
+            verdict: None,
+            rule_id: None,
+            requires_warrant: false,
+            details: "Action proposed".to_string(),
+        },
+        GovernanceTraceEvent {
+            step: 2,
+            timestamp_ms: 1001,
+            kind: GovernanceTraceEventType::TierEvaluated,
+            tier: Some(CageTier::Tier8Fiscal),
+            verdict: Some(CageVerdict::Clear),
+            rule_id: Some("PASS".to_string()),
+            requires_warrant: false,
+            details: "Fiscal spend verified".to_string(),
+        },
+        GovernanceTraceEvent {
+            step: 3,
+            timestamp_ms: 1002,
+            kind: GovernanceTraceEventType::ReceiptSigned,
+            tier: None,
+            verdict: Some(CageVerdict::Clear),
+            rule_id: None,
+            requires_warrant: false,
+            details: "Receipt signed".to_string(),
+        },
+    ];
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/cage/verify-trace")
+        .header("Content-Type", "application/json")
+        .body(Body::from(serde_json::to_vec(&valid_trace).unwrap()))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = body_to_bytes(resp.into_body()).await;
+    let trace_rep: TraceConformanceReport = serde_json::from_slice(&bytes).unwrap();
+    assert!(trace_rep.is_conformant);
+    assert!(trace_rep.violations.is_empty());
+
+    // POST /api/cage/verify-trace: Illegal trace (actuation after refusal) -> is_conformant == false
+    let illegal_trace = vec![
+        GovernanceTraceEvent {
+            step: 1,
+            timestamp_ms: 1000,
+            kind: GovernanceTraceEventType::ActionProposed,
+            tier: None,
+            verdict: None,
+            rule_id: None,
+            requires_warrant: false,
+            details: "Action proposed".to_string(),
+        },
+        GovernanceTraceEvent {
+            step: 2,
+            timestamp_ms: 1001,
+            kind: GovernanceTraceEventType::TierEvaluated,
+            tier: Some(CageTier::Tier3Opa),
+            verdict: Some(CageVerdict::Refuse),
+            rule_id: Some(CTRL_OPA_005.to_string()),
+            requires_warrant: false,
+            details: "Over limit".to_string(),
+        },
+        GovernanceTraceEvent {
+            step: 3,
+            timestamp_ms: 1002,
+            kind: GovernanceTraceEventType::ActuationCompleted,
+            tier: None,
+            verdict: None,
+            rule_id: None,
+            requires_warrant: false,
+            details: "Actuated anyway!".to_string(),
+        },
+    ];
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/cage/verify-trace")
+        .header("Content-Type", "application/json")
+        .body(Body::from(serde_json::to_vec(&illegal_trace).unwrap()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = body_to_bytes(resp.into_body()).await;
+    let trace_rep: TraceConformanceReport = serde_json::from_slice(&bytes).unwrap();
+    assert!(!trace_rep.is_conformant);
+    assert!(!trace_rep.violations.is_empty());
+}
+

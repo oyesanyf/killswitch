@@ -219,6 +219,10 @@ impl SubstrateCompiler {
             map.insert("allowed_tools".to_string(), serde_json::Value::Array(tools_list));
         }
 
+        if map.is_empty() {
+            return Err("Malformed substrate specification: unable to parse as valid JSON or YAML contract".to_string());
+        }
+
         Self::detect_and_compile(&serde_json::Value::Object(map))
     }
 
@@ -260,8 +264,20 @@ impl SubstrateCompiler {
             return Ok(SubstrateFormat::LinuxFoundationAaif);
         }
 
-        // Native CAGE or Fallback
-        Ok(SubstrateFormat::NativeCage)
+        // Check Native CAGE format markers or minimal default
+        if obj.contains_key("contract_id")
+            || obj.contains_key("schema_version")
+            || obj.contains_key("allowed_tools")
+            || obj.contains_key("parameter_bounds")
+            || obj.contains_key("norms")
+            || obj.contains_key("domain")
+            || obj.get("kind").and_then(|k| k.as_str()).is_some_and(|k| k.eq_ignore_ascii_case("NativeCage"))
+            || obj.is_empty()
+        {
+            return Ok(SubstrateFormat::NativeCage);
+        }
+
+        Err("Unrecognized substrate contract specification format".to_string())
     }
 
     fn compile_with_format(payload: &serde_json::Value, format: SubstrateFormat) -> Result<CompiledSubstrateArtifact, String> {
@@ -1152,6 +1168,7 @@ impl CageTraceVerifier {
     pub fn verify_trace_conformance(trace: &[GovernanceTraceEvent]) -> TraceConformanceReport {
         let mut violations = Vec::new();
         let mut last_step = 0usize;
+        let mut last_timestamp_ms = 0u64;
         let mut highest_tier: Option<CageTier> = None;
         let mut warrant_verified = false;
         let mut requires_warrant = false;
@@ -1191,6 +1208,16 @@ impl CageTraceVerifier {
                 ));
             }
             last_step = event.step;
+
+            // Timestamp monotonicity check (reject clock skew / time travel)
+            if idx > 0 && event.timestamp_ms < last_timestamp_ms {
+                monotonic_ordering_valid = false;
+                violations.push(format!(
+                    "NON_MONOTONIC_TIMESTAMP: Event at index {} has timestamp_ms {} < previous timestamp_ms {}",
+                    idx, event.timestamp_ms, last_timestamp_ms
+                ));
+            }
+            last_timestamp_ms = event.timestamp_ms;
 
             if event.requires_warrant {
                 requires_warrant = true;
@@ -2381,6 +2408,13 @@ mod tests {
         let rep_no_rcpt = CageTraceVerifier::verify_trace_conformance(&no_receipt);
         assert!(!rep_no_rcpt.is_conformant);
         assert!(rep_no_rcpt.violations.iter().any(|v| v.contains("ILLEGAL_ACTUATION_WITHOUT_CLEAR_RECEIPT")));
+
+        // Reversed timestamp / clock skew
+        let mut clock_skew = valid_trace.clone();
+        clock_skew[2].timestamp_ms = 99; // Decreases from 101 to 99
+        let rep_skew = CageTraceVerifier::verify_trace_conformance(&clock_skew);
+        assert!(!rep_skew.is_conformant);
+        assert!(rep_skew.violations.iter().any(|v| v.contains("NON_MONOTONIC_TIMESTAMP")));
     }
 
     #[test]

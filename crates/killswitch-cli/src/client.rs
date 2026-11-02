@@ -935,4 +935,71 @@ impl KillSwitchClient {
             acceptance_verdict: None,
         })
     }
+
+    // =========================================================================
+    // CAGE Governance PEP Client Methods (with in-process fallback)
+    // =========================================================================
+
+    pub async fn get_cage_status(&self) -> Result<killswitch_telemetry::CageKernelStatusReport> {
+        let url = format!("{}/api/cage/status", self.base_url);
+        if let Ok(resp) = self.client.get(&url).send().await {
+            if resp.status().is_success() {
+                if let Ok(body) = resp.json::<killswitch_telemetry::CageKernelStatusReport>().await {
+                    return Ok(body);
+                }
+            }
+        }
+        // Direct in-process fallback
+        Ok(killswitch_telemetry::global_cage_kernel().status())
+    }
+
+    pub async fn evaluate_cage(
+        &self,
+        req: &killswitch_telemetry::CageEvaluationRequest,
+    ) -> Result<killswitch_telemetry::CageEvaluationResponse> {
+        let url = format!("{}/api/cage/evaluate", self.base_url);
+        if let Ok(resp) = self.client.post(&url).json(req).send().await {
+            if resp.status().is_success() {
+                if let Ok(body) = resp.json::<killswitch_telemetry::CageEvaluationResponse>().await {
+                    return Ok(body);
+                }
+            }
+        }
+        // Direct in-process fallback
+        Ok(killswitch_telemetry::global_cage_kernel().evaluate(req))
+    }
+
+    pub async fn compile_substrate(
+        &self,
+        payload: &serde_json::Value,
+    ) -> Result<killswitch_telemetry::CompiledSubstrateArtifact> {
+        let url = format!("{}/api/cage/compile-substrate", self.base_url);
+        if let Ok(resp) = self.client.post(&url).json(payload).send().await {
+            if resp.status().is_success() {
+                if let Ok(body) = resp.json::<killswitch_telemetry::CompiledSubstrateArtifact>().await {
+                    return Ok(body);
+                }
+            }
+        }
+        // Direct in-process fallback
+        killswitch_telemetry::SubstrateCompiler::detect_and_compile(payload)
+            .map_err(|e| anyhow::anyhow!("Failed to compile CAGE substrate contract: {e}"))
+    }
+
+    pub async fn verify_cage_trace(
+        &self,
+        trace: &[killswitch_telemetry::GovernanceTraceEvent],
+    ) -> Result<killswitch_telemetry::TraceConformanceReport> {
+        let url = format!("{}/api/cage/verify-trace", self.base_url);
+        if let Ok(resp) = self.client.post(&url).json(trace).send().await {
+            if resp.status().is_success() {
+                if let Ok(body) = resp.json::<killswitch_telemetry::TraceConformanceReport>().await {
+                    return Ok(body);
+                }
+            }
+        }
+        // Direct in-process fallback
+        Ok(killswitch_telemetry::CageTraceVerifier::verify_trace_conformance(trace))
+    }
 }
+

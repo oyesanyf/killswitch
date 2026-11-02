@@ -50,21 +50,49 @@ struct StartCli {
     /// Path to durable state ledger and database directory
     #[arg(long)]
     db_dir: Option<PathBuf>,
+
+    /// Enforce CAGE (Cybernetic Agent Governance Engine, arXiv:2606.12320) runtime policy and run CAGE self-diagnostics
+    #[arg(long = "cage-governance", alias = "cage")]
+    cage_governance: bool,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = StartCli::parse();
 
+    // Standalone --cage-governance flag invocation
+    if cli.cage_governance && !cli.verify {
+        println!("🛡️  [START.EXE] Executing CAGE Governance Self-Diagnostics (--cage-governance)...");
+        match SubsystemVerifier::verify_cage_governance().await {
+            Ok(report) => {
+                println!("\n================================================================================");
+                println!("🛡️  CAGE GOVERNANCE SELF-DIAGNOSTIC REPORT");
+                println!("================================================================================");
+                println!("  Status:       {}", if report.passed { "PASS" } else { "FAIL" });
+                println!("  Phase:        {}", report.name);
+                println!("  Duration:     {} ms", report.duration_ms);
+                println!("  Details:      {}", report.details);
+                println!("================================================================================\n");
+                println!("✅ [START.EXE] CAGE Governance Verified Successfully! All 4 audit gates passed.");
+                std::process::exit(0);
+            }
+            Err(e) => {
+                eprintln!("❌ [START.EXE] CAGE Governance verification failed: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Self-Diagnostic Check Mode (--verify / --check)
     // -------------------------------------------------------------------------
     if cli.verify {
-        println!("🛡️  [START.EXE] Executing 7-Phase Subsystem Self-Diagnostics...");
-        match SubsystemVerifier::run_all().await {
+        let count = if cli.cage_governance { "8-Phase" } else { "7-Phase" };
+        println!("🛡️  [START.EXE] Executing {} Subsystem Self-Diagnostics...", count);
+        match SubsystemVerifier::run_with_governance(cli.cage_governance).await {
             Ok(report) => {
                 report.print_summary();
-                println!("✅ [START.EXE] All 7 Subsystems Verified Successfully! Self-check passed (exit 0).");
+                println!("✅ [START.EXE] All Subsystems Verified Successfully! Self-check passed (exit 0).");
                 std::process::exit(0);
             }
             Err(e) => {

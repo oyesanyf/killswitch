@@ -3702,3 +3702,61 @@ pub async fn post_hitl_reject(
         }))),
     }
 }
+
+// =============================================================================
+// 17. Google Cybernetic Agent Governance Engine (CAGE) PEP Handlers
+// =============================================================================
+
+/// GET /api/cage/status and GET /cage/status
+///
+/// Returns deterministic CAGE kernel status, active substrate contract digest,
+/// evaluation counters, evidence count, and fiscal spend.
+pub async fn get_cage_status(
+    State(_state): State<Arc<ServerState>>,
+) -> Result<Json<killswitch_telemetry::CageKernelStatusReport>, ServerError> {
+    let kernel = killswitch_telemetry::global_cage_kernel();
+    Ok(Json(kernel.status()))
+}
+
+/// POST /api/cage/evaluate and POST /cage/evaluate
+///
+/// Evaluates an agent action proposal against the 8-tier deterministic CAGE pipeline
+/// (FTRA, STPA, OPA, Confidence, Warrant, Consensus, CBF, Fiscal).
+pub async fn post_cage_evaluate(
+    State(_state): State<Arc<ServerState>>,
+    Json(req): Json<killswitch_telemetry::CageEvaluationRequest>,
+) -> Result<Json<killswitch_telemetry::CageEvaluationResponse>, ServerError> {
+    let kernel = killswitch_telemetry::global_cage_kernel();
+    let resp = kernel.evaluate(&req);
+    Ok(Json(resp))
+}
+
+/// POST /api/cage/compile-substrate and POST /cage/compile-substrate
+///
+/// Auto-detects and normalizes multi-format Substrate Contracts (Native CAGE,
+/// Microsoft ACS, Linux Foundation AAIF, NIST OSCAL, Lula Validation) into bitwise-deterministic
+/// compiled artifacts with SHA-256 contract digests.
+pub async fn post_cage_compile_substrate(
+    State(_state): State<Arc<ServerState>>,
+    Json(payload): Json<serde_json::Value>,
+) -> Result<Json<killswitch_telemetry::CompiledSubstrateArtifact>, ServerError> {
+    match killswitch_telemetry::SubstrateCompiler::detect_and_compile(&payload) {
+        Ok(artifact) => Ok(Json(artifact)),
+        Err(err) => Err(ServerError::Validation(format!(
+            "Failed to compile CAGE substrate contract: {err}"
+        ))),
+    }
+}
+
+/// POST /api/cage/verify-trace and POST /cage/verify-trace
+///
+/// Executes independent formal trace model checking on governance event sequences.
+pub async fn post_cage_verify_trace(
+    State(_state): State<Arc<ServerState>>,
+    Json(payload): Json<CageVerifyTracePayload>,
+) -> Result<Json<killswitch_telemetry::TraceConformanceReport>, ServerError> {
+    let trace = payload.into_trace();
+    let report = killswitch_telemetry::CageTraceVerifier::verify_trace_conformance(&trace);
+    Ok(Json(report))
+}
+
