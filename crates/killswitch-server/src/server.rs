@@ -217,13 +217,17 @@ impl KillSwitchServer {
                     .lineage_engine
                     .rl_traffic
                     .poll_and_learn_live_os_traffic();
+                let mut seen_pids = std::collections::HashSet::new();
                 for row in rows {
+                    if !seen_pids.insert(row.pid) || row.command_line.trim().is_empty() {
+                        continue;
+                    }
                     let eval = coord.evaluate_action(
                         &row.process_name,
                         &row.image_path,
                         &row.command_line,
                     );
-                    if !eval.is_clean {
+                    if !eval.technical.is_clean || !eval.operational.is_clean || !eval.data.is_clean {
                         let _ = sentinel_state
                             .arm_registry
                             .sever_and_regenerate_arm(2, &eval.summary)

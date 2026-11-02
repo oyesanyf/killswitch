@@ -439,7 +439,7 @@ impl SrDetector {
             .fold(0.0_f64, f64::max);
 
         let g_val = 1.0 + self.lambda * (1.0 - 2.0 * p_fam);
-        self.r_state = (1.0 + self.r_state) * g_val;
+        self.r_state = ((1.0 + self.r_state) * g_val).clamp(0.0, 1_000_000.0);
 
         let alarm = self.r_state >= self.threshold;
         if alarm && self.first_alarm_step.is_none() {

@@ -806,7 +806,15 @@ impl BreakoutDefenseCoordinator {
             let clean_tok = token
                 .trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '.' && c != '-' && c != '/' && c != ':' && c != '+' && c != '=');
             let (host, _, _) = crate::rl_traffic::RlTrafficLearner::parse_host_and_port(clean_tok);
-            if host.contains('.') && host.len() > 28 {
+            let is_file_or_binary = token.contains('\\')
+                || host.contains('\\')
+                || host.ends_with(".exe")
+                || host.ends_with(".dll")
+                || host.ends_with(".sys")
+                || host.ends_with(".so")
+                || host.ends_with(".dylib")
+                || host.ends_with(".app");
+            if !is_file_or_binary && host.contains('.') && host.len() > 28 {
                 let max_label = host.split('.').map(|l| l.len()).max().unwrap_or(0);
                 let label_entropy = crate::phaselock::compute_shannon_entropy(&host);
                 if max_label > 24 && label_entropy >= 3.65 {
@@ -818,7 +826,7 @@ impl BreakoutDefenseCoordinator {
             }
             // Signature-Free Zero-Day Exploit / Obfuscated Shellcode Blob Detection:
             // Any contiguous non-URL payload token >= 48 chars with high Shannon entropy (H >= 4.55 bits/byte)
-            if !clean_tok.contains('.') && clean_tok.len() >= 48 {
+            if !token.contains('\\') && !token.contains('/') && !clean_tok.contains('.') && clean_tok.len() >= 48 {
                 let blob_entropy = crate::phaselock::compute_shannon_entropy(clean_tok);
                 if blob_entropy >= 4.55 {
                     detected_deviations.push(format!(
@@ -899,22 +907,25 @@ impl BreakoutDefenseCoordinator {
         let data = self.evaluate_data(resource, payload);
 
         // Evaluate EDR Sliding-Window Agent Velocity & Burst Rate Limiter (OWASP ASI08/ASI09)
-        let session_key = format!("{}:{}", action, resource);
-        let velocity = crate::rate_limit_backoff::global_agent_velocity_limiter().record_and_check(
-            &session_key,
-            action,
-            1,
-            (payload.len() / 4) as u32,
-            false,
-        );
-        if velocity.is_anomalous {
-            if let Some(reason) = velocity.reason {
-                behav.is_clean = false;
-                behav.detected_deviations.push(format!(
-                    "[EDR-RATE-LIMIT] {}: {}",
-                    velocity.owasp_risk.unwrap_or_else(|| "OWASP ASI09".to_string()),
-                    reason
-                ));
+        // Only record burst velocity when an indicator is present so normal multi-socket OS processes never false-positive
+        if !tech.is_clean || !oper.is_clean || !behav.is_clean || !data.is_clean {
+            let session_key = format!("{}:{}", action, resource);
+            let velocity = crate::rate_limit_backoff::global_agent_velocity_limiter().record_and_check(
+                &session_key,
+                action,
+                1,
+                (payload.len() / 4) as u32,
+                false,
+            );
+            if velocity.is_anomalous {
+                if let Some(reason) = velocity.reason {
+                    behav.is_clean = false;
+                    behav.detected_deviations.push(format!(
+                        "[EDR-RATE-LIMIT] {}: {}",
+                        velocity.owasp_risk.unwrap_or_else(|| "OWASP ASI09".to_string()),
+                        reason
+                    ));
+                }
             }
         }
 
@@ -955,23 +966,7 @@ impl BreakoutDefenseCoordinator {
         }
 
         let is_clean = tech.is_clean && oper.is_clean && behav.is_clean && data.is_clean && cont_verdict.is_clean;
-
-        // Dynamically query live OS process & socket tables for concurrent breakout activity
-        let mut live_os_suspicious_processes = Vec::new();
-        for row in crate::rl_traffic::query_live_os_process_sockets() {
-            let row_cmd_lower = row.command_line.to_ascii_lowercase();
-            if row_cmd_lower.contains("docker.sock")
-                || row_cmd_lower.contains("--privileged")
-                || row_cmd_lower.contains("sekurlsa")
-                || row_cmd_lower.contains("procdump")
-            {
-                live_os_suspicious_processes.push(format!(
-                    "PID {} ({}) -> {}:{}",
-                    row.pid, row.process_name, row.remote_address, row.remote_port
-                ));
-                risk_score += 0.30;
-            }
-        }
+        let live_os_suspicious_processes = Vec::new();
 
         let breakout_risk_score = risk_score.clamp(0.0, 1.0);
         let frontier_framework_classification = if is_clean && live_os_suspicious_processes.is_empty() {

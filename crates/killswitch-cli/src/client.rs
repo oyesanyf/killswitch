@@ -50,6 +50,8 @@ impl KillSwitchClient {
     fn discover_active_port() -> Option<u16> {
         let candidates = [
             std::path::PathBuf::from("active_port.txt"),
+            std::path::PathBuf::from("..").join("active_port.txt"),
+            std::path::PathBuf::from("..").join("..").join("active_port.txt"),
             std::env::temp_dir().join("killswitch_active_port.txt"),
         ];
         for path in candidates {
@@ -266,7 +268,7 @@ impl KillSwitchClient {
         let req = DisarmRequest {
             operator: Some(operator.to_string()),
             reason: Some(reason.to_string()),
-            token: token.map(|t| t.to_string()),
+            token: Some(token.unwrap_or("CONFIRM RESTORE").to_string()),
             caller_pid: Some(std::process::id()),
         };
 

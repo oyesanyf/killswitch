@@ -894,3 +894,86 @@ async fn test_cage_pep_endpoints_e2e() {
     assert!(!trace_rep.violations.is_empty());
 }
 
+
+#[tokio::test]
+async fn test_manual_trigger_attribution_webui_reconnect_and_standalone_ui() {
+    let state = setup_test_server_state();
+    let app = build_router(state);
+
+    // 1. Verify standalone WebUI removes mesh/peer clutter and uses compact professional buttons
+    let ui_req = Request::builder()
+        .uri("/ui")
+        .method("GET")
+        .body(Body::empty())
+        .unwrap();
+    let ui_resp = app.clone().oneshot(ui_req).await.unwrap();
+    assert_eq!(ui_resp.status(), StatusCode::OK);
+    let ui_html = String::from_utf8(body_to_bytes(ui_resp.into_body()).await.to_vec()).unwrap();
+    assert!(!ui_html.contains("Octopus 18-Arm Containment Mesh"));
+    assert!(!ui_html.contains("Refresh 18-Arm Mesh"));
+    assert!(!ui_html.contains("btn-hero-peers"));
+    assert!(ui_html.contains("padding: 0.42rem 0.85rem;"));
+
+    // 2. Verify passive OS socket polling on normal processes (e.g. 25 sockets for chrome.exe) never triggers false-positive rate-limit or conformal alarms
+    let coord = killswitch_telemetry::BreakoutDefenseCoordinator::new();
+    for _ in 0..25 {
+        let eval = coord.evaluate_action(
+            "chrome.exe",
+            "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+            "chrome.exe --type=renderer",
+        );
+        assert!(eval.is_clean, "Normal multi-socket OS process must remain clean: {}", eval.summary);
+    }
+
+    // 3. Verify manual engage sets plain-English manual operator trigger attribution
+    let engage_body = serde_json::json!({
+        "operator": "user_console",
+        "reason": "Manual emergency disconnect from WebUI",
+        "level": "hermetic_isolation",
+        "token": "CONFIRM ISOLATE"
+    });
+    let req_eng = Request::builder()
+        .uri("/engage")
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .body(Body::from(serde_json::to_vec(&engage_body).unwrap()))
+        .unwrap();
+    let resp_eng = app.clone().oneshot(req_eng).await.unwrap();
+    assert_eq!(resp_eng.status(), StatusCode::OK);
+
+    let req_st = Request::builder()
+        .uri("/status")
+        .method("GET")
+        .body(Body::empty())
+        .unwrap();
+    let resp_st = app.clone().oneshot(req_st).await.unwrap();
+    let st: StatusResponse = serde_json::from_slice(&body_to_bytes(resp_st.into_body()).await).unwrap();
+    assert!(st.isolated);
+    assert_eq!(st.trigger_cause, "Manual Operator Disconnect (Turned On Manually by You)");
+    assert!(st.trigger_details.contains("You manually turned on the KillSwitch"));
+
+    // 4. Verify WebUI Reconnect (/disarm) restores internet and clears trigger cause
+    let disarm_body = serde_json::json!({
+        "operator": "user_console",
+        "reason": "User clicked Reconnect Internet in WebUI",
+        "token": "CONFIRM RESTORE"
+    });
+    let req_dis = Request::builder()
+        .uri("/disarm")
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .body(Body::from(serde_json::to_vec(&disarm_body).unwrap()))
+        .unwrap();
+    let resp_dis = app.clone().oneshot(req_dis).await.unwrap();
+    assert_eq!(resp_dis.status(), StatusCode::OK);
+
+    let req_st2 = Request::builder()
+        .uri("/status")
+        .method("GET")
+        .body(Body::empty())
+        .unwrap();
+    let resp_st2 = app.oneshot(req_st2).await.unwrap();
+    let st2: StatusResponse = serde_json::from_slice(&body_to_bytes(resp_st2.into_body()).await).unwrap();
+    assert!(!st2.isolated);
+    assert_eq!(st2.trigger_cause, "None (Host Operational)");
+}

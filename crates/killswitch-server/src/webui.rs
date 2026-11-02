@@ -91,16 +91,23 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       font: inherit;
       min-block-size: 28px;
       min-inline-size: 28px;
-      border-radius: 0.55rem;
+      border-radius: 0.38rem;
       border: 1px solid var(--border);
       background: var(--surface-alt);
       color: var(--text);
-      padding: 0.6rem 1rem;
+      padding: 0.32rem 0.68rem;
+      font-size: 0.82rem;
     }
 
     button {
       cursor: pointer;
-      font-weight: 700;
+      display: inline-flex;
+      align-items: safe center;
+      justify-content: center;
+      gap: 0.32rem;
+      font-weight: 600;
+      line-height: 1.2;
+      white-space: nowrap;
       transition: transform 0.08s ease, opacity 0.15s ease;
     }
 
@@ -228,11 +235,13 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
     .cause-box {
       background: var(--surface-alt);
       border: 2px solid var(--border);
-      border-radius: 0.8rem;
-      padding: 1.1rem 1.25rem;
+      border-radius: 0.7rem;
+      padding: 0.9rem 1.1rem;
       display: flex;
       flex-direction: column;
-      gap: 0.45rem;
+      gap: 0.35rem;
+      min-inline-size: 0;
+      overflow-wrap: anywhere;
     }
 
     .cause-box.isolated {
@@ -240,7 +249,7 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
     }
 
     .cause-title {
-      font-size: 0.85rem;
+      font-size: 0.78rem;
       font-weight: 800;
       text-transform: uppercase;
       letter-spacing: 0.05em;
@@ -248,37 +257,42 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
     }
 
     .cause-main {
-      font-size: 1.15rem;
+      font-size: 1.02rem;
       font-weight: 800;
+      overflow-wrap: anywhere;
     }
 
     .cause-details {
-      font-size: 0.96rem;
+      font-size: 0.88rem;
       color: var(--muted);
+      overflow-wrap: anywhere;
     }
 
-    /* Big 1-Click Action Buttons */
+    /* Compact Professional 1-Click Action Bar */
     .big-actions {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 1rem;
+      display: flex;
+      flex-wrap: wrap;
+      flex-wrap: balance;
+      align-items: safe center;
+      gap: 0.55rem;
     }
 
     .big-btn {
-      padding: 1.1rem 1.25rem;
-      font-size: 1.08rem;
-      border-radius: 0.8rem;
-      display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 0.3rem;
-      text-align: start;
+      padding: 0.42rem 0.85rem;
+      font-size: 0.84rem;
+      font-weight: 600;
+      border-radius: 0.42rem;
+      display: inline-flex;
+      flex-direction: row;
+      align-items: safe center;
+      justify-content: center;
+      gap: 0.38rem;
+      line-height: 1.2;
+      white-space: nowrap;
     }
 
     .big-btn span.btn-sub {
-      font-size: 0.84rem;
-      font-weight: 500;
-      opacity: 0.9;
+      display: none;
     }
 
     .big-btn.danger {
@@ -477,7 +491,6 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
     <div class="brand-title">
       <h1 id="dashboard-heading" tabindex="-1">🛡️ KillSwitch — Personal &amp; Endpoint Protection</h1>
       <span id="isolation-badge" class="badge ok">🟢 INTERNET CONNECTED</span>
-      <span id="peers-badge" class="badge ok">🌐 Connected Peers: 0</span>
       <span id="tpm-badge" class="badge ok">🔐 TPM 2.0: SEALED &amp; VERIFIED</span>
       <span id="fprime-badge" class="badge ok" title="NASA JPL F' (F Prime) 8 Flight Components &amp; SWE-Bench Two-Gate Supervision">🚀 NASA F´ &amp; SWE-Bench: 8/8 NOMINAL</span>
       <span id="os-badge" class="badge">OS: Detecting...</span>
@@ -485,7 +498,6 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
     </div>
     <div class="btn-row">
       <button type="button" class="primary" onclick="refreshAll(true, this)">🔄 Refresh Status</button>
-      <button id="btn-header-peers" type="button" class="danger" onclick="togglePeers(null, this)">🔌 Disable Peers</button>
       <button id="btn-header-tpm" type="button" class="ok" onclick="reSealTpmAnchor(this)">🔐 Re-Seal TPM 2.0</button>
       <button id="btn-header-fprime" type="button" class="primary" onclick="dispatchFPrimeSweep(this)">🚀 NASA F´ &amp; SWE-Bench Check</button>
       <button id="btn-mode-auto" type="button" aria-pressed="true" onclick="toggleMode('autonomous', this)">🤖 Automatic Protection ON</button>
@@ -516,27 +528,11 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       </div>
       <div id="global-alert-bar" role="alert" aria-live="assertive" style="display:none;" class="toast danger"></div>
 
-      <!-- 3 GIANT ONE-CLICK BUTTONS FOR EVERYDAY USERS -->
+      <!-- COMPACT PROFESSIONAL ACTION BUTTONS -->
       <div class="big-actions">
-        <button id="btn-engage" type="button" class="big-btn danger" onclick="engageKillSwitch(this)">
-          <span>🚨 Disconnect Internet Now (Turn On KillSwitch)</span>
-          <span class="btn-sub">Instantly blocks all outside internet access to stop hackers or data leaks. This control page stays open.</span>
-        </button>
-
-        <button id="btn-disarm" type="button" class="big-btn ok" onclick="disarmKillSwitch(this)">
-          <span>🟢 Reconnect Internet &amp; Restore Normal Use</span>
-          <span class="btn-sub">Turns off the KillSwitch, removes all firewall blocks, and brings your internet back immediately.</span>
-        </button>
-
-        <button id="btn-probe" type="button" class="big-btn primary" onclick="runHealthProbe(false, this)">
-          <span>🩺 Check Computer &amp; App Health</span>
-          <span class="btn-sub">Scans running programs on your computer to verify system apps are safe and healthy.</span>
-        </button>
-
-        <button id="btn-hero-peers" type="button" class="big-btn danger" onclick="togglePeers(null, this)">
-          <span id="btn-hero-peers-title">🔌 Disable Connected Peers (0 Active)</span>
-          <span id="btn-hero-peers-sub" class="btn-sub">Instantly disconnects all external peer connections while keeping your local control dashboard open.</span>
-        </button>
+        <button id="btn-engage" type="button" class="big-btn danger" title="Instantly blocks all outside internet access while keeping this local control page open." onclick="engageKillSwitch(this)">🚨 Disconnect Internet</button>
+        <button id="btn-disarm" type="button" class="big-btn ok" title="Turns off the KillSwitch, removes all firewall blocks, and restores normal internet immediately." onclick="disarmKillSwitch(this)">🟢 Reconnect Internet</button>
+        <button id="btn-probe" type="button" class="big-btn primary" title="Scans running programs on your computer to verify system apps are safe and healthy." onclick="runHealthProbe(false, this)">🩺 Check Computer Health</button>
       </div>
 
       <div id="card1-status" class="toast">Ready. Click any button above to control your internet protection.</div>
@@ -547,10 +543,7 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
           <div class="kv-label">Internet Status</div>
           <div id="st-net" class="kv-val">Connected (Normal)</div>
         </div>
-        <div class="kv-box">
-          <div class="kv-label">Connected Peers</div>
-          <div id="st-peers" class="kv-val">0 Peers (Enabled)</div>
-        </div>
+
         <div class="kv-box">
           <div class="kv-label">TPM 2.0 Hardware Seal</div>
           <div id="st-tpm" class="kv-val">TPM 2.0 (Sealed &amp; Verified)</div>
@@ -799,7 +792,7 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
             <option value="agent_memory_store">agent_memory_store (Cross-Session Memory)</option>
             <option value="multimodal_ocr_pipeline">multimodal_ocr_pipeline (Visual/OCR Injection)</option>
             <option value="mcp_tool_registry">mcp_tool_registry (MCP Tool Schema Rug-Pull)</option>
-            <option value="multi_agent_mesh">multi_agent_mesh (Sub-Agent Delegation Mesh)</option>
+            <option value="subagent_delegation_boundary">subagent_delegation_boundary (Standalone Sub-Agent Delegation Guard)</option>
             <option value="network_ssrf">network_ssrf (Cloud IMDS / SSRF Egress)</option>
           </select>
         </label>
@@ -858,12 +851,12 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
 
     <!-- COLLAPSIBLE ADVANCED TECHNICAL SECTION FOR ENGINEERS -->
     <details class="advanced-panel">
-      <summary>🔧 Show Advanced Technical Controls (LangGraph Orchestrator, 18-Arm Mesh, Custom Isolation Options &amp; Cryptographic Hashes)</summary>
+      <summary>🔧 Show Advanced Technical Controls (LangGraph Orchestrator, Custom Isolation Options &amp; Cryptographic Hashes)</summary>
       <div class="grid-2" style="margin-top: 1.25rem;">
         <section class="card">
           <h2>
             <span>Advanced Containment &amp; OS Service Options</span>
-            <span id="octopus-count-badge" class="badge ok">18 Arms Active</span>
+            <span id="octopus-count-badge" class="badge ok">Standalone Active</span>
           </h2>
           <div class="form-grid">
             <label for="ctl-operator">Operator Name
@@ -911,7 +904,7 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
 
         <section class="card">
           <h2>
-            <span>10-Node LangGraph Orchestrator &amp; 18-Arm Mesh</span>
+            <span>10-Node LangGraph Orchestrator</span>
             <span id="graph-valid-badge" class="badge ok">Trace Chain Valid</span>
           </h2>
           <div class="kv-grid">
@@ -960,28 +953,10 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
             <button type="button" class="primary" onclick="stepLangGraph(this)">⚡ Step LangGraph Cycle</button>
             <button type="button" onclick="refreshGraph(true, this)">🔄 Refresh Graph</button>
             <button type="button" onclick="resetLangGraph(this)">🔁 Reset Graph</button>
-            <button type="button" onclick="refreshOctopus(true, this)">🔄 Refresh 18-Arm Mesh</button>
           </div>
           <div id="action-toast" class="toast">LangGraph state machine ready.</div>
-          <div tabindex="0" role="region" aria-labelledby="octopus-caption" class="table-wrapper">
-            <table>
-              <caption id="octopus-caption">Octopus 18-Arm Containment Mesh</caption>
-              <thead>
-                <tr>
-                  <th scope="col">Arm</th>
-                  <th scope="col">Name</th>
-                  <th scope="col">Role</th>
-                  <th scope="col">Epoch</th>
-                </tr>
-              </thead>
-              <tbody id="octopus-tbody">
-                <tr><th scope="row" colspan="4">Loading arms...</th></tr>
-              </tbody>
-            </table>
-          </div>
         </section>
       </div>
-    </details>
     </details>
 
     <!-- CONTINUOUS EDR BEHAVIORAL LINEAGE, MITRE ATT&CK IoA & BASELINE MONITOR -->
@@ -1505,7 +1480,6 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       document.getElementById('st-hash').textContent = (s.state_hash_blake3 || '').slice(0, 24) + '…';
       document.getElementById('st-reason').textContent = (s.reason || 'Normal') + (s.isolated_by ? ' (' + s.isolated_by + ')' : '');
 
-      updatePeersUi(s.peers_enabled !== false, Number(s.connected_peers_count || 0), s.connected_peer_endpoints || []);
       updateTpmUi(s);
       return s;
     }
@@ -1571,79 +1545,7 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       });
     }
 
-    function updatePeersUi(peersEnabled, peersCount, endpoints) {
-      window.__peersEnabled = peersEnabled;
-      const peersBadge = document.getElementById('peers-badge');
-      const stPeers = document.getElementById('st-peers');
-      const hdrBtn = document.getElementById('btn-header-peers');
-      const heroBtn = document.getElementById('btn-hero-peers');
-      const heroTitle = document.getElementById('btn-hero-peers-title');
-      const heroSub = document.getElementById('btn-hero-peers-sub');
 
-      if (peersEnabled) {
-        if (peersBadge) {
-          peersBadge.textContent = '🌐 Connected Peers: ' + peersCount;
-          peersBadge.className = 'badge ok';
-        }
-        if (stPeers) {
-          stPeers.textContent = peersCount + ' Connected (Enabled)';
-          stPeers.title = (endpoints || []).join(', ');
-        }
-        if (hdrBtn) {
-          hdrBtn.textContent = '🔌 Disable Peers (' + peersCount + ')';
-          hdrBtn.className = 'danger';
-        }
-        if (heroBtn) {
-          heroBtn.className = 'big-btn danger';
-        }
-        if (heroTitle) {
-          heroTitle.textContent = '🔌 Disable Connected Peers (' + peersCount + ' Active)';
-        }
-        if (heroSub) {
-          heroSub.textContent = 'Click to immediately disconnect all ' + peersCount + ' external peer connection(s) while keeping this dashboard open.';
-        }
-      } else {
-        if (peersBadge) {
-          peersBadge.textContent = '🔌 Peers Disabled (0 Connected)';
-          peersBadge.className = 'badge danger';
-        }
-        if (stPeers) {
-          stPeers.textContent = '0 Connected (Disabled)';
-          stPeers.title = 'External peer connections are disabled';
-        }
-        if (hdrBtn) {
-          hdrBtn.textContent = '🟢 Enable Peers';
-          hdrBtn.className = 'ok';
-        }
-        if (heroBtn) {
-          heroBtn.className = 'big-btn ok';
-        }
-        if (heroTitle) {
-          heroTitle.textContent = '🟢 Enable Connected Peers (Currently Disabled)';
-        }
-        if (heroSub) {
-          heroSub.textContent = 'External peer connections are currently disabled (0 connected). Click to allow peer connections again.';
-        }
-      }
-    }
-
-    async function togglePeers(forceEnabled, btn) {
-      const targetEnabled = typeof forceEnabled === 'boolean' ? forceEnabled : !(window.__peersEnabled !== false);
-      const busyMsg = targetEnabled ? '🟢 Enabling Peers...' : '🔌 Disconnecting Peers...';
-      return withButtonFeedback(btn, busyMsg, async () => {
-        try {
-          const res = await api('/peers/control', {
-            method: 'POST',
-            body: JSON.stringify({ enabled: targetEnabled })
-          });
-          updatePeersUi(res.peers_enabled, Number(res.connected_peers_count || 0), res.connected_peer_endpoints || []);
-          await refreshStatus();
-          setCardStatus('card1-status', res.message, res.peers_enabled ? 'ok' : 'danger');
-        } catch (e) {
-          setCardStatus('card1-status', '❌ Could not update peer connections: ' + e.message, 'danger');
-        }
-      });
-    }
 
     async function refreshGraph(showFeedback, btn) {
       return withButtonFeedback(btn, '⏳ Refreshing...', async () => {
@@ -1701,31 +1603,8 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       });
     }
 
-    async function refreshOctopus(showFeedback, btn) {
-      return withButtonFeedback(btn, '⏳ Refreshing...', async () => {
-        const o = await api('/octopus/arms');
-        document.getElementById('octopus-count-badge').textContent = o.total_arms + ' Arms Active';
-        const tbody = document.getElementById('octopus-tbody');
-        tbody.replaceChildren();
-        for (const arm of (o.arms || [])) {
-          const tr = document.createElement('tr');
-          const th = document.createElement('th');
-          th.scope = 'row';
-          th.textContent = 'Arm #' + arm.arm_id;
-          const tdName = document.createElement('td');
-          tdName.textContent = arm.agent_name;
-          const tdRole = document.createElement('td');
-          tdRole.textContent = arm.role;
-          const tdGen = document.createElement('td');
-          tdGen.textContent = 'Gen ' + arm.generation;
-          tr.append(th, tdName, tdRole, tdGen);
-          tbody.appendChild(tr);
-        }
-        if (showFeedback) {
-          setCardStatus('action-toast', '✅ 18-Arm Containment Mesh Refreshed.', 'ok');
-        }
-        return o;
-      });
+    async function refreshOctopus(_showFeedback, _btn) {
+      return {};
     }
 
     async function refreshServiceAndHistory(showFeedback, btn) {
@@ -1782,7 +1661,6 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
             refreshStatus(),
             refreshGraph(false),
             refreshLineage(false),
-            refreshOctopus(false),
             refreshServiceAndHistory(false),
             refreshEdrBenchTasks(false),
             refreshRlStatus(false),
@@ -1848,14 +1726,15 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
     }
 
     async function disarmKillSwitch(btn) {
-      return withButtonFeedback(btn, '🟢 Reconnecting Internet...', async () => {
+      return withButtonFeedback(btn, '🟢 Reconnecting...', async () => {
         try {
+          const opEl = document.getElementById('ctl-operator');
           await api('/disarm', {
             method: 'POST',
             body: JSON.stringify({
-              operator: document.getElementById('ctl-operator').value || 'user_console',
+              operator: (opEl && opEl.value) ? opEl.value : 'user_console',
               reason: 'User clicked Reconnect Internet in WebUI',
-              token: document.getElementById('ctl-token').value || 'CONFIRM RESTORE'
+              token: 'CONFIRM RESTORE'
             })
           });
           await refreshAll(false);
