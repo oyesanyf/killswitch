@@ -5,7 +5,7 @@
 //! Boots 100% of subsystems into a single unified process:
 //! - Phase 1: Core Host Containment Manager & BLAKE3 State Ledger
 //! - Phase 2: Zero-False-Positive Adjudication Engine & WinTrust Validator
-//! - Phase 3: DLP OpenLineage Engine & Standalone Breakout Defense
+//! - Phase 3: DLP OpenLineage Engine & Octopus 18-Arm Defense Mesh
 //! - Phase 4: 10-Node Cyclic LangGraph Orchestrator & Durable Checkpointer
 //! - Phase 5: Local Axum HTTP API Server (port 3030 loopback)
 //! - Phase 6: Native OS Service Lifecycle Manager
@@ -54,11 +54,26 @@ struct StartCli {
     /// Enforce CAGE (Cybernetic Agent Governance Engine, arXiv:2606.12320) runtime policy and run CAGE self-diagnostics
     #[arg(long = "cage-governance", alias = "cage")]
     cage_governance: bool,
+
+    /// Internal elevated helper flag for Windows Filtering Platform (WFP) kernel delegation
+    #[arg(long, hide = true)]
+    wfp_kernel_apply: Option<String>,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = StartCli::parse();
+
+    // Internal elevated helper invocation for Windows Filtering Platform (WFP) kernel delegation
+    if let Some(ref action) = cli.wfp_kernel_apply {
+        match killswitch_cli::commands::handle_wfp_kernel_apply(action) {
+            Ok(()) => std::process::exit(0),
+            Err(e) => {
+                eprintln!("❌ [START.EXE] WFP kernel delegation failed: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
 
     // Standalone --cage-governance flag invocation
     if cli.cage_governance && !cli.verify {
@@ -119,7 +134,7 @@ async fn main() -> Result<()> {
 ================================================================================
  [1/6] Core Engine:    State Ledger & Native WFP / Tarpit Containment
  [2/6] Adjudication:   Zero-False-Positive Engine & WinTrust Validator
- [3/6] Telemetry:      DLP Lineage Engine & Standalone Breakout Defense
+ [3/6] Telemetry:      DLP Lineage Engine & Octopus 18-Arm Defense Mesh
  [4/6] Orchestrator:   10-Node Cyclic LangGraph & BLAKE3 Trace Checkpointer
  [5/6] Server:         Local Axum HTTP API Control Server (127.0.0.1:{})
  [6/6] Service:        Cross-Platform Native OS Service Lifecycle

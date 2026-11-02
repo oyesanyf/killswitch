@@ -574,3 +574,50 @@ pub async fn handle_cage(
     Ok(())
 }
 
+/// Handles the internal elevated helper delegation for Windows Filtering Platform (WFP)
+/// filter installation or disarm.
+pub fn handle_wfp_kernel_apply(action: &str) -> Result<()> {
+    #[cfg(windows)]
+    {
+        if !killswitch_core::wfp::is_current_process_elevated() {
+            bail!("Administrator privileges required to apply WFP kernel filters. Please run with elevated privileges.");
+        }
+        match action.to_lowercase().as_str() {
+            "engage" => {
+                let receipt = killswitch_core::wfp::engage_windows_network_quarantine_with_ports(
+                    "UAC-Elevated",
+                    "UAC delegation",
+                    &[3030],
+                )
+                .map_err(|e| anyhow::anyhow!("WFP kernel quarantine installation failed: {}", e))?;
+                println!(
+                    "✅ [WFP-KERNEL-APPLY] Installed {} WFP filters in Base Filtering Engine",
+                    receipt.wfp_filter_ids.len()
+                );
+                Ok(())
+            }
+            "disarm" => {
+                killswitch_core::wfp::disarm_windows_network_quarantine(
+                    "UAC-Elevated",
+                    "UAC delegation",
+                )
+                .map_err(|e| anyhow::anyhow!("WFP kernel quarantine disarm failed: {}", e))?;
+                println!("✅ [WFP-KERNEL-APPLY] Disarmed WFP kernel filters and BFE rules");
+                Ok(())
+            }
+            other => {
+                bail!(
+                    "Unknown --wfp-kernel-apply action '{}'. Expected 'engage' or 'disarm'.",
+                    other
+                );
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = action;
+        bail!("--wfp-kernel-apply is only supported on Windows platforms");
+    }
+}
+
+

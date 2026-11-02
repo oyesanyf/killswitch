@@ -977,3 +977,35 @@ async fn test_manual_trigger_attribution_webui_reconnect_and_standalone_ui() {
     assert!(!st2.isolated);
     assert_eq!(st2.trigger_cause, "None (Host Operational)");
 }
+
+#[tokio::test]
+async fn test_insufficient_privileges_server_error_and_webui_script() {
+    let err = killswitch_server::error::ServerError::Core(
+        killswitch_types::errors::KillSwitchError::InsufficientPrivileges {
+            details: "Administrative elevation required for WFP transaction".to_string(),
+            remediation: "Run terminal as Administrator and re-execute.".to_string(),
+        },
+    );
+
+    use axum::response::IntoResponse;
+    let resp = err.into_response();
+    assert_eq!(resp.status(), axum::http::StatusCode::FORBIDDEN);
+
+    let body_bytes = body_to_bytes(resp.into_body()).await;
+    let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+    assert_eq!(json["error"]["code"], "INSUFFICIENT_PRIVILEGES");
+    assert!(json["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("Administrative elevation required"));
+    assert_eq!(
+        json["message"].as_str().unwrap(),
+        json["error"]["message"].as_str().unwrap()
+    );
+
+    // Verify WEBUI_HTML contains the actionable remediation string and proper error extraction
+    assert!(killswitch_server::webui::WEBUI_HTML.contains(
+        "⚠️ Administrator privileges required to install kernel firewall filters. Please accept the UAC prompt or run KillSwitch as Administrator."
+    ));
+    assert!(killswitch_server::webui::WEBUI_HTML.contains("data.error.code === 'INSUFFICIENT_PRIVILEGES'"));
+}

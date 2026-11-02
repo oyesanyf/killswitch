@@ -1416,7 +1416,25 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       }, opts || {}));
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(data.message || data.error || ('HTTP ' + res.status));
+        let msg = '';
+        if (typeof data.message === 'string' && data.message.trim().length > 0) {
+          msg = data.message;
+        } else if (data.error && typeof data.error === 'object' && typeof data.error.message === 'string') {
+          msg = data.error.message;
+        } else if (typeof data.error === 'string' && data.error.trim().length > 0) {
+          msg = data.error;
+        } else {
+          msg = 'HTTP ' + res.status;
+        }
+        if (
+          res.status === 403 &&
+          (msg.includes('Administrative elevation required') ||
+           msg.includes('INSUFFICIENT_PRIVILEGES') ||
+           (data.error && data.error.code === 'INSUFFICIENT_PRIVILEGES'))
+        ) {
+          msg = '⚠️ Administrator privileges required to install kernel firewall filters. Please accept the UAC prompt or run KillSwitch as Administrator.';
+        }
+        throw new Error(msg);
       }
       return data;
     }
