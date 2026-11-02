@@ -8,6 +8,7 @@
 
 pub mod attack;
 pub mod bounded_agents_apc;
+pub mod cage_governance;
 pub mod canary;
 pub mod causal;
 pub mod continuous_defense;
@@ -34,6 +35,17 @@ pub use bounded_agents_apc::{
     ApcStatusSummary, ApprovalToken, AuthorizationEnvelope, BudgetState, CompositionChecker,
     DelegationBudgetSpec, EnvelopeSealedError, EvidenceRecord, EvidenceSink, ExecutedActionEvent,
     IntentEnforcementMode, IntentSpec, KTupleRestriction, KTupleStep, PairwiseRestriction,
+};
+pub use cage_governance::{
+    global_cage_kernel, AtomicFiscalBarrier, CageDecisionReceipt, CageEvidenceEntry,
+    CageEvidenceWriter, CageEvaluationRequest, CageEvaluationResponse, CageGovernanceKernel,
+    CageKernelStatusReport, CageTier, CageTraceVerifier, CageVerdict, CageWarrantToken,
+    CompiledSubstrateArtifact, FinanceBoundingBarrier, GovernanceTraceEvent,
+    GovernanceTraceEventType, HealthcareDoseBarrier, HitlConsensusApproval, SubstrateCompiler,
+    SubstrateFormat, SubstrateNorm, TraceConformanceReport, CTRL_CBF_DOSE_001, CTRL_CBF_FINANCE_001,
+    CTRL_CONF_001, CTRL_CONSENSUS_REQUIRED, CTRL_FTRA_001, CTRL_OPA_005, CTRL_STPA_UCA1,
+    CTRL_STPA_UCA2, CTRL_STPA_UCA3, CTRL_STPA_UCA4, CTRL_WARRANT_INVALID, CTRL_WARRANT_REQUIRED,
+    FISCAL_CAP_EXCEEDED,
 };
 pub use canary::{CanaryAuditReport, CanaryDecoyFile, CanaryManager};
 pub use causal::{CausalEdge, CausalEdgeKind, CausalNodeType, CausalSecurityGraph};

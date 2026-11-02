@@ -20,7 +20,7 @@ pub mod state;
 
 // Re-exports
 pub use checkpointer::DurableFileCheckpointer;
-pub use engine::{KillSwitchOrchestrator, OrchestratorConfig};
+pub use engine::{evaluate_cage_guard, KillSwitchOrchestrator, OrchestratorConfig};
 pub use graph::{CompiledStateGraph, LifecycleNode, RoutingFn, StateGraphBuilder};
 pub use lineage_trigger::LineageTriggerEvaluator;
 pub use ollama::{OllamaReasoningEngine, OllamaReasoningResult};

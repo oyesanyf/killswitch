@@ -16,6 +16,7 @@ use killswitch_types::errors::{KillSwitchError, Result};
 use killswitch_types::graph::{GraphNodeId, GraphNodeOutput, KillSwitchGraphState, OrchestratorMode, StateCheckpointer};
 use killswitch_types::status::{ContainmentLevel, HealthProbeRunner};
 
+use crate::engine::evaluate_cage_guard;
 use crate::graph::LifecycleNode;
 use crate::lineage_trigger::LineageTriggerEvaluator;
 use crate::ollama::OllamaReasoningEngine;
@@ -314,6 +315,15 @@ impl LifecycleNode for ReasonOllamaNode {
             state.active_threats.len()
         );
 
+        let receipt = evaluate_cage_guard(
+            state,
+            "query_ollama_reasoning",
+            serde_json::json!({
+                "prompt": &prompt,
+                "threat_score": state.aggregate_threat_score,
+            }),
+        )?;
+
         let reasoning = self.ollama.evaluate_forensics(&prompt).await;
 
         state
@@ -334,8 +344,11 @@ impl LifecycleNode for ReasonOllamaNode {
             containment_action_taken: None,
             fraud_proofs_emitted: vec![],
             summary: format!(
-                "Ollama reasoning complete (model: {}, fallback: {})",
-                reasoning.model_used, reasoning.is_offline_fallback
+                "Ollama reasoning complete (model: {}, fallback: {}) [CAGE: Clear, receipt={}, digest={}]",
+                reasoning.model_used,
+                reasoning.is_offline_fallback,
+                receipt.receipt_id,
+                &receipt.decision_digest[..8.min(receipt.decision_digest.len())]
             ),
         })
     }
@@ -430,6 +443,20 @@ impl LifecycleNode for ContainNode {
             || (state.mode == OrchestratorMode::Manual && state.operator_approval.is_some());
 
         if should_isolate && !state.containment_status.isolated {
+            let receipt = evaluate_cage_guard(
+                state,
+                "engage_containment",
+                serde_json::json!({
+                    "action": "engage_isolation",
+                    "threat_score": state.aggregate_threat_score,
+                    "active_threats_count": state.active_threats.len(),
+                    "mode": format!("{:?}", state.mode),
+                    "candidates": state.active_threats.iter().map(|c| &c.proc_name).collect::<Vec<_>>(),
+                    "detection_reasons": state.active_threats.iter().map(|c| &c.detection_reason).collect::<Vec<_>>(),
+                    "command_lines": state.active_threats.iter().filter_map(|c| c.command_line.as_deref()).collect::<Vec<_>>(),
+                }),
+            )?;
+
             info!("🚨 [CONTAIN-NODE] Engaging host containment via HostContainmentManager");
             let new_status = self
                 .host_manager
@@ -449,7 +476,11 @@ impl LifecycleNode for ContainNode {
                 candidate_updates: vec![],
                 containment_action_taken: Some(VoteAction::Isolate),
                 fraud_proofs_emitted: vec![],
-                summary: "Host containment engaged successfully".to_string(),
+                summary: format!(
+                    "Host containment engaged successfully [CAGE: Clear, receipt={}, digest={}]",
+                    receipt.receipt_id,
+                    &receipt.decision_digest[..8.min(receipt.decision_digest.len())]
+                ),
             })
         } else {
             Ok(GraphNodeOutput {
@@ -527,6 +558,16 @@ impl LifecycleNode for RollbackNode {
     }
 
     async fn execute(&self, state: &mut KillSwitchGraphState) -> Result<GraphNodeOutput> {
+        let receipt = evaluate_cage_guard(
+            state,
+            "disarm_and_restore",
+            serde_json::json!({
+                "action": "emergency_disarm",
+                "clean_probes": state.probe_results.len(),
+                "mode": format!("{:?}", state.mode),
+            }),
+        )?;
+
         info!("🟢 [ROLLBACK-NODE] Disarming host containment via emergency rollback");
         let restored_status = self
             .host_manager
@@ -543,7 +584,11 @@ impl LifecycleNode for RollbackNode {
             candidate_updates: vec![],
             containment_action_taken: Some(VoteAction::Monitor),
             fraud_proofs_emitted: vec![],
-            summary: "Host containment cleanly disarmed; system restored".to_string(),
+            summary: format!(
+                "Host containment cleanly disarmed; system restored [CAGE: Clear, receipt={}, digest={}]",
+                receipt.receipt_id,
+                &receipt.decision_digest[..8.min(receipt.decision_digest.len())]
+            ),
         })
     }
 }

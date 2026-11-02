@@ -8,11 +8,16 @@ use tokio::sync::RwLock;
 
 use killswitch_adjudication::ZeroFalsePositiveAdjudicator;
 use killswitch_core::killchain::HostContainmentManager;
+use killswitch_telemetry::{
+    global_cage_kernel, CageDecisionReceipt, CageEvaluationRequest, CageVerdict,
+    CageWarrantToken, HitlConsensusApproval,
+};
 use killswitch_telemetry::otel_lineage::EndpointLineageEngine;
 use killswitch_types::adjudication::ThreatCandidate;
-use killswitch_types::errors::Result;
+use killswitch_types::errors::{KillSwitchError, Result};
 use killswitch_types::graph::{
-    KillSwitchGraphState, OperatorApprovalState, OrchestratorMode, StateCheckpointer,
+    ApprovalDecision, KillSwitchGraphState, OperatorApprovalState, OrchestratorMode,
+    StateCheckpointer,
 };
 
 use crate::checkpointer::DurableFileCheckpointer;
@@ -213,5 +218,264 @@ impl KillSwitchOrchestrator {
     /// Access the underlying checkpointer.
     pub fn checkpointer(&self) -> Arc<dyn StateCheckpointer> {
         self.checkpointer.clone()
+    }
+
+    /// Evaluates the CAGE Policy Enforcement Point guard for the proposed action.
+    pub fn evaluate_cage_guard(
+        &self,
+        state: &mut KillSwitchGraphState,
+        tool_name: &str,
+        arguments: serde_json::Value,
+    ) -> std::result::Result<CageDecisionReceipt, KillSwitchError> {
+        evaluate_cage_guard(state, tool_name, arguments)
+    }
+
+    /// Evaluates the CAGE Policy Enforcement Point guard against the active orchestrator state.
+    pub async fn evaluate_active_cage_guard(
+        &self,
+        tool_name: &str,
+        arguments: serde_json::Value,
+    ) -> std::result::Result<CageDecisionReceipt, KillSwitchError> {
+        let mut state = self.active_state.write().await;
+        evaluate_cage_guard(&mut state, tool_name, arguments)
+    }
+}
+
+/// Policy Enforcement Point (PEP) evaluating CAGE 8-tier deterministic governance
+/// before tool/agent invocations and actuation transitions.
+pub fn evaluate_cage_guard(
+    state: &mut KillSwitchGraphState,
+    tool_name: &str,
+    arguments: serde_json::Value,
+) -> std::result::Result<CageDecisionReceipt, KillSwitchError> {
+    let agent_id = arguments
+        .get("agent_id")
+        .and_then(|v| v.as_str())
+        .or_else(|| state.metadata.get("cage_agent_id").map(|s| s.as_str()))
+        .or_else(|| state.metadata.get("agent_id").map(|s| s.as_str()))
+        .unwrap_or("killswitch-orchestrator")
+        .to_string();
+
+    let role = arguments
+        .get("role")
+        .and_then(|v| v.as_str())
+        .or_else(|| state.metadata.get("cage_role").map(|s| s.as_str()))
+        .or_else(|| state.metadata.get("agent_role").map(|s| s.as_str()))
+        .unwrap_or_else(|| {
+            if tool_name == "query_ollama_reasoning" {
+                "forensic_analyst"
+            } else {
+                "containment_orchestrator"
+            }
+        })
+        .to_string();
+
+    let confidence_score = arguments
+        .get("confidence_score")
+        .and_then(|v| v.as_f64())
+        .or_else(|| {
+            state
+                .metadata
+                .get("cage_confidence_score")
+                .and_then(|s| s.parse::<f64>().ok())
+        })
+        .or(if state.aggregate_threat_score > 0.0 {
+            Some(state.aggregate_threat_score as f64)
+        } else {
+            None
+        });
+
+    let amount_usd = arguments
+        .get("amount_usd")
+        .and_then(|v| v.as_f64())
+        .or_else(|| {
+            state
+                .metadata
+                .get("cage_amount_usd")
+                .and_then(|s| s.parse::<f64>().ok())
+        });
+
+    let dose_mg = arguments
+        .get("dose_mg")
+        .and_then(|v| v.as_f64())
+        .or_else(|| {
+            state
+                .metadata
+                .get("cage_dose_mg")
+                .and_then(|s| s.parse::<f64>().ok())
+        });
+
+    let warrant_token: Option<CageWarrantToken> = arguments
+        .get("warrant_token")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .or_else(|| {
+            state
+                .metadata
+                .get("cage_warrant_token")
+                .and_then(|s| serde_json::from_str(s).ok())
+        });
+
+    let human_approval: Option<HitlConsensusApproval> = arguments
+        .get("human_approval")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .or_else(|| {
+            state
+                .metadata
+                .get("cage_human_approval")
+                .and_then(|s| serde_json::from_str(s).ok())
+        })
+        .or_else(|| {
+            state.operator_approval.as_ref().map(|app| {
+                let rationale = app.comments.clone().unwrap_or_else(|| {
+                    if !app.confirmation_token.trim().is_empty() {
+                        format!("Operator confirmed via token '{}'", app.confirmation_token)
+                    } else {
+                        String::new()
+                    }
+                });
+                HitlConsensusApproval {
+                    operator_id: app.operator_id.clone(),
+                    is_approved: matches!(
+                        app.decision,
+                        ApprovalDecision::Approved | ApprovalDecision::AutoApproved
+                    ),
+                    rationale,
+                    approved_at_ms: chrono::Utc::now().timestamp_millis().max(0) as u64,
+                    signature_hex: None,
+                }
+            })
+        });
+
+    let mut effective_args = arguments.clone();
+    if let Some(confab) = state.metadata.get("cage_confabulation") {
+        if let Some(obj) = effective_args.as_object_mut() {
+            obj.insert("claim".to_string(), serde_json::Value::String(confab.clone()));
+        }
+    }
+    if let Some(override_args) = state.metadata.get("cage_arguments") {
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(override_args) {
+            if let Some(obj) = effective_args.as_object_mut() {
+                if let Some(over_obj) = val.as_object() {
+                    for (k, v) in over_obj {
+                        obj.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    let mut ctx = serde_json::json!({
+        "incident_id": state.incident_id,
+        "mode": format!("{:?}", state.mode),
+        "active_threats_count": state.active_threats.len(),
+        "isolated": state.containment_status.isolated,
+        "aggregate_threat_score": state.aggregate_threat_score,
+    });
+    if let Some(arg_ctx) = arguments.get("context").and_then(|c| c.as_object()) {
+        if let Some(obj) = ctx.as_object_mut() {
+            for (k, v) in arg_ctx {
+                obj.insert(k.clone(), v.clone());
+            }
+        }
+    }
+    if let Some(meta_ctx_str) = state.metadata.get("cage_context") {
+        if let Ok(meta_ctx) = serde_json::from_str::<serde_json::Value>(meta_ctx_str) {
+            if let Some(arg_ctx) = meta_ctx.as_object() {
+                if let Some(obj) = ctx.as_object_mut() {
+                    for (k, v) in arg_ctx {
+                        obj.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    let req = CageEvaluationRequest {
+        agent_id,
+        role,
+        tool_name: tool_name.to_string(),
+        arguments: effective_args,
+        confidence_score,
+        amount_usd,
+        dose_mg,
+        warrant_token,
+        human_approval,
+        context: Some(ctx),
+    };
+
+    let kernel = global_cage_kernel();
+    let resp = kernel.evaluate(&req);
+
+    match resp.verdict {
+        CageVerdict::Clear => {
+            state.metadata.insert(
+                "cage_receipt_digest".to_string(),
+                resp.receipt.decision_digest.clone(),
+            );
+            state.metadata.insert(
+                "cage_substrate_digest".to_string(),
+                resp.receipt.substrate_digest.clone(),
+            );
+            state.metadata.insert(
+                "cage_signature".to_string(),
+                resp.receipt.receipt_signature.clone(),
+            );
+            state.metadata.insert(
+                "cage_decision_digest".to_string(),
+                resp.receipt.decision_digest.clone(),
+            );
+            state.metadata.insert(
+                "cage_receipt_id".to_string(),
+                resp.receipt.receipt_id.clone(),
+            );
+            state.metadata.insert("cage_verdict".to_string(), "Clear".to_string());
+            state.metadata.insert("cage_last_verdict".to_string(), "Clear".to_string());
+            state.metadata.insert("cage_rule_id".to_string(), resp.rule_id.clone());
+            state.metadata.insert("cage_last_rule_id".to_string(), resp.rule_id);
+            state.metadata.insert("cage_tier".to_string(), format!("{:?}", resp.tier));
+            state.metadata.insert("cage_last_tier".to_string(), format!("{:?}", resp.tier));
+
+            Ok(resp.receipt)
+        }
+        CageVerdict::Refuse => {
+            let reason = resp.receipt.refusal_reason.clone().unwrap_or_else(|| {
+                resp.error_message
+                    .clone()
+                    .unwrap_or_else(|| "CAGE policy refusal".to_string())
+            });
+
+            state.metadata.insert("cage_refusal".to_string(), reason.clone());
+            state.metadata.insert(
+                "cage_receipt_digest".to_string(),
+                resp.receipt.decision_digest.clone(),
+            );
+            state.metadata.insert(
+                "cage_decision_digest".to_string(),
+                resp.receipt.decision_digest.clone(),
+            );
+            state.metadata.insert(
+                "cage_substrate_digest".to_string(),
+                resp.receipt.substrate_digest.clone(),
+            );
+            state.metadata.insert(
+                "cage_signature".to_string(),
+                resp.receipt.receipt_signature.clone(),
+            );
+            state.metadata.insert(
+                "cage_receipt_id".to_string(),
+                resp.receipt.receipt_id.clone(),
+            );
+            state.metadata.insert("cage_verdict".to_string(), "Refuse".to_string());
+            state.metadata.insert("cage_last_verdict".to_string(), "Refuse".to_string());
+            state.metadata.insert("cage_rule_id".to_string(), resp.rule_id.clone());
+            state.metadata.insert("cage_last_rule_id".to_string(), resp.rule_id.clone());
+            state.metadata.insert("cage_tier".to_string(), format!("{:?}", resp.tier));
+            state.metadata.insert("cage_last_tier".to_string(), format!("{:?}", resp.tier));
+
+            Err(KillSwitchError::GraphHalted(format!(
+                "CAGE PEP refused action '{}' by rule '{}' at {:?}: {}",
+                tool_name, resp.rule_id, resp.tier, reason
+            )))
+        }
     }
 }
