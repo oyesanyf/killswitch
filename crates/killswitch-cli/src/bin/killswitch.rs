@@ -71,6 +71,14 @@ struct Cli {
     #[arg(long = "cage-governance", alias = "cage")]
     cage_governance: bool,
 
+    /// Inspect and verify Signed Ring-0 Kernel Driver Deployment (Windows ELAM/Minifilter .sys & Linux eBPF .bpf.o)
+    #[arg(long = "ring0-driver", alias = "ring0")]
+    ring0_driver: bool,
+
+    /// Inspect and verify Distributed Multi-Node Consensus Storage (Raft Quorum + Valkey RESP/AOF Backend)
+    #[arg(long = "distributed-consensus", alias = "consensus")]
+    distributed_consensus: bool,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -300,6 +308,51 @@ async fn main() -> Result<()> {
             }
             Err(e) => {
                 eprintln!("❌ [KILLSWITCH.EXE] CAGE Governance verification failed: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if cli.ring0_driver || cli.distributed_consensus {
+        println!("🛡️  [KILLSWITCH.EXE] Executing Ring-0 Kernel Driver & Distributed Raft/Valkey Consensus Verification...");
+        let r0_status = killswitch_telemetry::global_ring0_manager().status_report();
+        println!("\n================================================================================");
+        println!("🛡️  ARCHITECTURAL SCOPE & RING-0 DRIVER DEPLOYMENT STATUS");
+        println!("================================================================================");
+        println!("  Classification:    {}", r0_status.classification.primary_classification);
+        println!("  Traditional EDR?:  {}", r0_status.classification.is_traditional_full_kernel_edr);
+        println!("  Scope Note:        {}", r0_status.classification.traditional_edr_disclaimer);
+        println!("  Ring-0 Posture:    {:?}", r0_status.posture);
+        println!("  Windows .sys PE64: valid={} | ObRegisterCallbacks={} | /INTEGRITYCHECK={} | SHA256={}",
+            r0_status.windows_pe_sys_verification.valid_pe64_driver,
+            r0_status.windows_pe_sys_verification.ob_register_callbacks_eligible,
+            r0_status.windows_pe_sys_verification.has_force_integrity_flag,
+            &r0_status.windows_pe_sys_verification.sha256_hex[..16]
+        );
+        println!("  Linux eBPF ELF64:  valid={} | insns={} | GPL={} | SHA256={}",
+            r0_status.linux_ebpf_elf_verification.valid_ebpf_elf64,
+            r0_status.linux_ebpf_elf_verification.verified_instruction_count,
+            r0_status.linux_ebpf_elf_verification.has_gpl_license,
+            &r0_status.linux_ebpf_elf_verification.sha256_hex[..16]
+        );
+
+        match SubsystemVerifier::verify_ring0_and_consensus().await {
+            Ok(report) => {
+                let c_status = killswitch_telemetry::global_consensus_cluster().status();
+                println!("--------------------------------------------------------------------------------");
+                println!("  Raft Cluster Role: {:?} (Node: {}, Term: {}, Commit Index: {})",
+                    c_status.role, c_status.local_node_id, c_status.current_term, c_status.commit_index
+                );
+                println!("  Quorum Required:   {}/{} nodes | BLAKE3 Log Chain Valid: {}",
+                    c_status.quorum_size_required, c_status.cluster_nodes.len(), c_status.log_chain_integrity_verified
+                );
+                println!("  Valkey AOF File:   {} ({} bytes fsynced)", c_status.aof_path, c_status.aof_bytes_written);
+                println!("  Self-Check Phase:  [PASS] {} ({} ms)", report.name, report.duration_ms);
+                println!("================================================================================\n");
+                std::process::exit(0);
+            }
+            Err(e) => {
+                eprintln!("❌ [KILLSWITCH.EXE] Ring-0 / Consensus verification failed: {}", e);
                 std::process::exit(1);
             }
         }

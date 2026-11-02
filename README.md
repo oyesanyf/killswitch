@@ -4,6 +4,12 @@
 
 It runs **100% independently** without requiring any external EDR, antivirus, or OS CLI wrapper tools (`netsh`, `iptables`, `nft`, `pfctl`, `taskkill`, or `sc.exe`). When started, it automatically launches a **plain-English WebUI Dashboard** in your default browser, explains **what caused the KillSwitch to activate** in clear everyday language, and preserves access to the local dashboard port (`-p 4040` / `3030`) even when the computer is under full internet lockdown.
 
+> [!IMPORTANT]
+> **Architectural Scope Disclosure — Not a Full EDR in the Traditional Sense**:
+> KillSwitch is an **AI Agent Runtime Containment, Doomsday Network KillSwitch & Cybernetic Governance Control Plane**, **not a full enterprise Endpoint Detection and Response (EDR) agent in the traditional kernel-vendor sense** out of the box.
+> - **In Standalone Mode**: KillSwitch combines live user-mode OS process and socket telemetry (`edr_behavioral.rs`, `rl_traffic.rs`), stateful parent-child process lineage trees, MITRE ATT&CK IoA & Welford statistical baseline anomaly detection, Google CAGE 8-tier deterministic policy enforcement (`cage_governance.rs`), Bounded Agents APC principal chains (`arXiv:2608.15888`), and kernel firewall/sandbox primitives (**Windows WFP** `FwpmFilterAdd0`, **macOS `/dev/pf`**, **Linux Netlink/Landlock**).
+> - **Full Ring-0 Kernel Tamper Immunity (`ring0_driver_loader.rs`)**: Deploying the included Windows Kernel Minifilter/ELAM driver (`drivers/windows/killswitch_minifilter.c` + `.inf`, countersigned with an EV/WHQL certificate for `PsSetCreateProcessNotifyRoutineEx` and `ObRegisterCallbacks` in Ring 0) and pinning the included Linux eBPF LSM object (`drivers/linux/killswitch_ring0.bpf.c` in `/sys/fs/bpf/killswitch/*`) bridges the remaining step for full Ring-0 rootkit tamper immunity.
+
 ---
 
 ## 🚨 Doomsday Protection & Autonomous AI Agent Breakout Defense
@@ -178,3 +184,57 @@ To prevent an attacker or rootkit with local administrator access from tampering
 - **REST API Endpoints**:
   - `GET /fprime/status` (and `/api/fprime/status`): Returns live NASA F´ topology status, rate group tick counters, component `PingReturn` health states, `Svc::TlmChan` channels, and bounded `Svc::ActiveLogger` event records.
   - `POST /fprime/dispatch` (and `/api/fprime/dispatch`): Dispatches typed opcodes (`CMD_NO_OP`, `CMD_PING_ALL_COMPONENTS`, `CMD_VERIFY_SWEBENCH_GATES`, `CMD_ENGAGE_SAFE_MODE`, `CMD_EXIT_SAFE_MODE`) through `Svc::CommandDispatcher`.
+
+
+---
+
+## 🏛️ Google CAGE (`cybernetic-agent-governance-engine`, Tallam 2026 `arXiv:2606.12320`) 8-Tier Governance Kernel
+
+`killswitch-telemetry::cage_governance` integrates Google's **Cybernetic Agent Governance Engine** (**CAGE**, Apache-2.0) across the execution boundary:
+- **Multi-Format Substrate Contract Compiler (`SubstrateCompiler`)**: Auto-detects and compiles 5 policy specification formats (**Native CAGE**, **Microsoft ACS** `behaviorDeclarations`, **Linux Foundation AAIF** `governedRunLoop`, **NIST OSCAL 1.1.x** `oscal-version`, and **Lula Validation** `kind: LulaValidation`) into deterministic `CompiledSubstrateArtifact`s with bitwise-identical SHA-256 `substrate_contract_digest`.
+- **8-Tier Deterministic LLM-Free Kernel (`CageGovernanceKernel`)**:
+  1. `FTRA` (Fault Tree Risk Analysis minimal cut sets)
+  2. `STPA` (Systems-Theoretic Process Analysis Unsafe Control Actions `UCA-1..UCA-4`)
+  3. `OPA / Substrate` (`CTRL_OPA_005` single-transfer cap, forbidden tools, role norms)
+  4. `Confidence` (`CTRL_CONF_001` unverified self-authorization & confidence claim detector)
+  5. `Warrant` (cryptographic constant-time HMAC-SHA256 `CageWarrantToken` verification when `requires_warrant: true`)
+  6. `Consensus` (human-in-the-loop escalation at or above `consensus_risk_threshold` with mandatory non-empty rationale)
+  7. `CBF` (discrete-time Control Barrier Function $h(x_{k+1}) - (1-\gamma)h(x_k) \ge 0$ with `FinanceBoundingBarrier` and `HealthcareDoseBarrier` `CTRL_CBF_DOSE_001`)
+  8. `Fiscal` (`AtomicFiscalBarrier` using lock-free `AtomicU64` compare-and-exchange refusing concurrent overspend with `FISCAL_CAP_EXCEEDED`)
+- **Tamper-Evident Receipts & Independent Trace Model Checker**: `CageDecisionReceipt`, `CageEvidenceWriter`, and `CageTraceVerifier::verify_trace_conformance`.
+
+---
+
+## 🛡️ Signed Kernel-Mode Driver Deployment (`ELAM / Minifilter / eBPF Ring-0 Loading`)
+
+While `edr_behavioral.rs` and `rl_traffic.rs` ingest live user-mode OS process and socket snapshots and model Windows ETW / kernel callback / Linux eBPF telemetry structures with high fidelity, **KillSwitch is not a full enterprise EDR in the traditional kernel-vendor sense out of the box**. Full Ring-0 tamper immunity against kernel rootkits is provided through `killswitch-telemetry::ring0_driver_loader`:
+
+1. **Windows Kernel Minifilter, ELAM & `ObRegisterCallbacks` (`drivers/windows/killswitch_minifilter.c` & `.inf`)**:
+   - Registers `FltRegisterFilter` at Altitude `385200` (`FSFilter Anti-Virus`), `PsSetCreateProcessNotifyRoutineEx` for Ring-0 process creation lineage, and `ObRegisterCallbacks` to strip `PROCESS_TERMINATE (0x0001)` and `PROCESS_VM_WRITE (0x0020)` handles targeting `killswitch.exe` and `lsass.exe`.
+   - `verify_windows_pe_sys_binary` enforces a **Fail-Closed Binary Gate** before staging: verifies PE32+ headers (`MZ`, `PE\0\0`, `IMAGE_SUBSYSTEM_NATIVE`), verifies `IMAGE_DLLCHARACTERISTICS_FORCE_INTEGRITY (0x0080 /INTEGRITYCHECK)` (required by the Windows kernel for `ObRegisterCallbacks`), validates the embedded PKCS#7 Authenticode `WIN_CERTIFICATE` table, and checks SHA-256 + BLAKE3 digests.
+2. **Linux Ring-0 eBPF Tracepoints & LSM Tamper Guard (`drivers/linux/killswitch_ring0.bpf.c`)**:
+   - Hooks `tracepoint/sched/sched_process_exec`, `lsm/task_kill` (returning `-EPERM` on unauthorized `SIGKILL`/`SIGTERM` against the protected KillSwitch daemon PID), and `kprobe/tcp_v4_connect`, pinned under `/sys/fs/bpf/killswitch/*`.
+   - `verify_linux_ebpf_elf_binary` parses 64-bit `EM_BPF (247)` ELF objects, verifies `R0..R10` register bounds, rejects unbounded backward jumps, enforces `BPF_EXIT (0x95)` termination, and requires a GPL-compatible license section.
+3. **Authenticated Ring-0 Communication Port Bridge (`Ring0KernelEventFrame`)**:
+   - Verifies constant-time HMAC-SHA256 signatures and monotonic sequence numbers on Ring-0 frames from `\KillSwitchRing0Port` / `BPF_MAP_TYPE_RINGBUF` and forwards verified events directly into `global_edr_behavioral_engine()`.
+4. **CLI & REST API**:
+   - CLI: `killswitch.exe --ring0-driver`
+   - REST: `GET /api/ring0/status` and `POST /api/ring0/verify-driver`
+
+---
+
+## 🌐 Distributed Multi-Node Consensus Storage (`Raft Quorum + Valkey RESP/AOF Backend`)
+
+To extend state checkpointing (`engine.rs`), CAGE/APC atomic fiscal spend caps, APC envelope revocations, and OpenLineage DLP taint tracking across multi-host clusters, `killswitch-telemetry::distributed_consensus` and `killswitch-orchestrator::checkpointer::DistributedConsensusCheckpointer` implement:
+
+1. **Deterministic Multi-Node Raft Consensus (`RaftClusterCoordinator`)**:
+   - Enforces Raft leader election with the Section 5.4.1 Up-to-Date Log Election Restriction, BLAKE3-chained `RaftLogEntry` replication, and $\lfloor N/2 \rfloor + 1$ HMAC-SHA256 quorum signatures before advancing `commit_index`.
+2. **Cluster-Wide Atomic Fiscal Caps & Replicated Checkpoints (`ConsensusCommand`)**:
+   - `FiscalReserveCas`: Cluster-wide atomic compare-and-add fiscal spend barrier with idempotency keys (`request_id`), preventing multi-host agent swarms from splitting spend across separate nodes to bypass `FISCAL_CAP_EXCEEDED`.
+   - `SaveGraphCheckpoint`: Replicates `KillSwitchGraphState` across the Raft cluster with BLAKE3 verification.
+   - `PropagateLineageTaint` & `RevokeApcEnvelope`: Cluster-wide DLP taint propagation and immediate APC authorization envelope revocation.
+3. **Valkey RESP Wire Protocol + `fsync` Append-Only File (`AOF`) Persistence**:
+   - Serializes every committed transition into canonical Valkey/Redis RESP frames (`*<argc>\r\n$<len>\r\n...`), optionally syncs over TCP (`KILLSWITCH_VALKEY_ADDR`, 250ms timeout), and persists to `killswitch_governance_valkey.aof` with `File::sync_all()` and deterministic startup replay (`replay_aof_from_path`).
+4. **CLI & REST API**:
+   - CLI: `killswitch.exe --distributed-consensus`
+   - REST: `GET /api/consensus/status` and `POST /api/consensus/propose`

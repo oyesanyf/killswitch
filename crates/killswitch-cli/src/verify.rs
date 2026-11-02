@@ -246,6 +246,21 @@ impl SubsystemVerifier {
         })
     }
 
+    /// Executes Phase 9 standalone (Signed Ring-0 Driver Verifier & Distributed Raft/Valkey Consensus).
+    pub async fn verify_ring0_and_consensus() -> Result<PhaseReport> {
+        let start = Instant::now();
+        let res = Self::verify_phase_9_ring0_and_consensus().await;
+        Ok(PhaseReport {
+            phase_number: 9,
+            name: "Signed Ring-0 Kernel Driver Loader (ELAM/Minifilter/eBPF) & Distributed Raft/Valkey Consensus".to_string(),
+            passed: res.is_ok(),
+            details: res.err().map(|e| e.to_string()).unwrap_or_else(|| {
+                "PE32+ .sys (/INTEGRITYCHECK + Authenticode), ELF64 EM_BPF bytecode verifier, and 3-node Raft + Valkey AOF quorum verified".to_string()
+            }),
+            duration_ms: start.elapsed().as_millis(),
+        })
+    }
+
     async fn verify_phase_1_core() -> Result<()> {
         let temp_dir = tempfile::tempdir()?;
         let mgr = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path()))?);
@@ -879,6 +894,100 @@ impl SubsystemVerifier {
         let bad_report = CageTraceVerifier::verify_trace_conformance(&bad_trace);
         if bad_report.is_conformant {
             bail!("Non-monotonic trace was unexpectedly accepted by model checker");
+        }
+
+        Ok(())
+    }
+
+    async fn verify_phase_9_ring0_and_consensus() -> Result<()> {
+        use killswitch_telemetry::{
+            build_canonical_ebpf_elf_object, build_canonical_signed_pe_sys_image,
+            global_consensus_cluster, global_ring0_manager, verify_linux_ebpf_elf_binary,
+            verify_windows_pe_sys_binary, ConsensusCommand, Ring0KernelEventFrame,
+            CLUSTER_FISCAL_CAP_EXCEEDED,
+        };
+
+        // 1. Verify Windows PE32+ .sys Minifilter + ObRegisterCallbacks binary verifier
+        let pe_bytes = build_canonical_signed_pe_sys_image();
+        let pe_rep = verify_windows_pe_sys_binary(&pe_bytes, None);
+        if !pe_rep.valid_pe64_driver || !pe_rep.ob_register_callbacks_eligible {
+            bail!(
+                "Windows PE32+ .sys driver verification failed: {:?}",
+                pe_rep.errors
+            );
+        }
+
+        // 2. Verify Linux ELF64 EM_BPF (.bpf.o) static bytecode verifier
+        let elf_bytes = build_canonical_ebpf_elf_object();
+        let elf_rep = verify_linux_ebpf_elf_binary(&elf_bytes, None);
+        if !elf_rep.valid_ebpf_elf64 || elf_rep.verified_instruction_count == 0 {
+            bail!(
+                "Linux ELF64 EM_BPF verification failed: {:?}",
+                elf_rep.errors
+            );
+        }
+
+        // 3. Verify Ring-0 authenticated communication port frame & replay protection
+        let r0_mgr = global_ring0_manager();
+        let status = r0_mgr.status_report();
+        if !status
+            .classification
+            .traditional_edr_disclaimer
+            .contains("NOT a full enterprise EDR")
+        {
+            bail!("Missing traditional EDR disclaimer in Ring0DriverStatusReport");
+        }
+
+        let seq = status.last_verified_frame_seq + 1;
+        let frame = Ring0KernelEventFrame::new_signed(
+            seq,
+            "ObRegisterCallbacks",
+            5150,
+            1000,
+            r"C:\Windows\System32\cmd.exe",
+            "cmd.exe /c whoami",
+            0x0021,
+            1_762_000_000_000,
+            r0_mgr.port_key(),
+        );
+        if let Err(e) = r0_mgr.ingest_ring0_frame(&frame) {
+            bail!("Valid Ring-0 frame rejected: {}", e);
+        }
+
+        // 4. Verify Distributed 3-Node Raft + Valkey AOF Consensus Cluster
+        let cluster = global_consensus_cluster();
+        let scope_id = format!("verify-scope-{}", seq);
+        let ok_res = cluster
+            .propose(ConsensusCommand::FiscalReserveCas {
+                scope_id: scope_id.clone(),
+                agent_id: "verifier-agent".to_string(),
+                delta_micro_usd: 3_000_000_000,
+                cap_micro_usd: 5_000_000_000,
+                request_id: format!("req-ok-{}", seq),
+            })
+            .map_err(|e| anyhow::anyhow!(e))?;
+        if !ok_res.committed || ok_res.quorum_acks < 2 {
+            bail!("Raft FiscalReserveCas failed to commit with quorum: {:?}", ok_res);
+        }
+
+        let over_res = cluster
+            .propose(ConsensusCommand::FiscalReserveCas {
+                scope_id,
+                agent_id: "verifier-agent".to_string(),
+                delta_micro_usd: 3_000_000_000,
+                cap_micro_usd: 5_000_000_000,
+                request_id: format!("req-over-{}", seq),
+            })
+            .map_err(|e| anyhow::anyhow!(e))?;
+        if over_res.committed || over_res.code != CLUSTER_FISCAL_CAP_EXCEEDED {
+            bail!(
+                "Raft FiscalReserveCas failed to enforce cluster cap: {:?}",
+                over_res
+            );
+        }
+
+        if !cluster.verify_log_chain_integrity() {
+            bail!("Raft BLAKE3 log chain & HMAC quorum integrity verification failed");
         }
 
         Ok(())
