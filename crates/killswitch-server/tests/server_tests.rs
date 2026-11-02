@@ -1008,4 +1008,63 @@ async fn test_insufficient_privileges_server_error_and_webui_script() {
         "⚠️ Administrator privileges required to install kernel firewall filters. Please accept the UAC prompt or run KillSwitch as Administrator."
     ));
     assert!(killswitch_server::webui::WEBUI_HTML.contains("data.error.code === 'INSUFFICIENT_PRIVILEGES'"));
-}
+}
+
+#[tokio::test]
+async fn test_protocol_catalog_endpoint_and_webui_matrix() {
+    let state = setup_test_server_state();
+    let app = build_router(state);
+
+    // 1. GET /api/protocol-catalog
+    let req = Request::builder()
+        .uri("/api/protocol-catalog")
+        .method("GET")
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body_bytes = body_to_bytes(resp.into_body()).await;
+    let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+    assert_eq!(json["domains_count"], 16);
+    assert_eq!(json["iana_protocols_blocked"], 256);
+    assert_eq!(json["l2_ethertypes_blocked"], 4);
+    assert!(json["total_protocols"].as_u64().unwrap() >= 200);
+    assert_eq!(json["protocols"].as_array().unwrap().len(), json["total_protocols"].as_u64().unwrap() as usize);
+
+    // 2. GET /api/protocol-catalog/domain?domain=1
+    let req = Request::builder()
+        .uri("/api/protocol-catalog/domain?domain=1")
+        .method("GET")
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body_bytes = body_to_bytes(resp.into_body()).await;
+    let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+    assert_eq!(json["domain_number"], 1);
+    assert!(json["domain_name"].as_str().unwrap().contains("Classical Network"));
+    assert!(!json["protocols"].as_array().unwrap().is_empty());
+
+    // 3. GET /ui contains the interactive 16-Domain Universal Protocol Quarantine Matrix panel
+    let req = Request::builder()
+        .uri("/ui")
+        .method("GET")
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body_bytes = body_to_bytes(resp.into_body()).await;
+    let html = String::from_utf8_lossy(&body_bytes);
+    assert!(html.contains("16-Domain Universal Protocol Quarantine Matrix"));
+    assert!(html.contains("domain-btn-pill"));
+    assert!(html.contains("protocol-search"));
+    assert!(html.contains("protocol-table-body"));
+    assert!(html.contains("/api/protocol-catalog"));
+}
+

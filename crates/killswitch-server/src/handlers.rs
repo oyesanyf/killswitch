@@ -3878,3 +3878,64 @@ pub async fn post_consensus_propose(
         Err(err) => Err(ServerError::Validation(err)),
     }
 }
+
+/// GET /api/protocol-catalog and GET /protocol-catalog
+pub async fn get_protocol_catalog(
+    State(state): State<Arc<ServerState>>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let status = state.containment_manager.get_status();
+    let domains: Vec<serde_json::Value> = killswitch_types::protocol::UniversalProtocolCatalog::all_domains()
+        .iter()
+        .map(|d| {
+            let protocols = killswitch_types::protocol::UniversalProtocolCatalog::protocols_for_domain(*d);
+            serde_json::json!({
+                "number": d.domain_number(),
+                "name": d.name(),
+                "protocol_count": protocols.len(),
+            })
+        })
+        .collect();
+
+    let protocols: Vec<&killswitch_types::protocol::ProtocolDefinition> =
+        killswitch_types::protocol::UniversalProtocolCatalog::all_protocols().iter().collect();
+
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "total_protocols": killswitch_types::protocol::UniversalProtocolCatalog::total_protocols_count(),
+        "domains_count": 16,
+        "iana_protocols_blocked": 256,
+        "l2_ethertypes_blocked": 4,
+        "loopback_preserved": true,
+        "isolated": status.isolated,
+        "quarantine_state": if status.isolated { "BLOCKED & ISOLATED (ZERO OUTSIDE EGRESS)" } else { "Disarmed (Normal)" },
+        "domains": domains,
+        "protocols": protocols,
+    })))
+}
+
+/// GET /api/protocol-catalog/domain and GET /protocol-catalog/domain?domain=1
+pub async fn get_protocol_catalog_domain(
+    State(_state): State<Arc<ServerState>>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let domain_num = params.get("domain")
+        .and_then(|v| v.parse::<u8>().ok())
+        .unwrap_or(1);
+
+    let domain = killswitch_types::protocol::UniversalProtocolCatalog::all_domains()
+        .iter()
+        .find(|d| d.domain_number() == domain_num)
+        .copied()
+        .unwrap_or(killswitch_types::protocol::ProtocolDomain::ClassicalNetworkTransportSecurity);
+
+    let protocols = killswitch_types::protocol::UniversalProtocolCatalog::protocols_for_domain(domain);
+
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "domain_number": domain.domain_number(),
+        "domain_name": domain.name(),
+        "protocols_count": protocols.len(),
+        "protocols": protocols,
+    })))
+}
+

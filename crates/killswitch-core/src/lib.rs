@@ -50,3 +50,8 @@ pub use wfp::{
     remove_all_killswitch_bfe_registry_rules, terminate_active_tcp_sockets_for_ips,
     terminate_all_non_loopback_tcp_sockets, WfpDynamicSession, WfpGuid, WindowsWfpIsolator,
 };
+
+pub use killswitch_types::protocol::{
+    OsiLayer, ProtocolDefinition, ProtocolDomain, ProtocolVectorType,
+    UniversalProtocolCatalog, ALL_DOMAINS,
+};
