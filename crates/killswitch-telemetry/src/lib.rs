@@ -4,7 +4,9 @@
 //! Causal and Attack Graphs, Canaries/Watchdog/Honeytokens, Octopus Multi-Ring
 //! Agent Containment, Oso 3-Way Intersection + AWS R1-R5 Containment KillSwitch,
 //! Bounded Agents APC (`arXiv:2608.15888`), Tamper Guard, Cognitive Red-Team HITL,
-//! and 100% OpenTelemetry & OpenLineage DLP Data Lineage Engine.
+//! Signed Ring-0 Kernel Driver Loader (`ELAM / Minifilter / eBPF`), Distributed
+//! Multi-Node Raft/Valkey Consensus Storage, and 100% OpenTelemetry & OpenLineage
+//! DLP Data Lineage Engine.
 
 pub mod attack;
 pub mod bounded_agents_apc;
@@ -13,6 +15,7 @@ pub mod canary;
 pub mod causal;
 pub mod continuous_defense;
 pub mod correlator;
+pub mod distributed_consensus;
 pub mod edr_behavioral;
 pub mod honeytokens;
 pub mod octopus;
@@ -20,6 +23,7 @@ pub mod oso_aws_containment;
 pub mod otel_lineage;
 pub mod phaselock;
 pub mod rate_limit_backoff;
+pub mod ring0_driver_loader;
 pub mod rl_traffic;
 pub mod tamper_and_process_killswitch;
 pub mod watchdog;
@@ -62,6 +66,12 @@ pub use continuous_defense::{
     CODE_REPO_PRIORITY_BOOST,
 };
 pub use correlator::{EventCorrelator, ProcessCorrelationContext};
+pub use distributed_consensus::{
+    command_to_resp_tokens, encode_resp_command, global_consensus_cluster,
+    ClusterLineageTaintRecord, ConsensusCommand, ConsensusProposalOutcome,
+    DistributedConsensusStatus, QuorumNodeVote, RaftClusterCoordinator, RaftLogEntry, RaftPeerNode,
+    RaftRole, RequestVoteRequest, RequestVoteResponse, CLUSTER_FISCAL_CAP_EXCEEDED,
+};
 pub use edr_behavioral::{
     evaluate_deterministic_mitre_ioas, global_edr_behavioral_engine, AccountRole,
     BaselineAnomalyDeviation, EdrBehavioralEngine, EdrBehavioralStatusReport, EdrContainmentAction,
@@ -92,6 +102,14 @@ pub use otel_lineage::{
 pub use phaselock::{
     compute_shannon_entropy, compute_syscall_phase_metric, PerPidPhaseLockMonitor,
     PhaseLockManager, PhaseSpaceConfig, PhaseSpaceVerdict,
+};
+pub use ring0_driver_loader::{
+    build_canonical_ebpf_elf_object, build_canonical_signed_pe_sys_image, global_ring0_manager,
+    query_live_host_ring0_inventory, verify_linux_ebpf_elf_binary, verify_windows_pe_sys_binary,
+    EbpfElfVerificationReport, EdrArchitectureClassification, HostKernelDriverInventory,
+    PeSysVerificationReport, Ring0DeploymentManager, Ring0DriverStatusReport,
+    Ring0KernelEventFrame, Ring0Posture, KILLSWITCH_BPFFS_PIN_ROOT, KILLSWITCH_MINIFILTER_ALTITUDE,
+    KILLSWITCH_MINIFILTER_PORT,
 };
 pub use rl_traffic::{
     query_live_os_process_sockets, run_empirical_rl_benchmark, ConfidenceInterval95,

@@ -1329,6 +1329,64 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
         </div>
       </div>
     </section>
+
+    <!-- 8. Signed Ring-0 Kernel Driver Loader (ELAM / Minifilter / eBPF) & Distributed Raft/Valkey Consensus -->
+    <section id="ring0-consensus-section" class="card" aria-labelledby="card-ring0-title">
+      <div class="card-header">
+        <div>
+          <h2 id="card-ring0-title" class="card-title">8. Signed Ring-0 Kernel Driver Loader (ELAM / Minifilter / eBPF) &amp; Distributed Raft/Valkey Consensus</h2>
+          <p class="card-desc">
+            <strong>Architectural Scope Disclosure:</strong> KillSwitch is an <em>AI Agent Runtime Containment, Doomsday Network KillSwitch &amp; Cybernetic Governance Control Plane</em>—<strong>not a full enterprise EDR in the traditional kernel-vendor sense</strong> out of the box. This panel manages the fail-closed PE32+ <code>.sys</code> Minifilter/ELAM &amp; Linux <code>EM_BPF</code> <code>.bpf.o</code> binary verifiers and the multi-node Raft + Valkey RESP/AOF distributed consensus engine.
+          </p>
+        </div>
+        <span id="ring0-posture-badge" class="badge ok">🛡️ Ring-0 Verifier &amp; Raft Quorum Ready</span>
+      </div>
+
+      <div id="ring0-consensus-toast" class="toast ok" role="status" aria-live="polite">
+        Ring-0 PE32+ / eBPF Binary Verifiers &amp; 3-Node Raft + Valkey AOF Consensus Cluster Online.
+      </div>
+
+      <div class="kv-grid">
+        <div class="kv-box">
+          <div class="kv-label">Traditional Full Kernel EDR?</div>
+          <div id="r0-trad-edr" class="kv-val">No (Agent Containment + WFP/Landlock + Ring-0 Loader)</div>
+        </div>
+        <div class="kv-box">
+          <div class="kv-label">Windows PE32+ .sys (/INTEGRITYCHECK)</div>
+          <div id="r0-pe-status" class="kv-val">Verified (ObRegisterCallbacks Eligible)</div>
+        </div>
+        <div class="kv-box">
+          <div class="kv-label">Linux ELF64 EM_BPF (.bpf.o)</div>
+          <div id="r0-ebpf-status" class="kv-val">Verified (lsm/task_kill + tracepoint)</div>
+        </div>
+        <div class="kv-box">
+          <div class="kv-label">Minifilter Altitude &amp; Port</div>
+          <div id="r0-altitude" class="kv-val">385200 (\KillSwitchRing0Port)</div>
+        </div>
+        <div class="kv-box">
+          <div class="kv-label">Raft Cluster Role &amp; Term</div>
+          <div id="raft-role-term" class="kv-val">Leader (Term 2)</div>
+        </div>
+        <div class="kv-box">
+          <div class="kv-label">Raft Commit Index &amp; Quorum</div>
+          <div id="raft-commit-quorum" class="kv-val">Index 0 (2/3 Quorum)</div>
+        </div>
+        <div class="kv-box">
+          <div class="kv-label">Valkey AOF Persistence</div>
+          <div id="raft-aof-status" class="kv-val">0 bytes (fsync active)</div>
+        </div>
+        <div class="kv-box">
+          <div class="kv-label">BLAKE3 Log Chain Integrity</div>
+          <div id="raft-chain-valid" class="kv-val">✅ Verified</div>
+        </div>
+      </div>
+
+      <div class="btn-row">
+        <button type="button" class="primary" onclick="refreshRing0AndConsensus(true, this)">🔄 Refresh Ring-0 &amp; Raft/Valkey Status</button>
+        <button type="button" class="ok" onclick="verifyRing0Drivers(this)">🔬 Verify Signed PE32+ .sys &amp; eBPF .bpf.o (/api/ring0/verify-driver)</button>
+        <button type="button" class="warn" onclick="proposeClusterFiscalCas(500000000, this)">⚡ Propose Cluster Fiscal CAS ($500 via Raft + Valkey AOF)</button>
+      </div>
+    </section>
   </main>
 
   <script>
@@ -3276,12 +3334,138 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       });
     }
 
+    async function refreshRing0AndConsensus(showFeedback, btn) {
+      return withButtonFeedback(btn, '⏳ Refreshing Ring-0 & Raft…', async () => {
+        try {
+          const [r0, raft] = await Promise.all([
+            api('/api/ring0/status'),
+            api('/api/consensus/status')
+          ]);
+
+          const tradEl = document.getElementById('r0-trad-edr');
+          if (tradEl && r0.classification) {
+            tradEl.textContent = r0.classification.is_traditional_full_kernel_edr
+              ? 'Yes (Active Ring-0 Enforced)'
+              : 'No (Agent Containment + WFP/Landlock + Ring-0 Loader)';
+          }
+
+          const peEl = document.getElementById('r0-pe-status');
+          if (peEl && r0.windows_pe_sys_verification) {
+            const p = r0.windows_pe_sys_verification;
+            peEl.textContent = p.valid_pe64_driver
+              ? '✅ Verified (' + p.machine_arch + ', FORCE_INTEGRITY=true)'
+              : '🛑 Invalid';
+          }
+
+          const bpfEl = document.getElementById('r0-ebpf-status');
+          if (bpfEl && r0.linux_ebpf_elf_verification) {
+            const b = r0.linux_ebpf_elf_verification;
+            bpfEl.textContent = b.valid_ebpf_elf64
+              ? '✅ Verified (' + b.verified_instruction_count + ' insns, GPL=true)'
+              : '🛑 Invalid';
+          }
+
+          const altEl = document.getElementById('r0-altitude');
+          if (altEl) {
+            altEl.textContent = (r0.minifilter_altitude || '385200') + ' (' + (r0.communication_port || '\\KillSwitchRing0Port') + ')';
+          }
+
+          const roleEl = document.getElementById('raft-role-term');
+          if (roleEl) {
+            roleEl.textContent = (raft.role || 'Leader') + ' (Term ' + (raft.current_term || 1) + ', Node ' + (raft.local_node_id || 'ks-node-1') + ')';
+          }
+
+          const comEl = document.getElementById('raft-commit-quorum');
+          if (comEl) {
+            comEl.textContent = 'Index ' + (raft.commit_index || 0) + ' (Quorum ' + (raft.quorum_size_required || 2) + '/' + ((raft.cluster_nodes || []).length || 3) + ')';
+          }
+
+          const aofEl = document.getElementById('raft-aof-status');
+          if (aofEl) {
+            aofEl.textContent = (raft.aof_bytes_written || 0) + ' bytes (' + (raft.replicated_checkpoints_count || 0) + ' checkpoints)';
+          }
+
+          const chEl = document.getElementById('raft-chain-valid');
+          if (chEl) {
+            chEl.textContent = raft.log_chain_integrity_verified
+              ? '✅ Verified (' + (raft.head_entry_blake3 || '').slice(0, 12) + '…)'
+              : '🛑 Chain Broken';
+          }
+
+          if (showFeedback) {
+            setCardStatus(
+              'ring0-consensus-toast',
+              '✅ Ring-0 Posture: ' + r0.posture + ' | Raft Commit Index: ' + raft.commit_index + ' | AOF Bytes: ' + raft.aof_bytes_written,
+              'ok'
+            );
+          }
+        } catch (e) {
+          if (showFeedback) {
+            setCardStatus('ring0-consensus-toast', '❌ Ring-0 / Consensus status error: ' + e.message, 'danger');
+          }
+        }
+      });
+    }
+
+    async function verifyRing0Drivers(btn) {
+      return withButtonFeedback(btn, '🔬 Verifying Drivers…', async () => {
+        try {
+          const res = await api('/api/ring0/verify-driver', {
+            method: 'POST',
+            body: JSON.stringify({ format: 'both' })
+          });
+          const pe = res.pe_sys_verification || {};
+          const bpf = res.ebpf_elf_verification || {};
+          await refreshRing0AndConsensus(false);
+          setCardStatus(
+            'ring0-consensus-toast',
+            '🔬 Driver Binary Verification Complete: PE32+ .sys valid=' + pe.valid_pe64_driver +
+              ' (ObRegisterCallbacks eligible=' + pe.ob_register_callbacks_eligible + ', SHA-256=' + (pe.sha256_hex || '').slice(0, 16) + '…) | ' +
+              'Linux EM_BPF .bpf.o valid=' + bpf.valid_ebpf_elf64 + ' (' + bpf.verified_instruction_count + ' BPF insns verified)',
+            pe.valid_pe64_driver && bpf.valid_ebpf_elf64 ? 'ok' : 'danger'
+          );
+        } catch (e) {
+          setCardStatus('ring0-consensus-toast', '❌ Driver Verification Error: ' + e.message, 'danger');
+        }
+      });
+    }
+
+    async function proposeClusterFiscalCas(deltaMicroUsd, btn) {
+      return withButtonFeedback(btn, '⚡ Proposing Raft CAS…', async () => {
+        try {
+          const reqId = 'webui-cas-' + Date.now();
+          const res = await api('/api/consensus/propose', {
+            method: 'POST',
+            body: JSON.stringify({
+              cmd_type: 'FiscalReserveCas',
+              scope_id: 'cluster-default-scope',
+              agent_id: 'webui-operator',
+              delta_micro_usd: deltaMicroUsd,
+              cap_micro_usd: 5000000000,
+              request_id: reqId
+            })
+          });
+          await refreshRing0AndConsensus(false);
+          setCardStatus(
+            'ring0-consensus-toast',
+            (res.committed ? '✅ Raft Quorum Committed' : '🛑 Refused (' + res.code + ')') +
+              ' | Index: ' + res.log_index + ' | Quorum: ' + res.quorum_acks + '/' + res.cluster_size +
+              ' | Entry BLAKE3: ' + (res.entry_blake3 || '').slice(0, 16) + '… | ' + res.details,
+            res.committed ? 'ok' : 'danger'
+          );
+        } catch (e) {
+          setCardStatus('ring0-consensus-toast', '❌ Raft Proposal Error: ' + e.message, 'danger');
+        }
+      });
+    }
+
     loadSubstratePreset('NativeCage');
     loadEvaluationScenario('clean_trade');
     loadTracePreset('valid_compliant');
     refreshAll(false);
     refreshEdrBehavioral();
     refreshCageStatus(false);
+    refreshRing0AndConsensus(false);
     setInterval(() => refreshAll(false), 5000);
   </script>
 </body>

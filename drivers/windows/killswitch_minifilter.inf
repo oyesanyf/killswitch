@@ -1,0 +1,61 @@
+;
+; KillSwitch Ring-0 Windows Minifilter & ELAM Setup Information (.inf)
+; SPDX-License-Identifier: Apache-2.0
+;
+
+[Version]
+Signature   = "$Windows NT$"
+Class       = "ActivityMonitor"
+ClassGuid   = {b86dff51-a31e-4bac-b3cf-e8cfe75c9fc2}
+Provider    = %ManufacturerName%
+DriverVer   = 11/02/2026,0.1.0.0
+CatalogFile = killswitch_minifilter.cat
+PnpLockdown = 1
+
+[DestinationDirs]
+DefaultDestDir          = 12
+MiniFilter.DriverFiles  = 12
+
+[DefaultInstall.NTamd64]
+OptionDesc          = %ServiceDescription%
+CopyFiles           = MiniFilter.DriverFiles
+
+[DefaultInstall.NTamd64.Services]
+AddService          = %ServiceName%,,MiniFilter.Service
+
+[DefaultUninstall.NTamd64]
+LegacyUninstall     = 1
+DelFiles            = MiniFilter.DriverFiles
+
+[DefaultUninstall.NTamd64.Services]
+DelService          = %ServiceName%,0x200
+
+[MiniFilter.Service]
+DisplayName      = %ServiceName%
+Description      = %ServiceDescription%
+ServiceBinary    = %12%\%DriverName%.sys
+Dependencies     = "FltMgr"
+ServiceType      = 2                            ; SERVICE_FILE_SYSTEM_DRIVER
+StartType        = 3                            ; SERVICE_DEMAND_START (or 0 for ELAM boot-start)
+ErrorControl     = 1                            ; SERVICE_ERROR_NORMAL
+LoadOrderGroup   = "FSFilter Anti-Virus"
+AddReg           = MiniFilter.AddRegistry
+
+[MiniFilter.AddRegistry]
+HKR,,"SupportedFeatures",0x00010001,0x3
+HKR,"Instances","DefaultInstance",0x00000000,%DefaultInstance%
+HKR,"Instances\"%Instance1.Name%,"Altitude",0x00000000,%Instance1.Altitude%
+HKR,"Instances\"%Instance1.Name%,"Flags",0x00010001,%Instance1.Flags%
+
+[MiniFilter.DriverFiles]
+%DriverName%.sys
+
+[Strings]
+ManufacturerName        = "KillSwitch Security Project"
+ServiceDescription      = "KillSwitch Ring-0 Minifilter, ObRegisterCallbacks & Process Lineage Driver"
+ServiceName             = "KillSwitchMinifilter"
+DriverName              = "killswitch_minifilter"
+DefaultInstance         = "KillSwitchMinifilter Instance"
+Instance1.Name          = "KillSwitchMinifilter Instance"
+Instance1.Altitude      = "385200"
+Instance1.Flags         = 0x0
