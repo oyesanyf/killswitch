@@ -58,6 +58,7 @@ pub struct ServerState {
     pub active_mode: Arc<RwLock<OrchestratorMode>>,
     pub last_trigger_cause: Arc<RwLock<Option<(String, String, String)>>>,
     pub peers_enabled: Arc<std::sync::atomic::AtomicBool>,
+    pub active_bound_port: Arc<std::sync::atomic::AtomicU16>,
     pub fprime_supervisor: Arc<killswitch_core::fprime::FPrimeSupervisor>,
     pub config: ServerConfig,
 }
@@ -85,6 +86,7 @@ impl ServerState {
             active_mode: Arc::new(RwLock::new(OrchestratorMode::Autonomous)),
             last_trigger_cause: Arc::new(RwLock::new(None)),
             peers_enabled: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            active_bound_port: Arc::new(std::sync::atomic::AtomicU16::new(3030)),
             fprime_supervisor: Arc::new(killswitch_core::fprime::FPrimeSupervisor::new()),
             config: ServerConfig::default(),
         }
@@ -95,7 +97,13 @@ impl ServerState {
         let lineage_engine = Arc::new(EndpointLineageEngine::new_in_memory());
         let orchestrator_bridge = Arc::new(InMemoryOrchestratorBridge::default());
         let service_manager = default_service_manager();
-        Self::new(containment_manager, adjudicator, lineage_engine, orchestrator_bridge, service_manager)
+        Self::new(
+            containment_manager,
+            adjudicator,
+            lineage_engine,
+            orchestrator_bridge,
+            service_manager,
+        )
     }
 }
 
@@ -139,9 +147,17 @@ impl KillSwitchServer {
                 .parse()
                 .map_err(|e| ServerError::Validation(format!("Invalid socket address: {}", e)))?;
 
-            // On Windows, another process bound to 0.0.0.0:<port> or [::]:<port> may still allow
-            // binding 127.0.0.1:<port> while intercepting traffic. Probe first when port != 0.
+            // Check OS kernel TCP LISTEN table + active probe so hung SO_REUSEADDR listeners
+            // (e.g., deadlocked daemons on 127.0.0.1:3030) never hijack WebUI browser connections.
             if port != 0 {
+                if killswitch_core::wfp::is_local_tcp_port_listening(port) {
+                    tracing::warn!(
+                        "⚠️ [KILLSWITCH-SERVER] Port {} already has an OS LISTEN socket in GetTcpTable; trying next port...",
+                        port
+                    );
+                    continue;
+                }
+
                 let probe_busy = tokio::time::timeout(
                     std::time::Duration::from_millis(120),
                     tokio::net::TcpStream::connect(addr),
@@ -152,7 +168,7 @@ impl KillSwitchServer {
 
                 if probe_busy {
                     tracing::warn!(
-                        "⚠️ [KILLSWITCH-SERVER] Port {} is already occupied by an active listener; trying next port...",
+                        "⚠️ [KILLSWITCH-SERVER] Port {} is already occupied by an active or hung listener; trying next port...",
                         port
                     );
                     continue;
@@ -174,7 +190,10 @@ impl KillSwitchServer {
                     continue;
                 }
                 Err(e) => {
-                    return Err(ServerError::Internal(format!("Failed to bind to {}: {}", addr, e)));
+                    return Err(ServerError::Internal(format!(
+                        "Failed to bind to {}: {}",
+                        addr, e
+                    )));
                 }
             }
         }
@@ -190,26 +209,51 @@ impl KillSwitchServer {
             );
         }
 
-        // Persist the active port so CLI subcommands (`killswitch.exe status/isolate/restore`) can auto-discover it
-        let _ = std::fs::write("active_port.txt", bound_port.to_string());
+        self.state
+            .active_bound_port
+            .store(bound_port, std::sync::atomic::Ordering::SeqCst);
+
+        // Persist the active port so CLI subcommands and elevated helpers can auto-discover it
+        let port_str = bound_port.to_string();
+        let _ = std::fs::write("active_port.txt", &port_str);
         let temp_port_file = std::env::temp_dir().join("killswitch_active_port.txt");
         if !temp_port_file.is_symlink() {
-            let _ = std::fs::write(&temp_port_file, bound_port.to_string());
+            let _ = std::fs::write(&temp_port_file, &port_str);
+        }
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                let exe_port_file = dir.join("active_port.txt");
+                if !exe_port_file.is_symlink() {
+                    let _ = std::fs::write(&exe_port_file, &port_str);
+                }
+            }
         }
 
-        println!("================================================================================");
+        println!(
+            "================================================================================"
+        );
         println!("🌐  KILLSWITCH WEBUI DASHBOARD READY: http://{}", addr);
-        println!("🛡️  REST API Control Endpoint:        http://{}/status", addr);
-        println!("================================================================================");
-        info!("🛡️ [KILLSWITCH-SERVER] Local Axum HTTP API & WebUI listening on http://{}", addr);
+        println!(
+            "🛡️  REST API Control Endpoint:        http://{}/status",
+            addr
+        );
+        println!(
+            "================================================================================"
+        );
+        info!(
+            "🛡️ [KILLSWITCH-SERVER] Local Axum HTTP API & WebUI listening on http://{}",
+            addr
+        );
 
         let web_url = format!("http://{}", addr);
         open_browser_cross_platform(&web_url);
 
-        // Spawn continuous Live OS-Query & Autonomous Agent Breakout Sentinel loop
+        // Spawn continuous Live OS-Query & Adjudicated Agent Breakout Sentinel loop
         let sentinel_state = Arc::clone(&self.state);
         let sentinel_handle = tokio::spawn(async move {
-            let coord = killswitch_telemetry::BreakoutDefenseCoordinator::new();
+            let self_pid = std::process::id();
+            let mut evaluated_signatures: std::collections::HashSet<(u32, String)> =
+                std::collections::HashSet::new();
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(3));
             loop {
                 interval.tick().await;
@@ -217,17 +261,52 @@ impl KillSwitchServer {
                     .lineage_engine
                     .rl_traffic
                     .poll_and_learn_live_os_traffic();
-                let mut seen_pids = std::collections::HashSet::new();
+                let mut active_pids = std::collections::HashSet::new();
+                for row in &rows {
+                    active_pids.insert(row.pid);
+                }
+                evaluated_signatures.retain(|(pid, _)| active_pids.contains(pid));
+
                 for row in rows {
-                    if !seen_pids.insert(row.pid) || row.command_line.trim().is_empty() {
+                    if row.pid == self_pid || row.command_line.trim().is_empty() {
                         continue;
                     }
+                    let sig = (row.pid, row.command_line.clone());
+                    if !evaluated_signatures.insert(sig) {
+                        continue;
+                    }
+
+                    // Fresh per-candidate breakout evaluation so OS process enumeration does not self-poison rate limits
+                    let coord = killswitch_telemetry::BreakoutDefenseCoordinator::new();
                     let eval = coord.evaluate_action(
                         &row.process_name,
                         &row.image_path,
                         &row.command_line,
                     );
-                    if !eval.technical.is_clean || !eval.operational.is_clean || !eval.data.is_clean {
+                    if !eval.technical.is_clean || !eval.operational.is_clean || !eval.data.is_clean
+                    {
+                        // Mandatory Decision Model & 5-Layer Zero-False-Positive Adjudication Governance
+                        let mut candidate = killswitch_types::adjudication::ThreatCandidate::new(
+                            Some(row.pid),
+                            &row.process_name,
+                            "live_os_ai_breakout_sentinel",
+                            &eval.summary,
+                            eval.breakout_risk_score as f32,
+                            killswitch_types::adjudication::EvidenceClass::Behavior,
+                        );
+                        if !row.image_path.is_empty() {
+                            candidate.binary_path = Some(row.image_path.clone());
+                        }
+                        candidate.command_line = Some(row.command_line.clone());
+
+                        let verdict = sentinel_state
+                            .adjudicator
+                            .adjudicate_threat_candidate(&candidate, None)
+                            .await;
+                        if !verdict.is_confirmed() {
+                            continue;
+                        }
+
                         let _ = sentinel_state
                             .arm_registry
                             .sever_and_regenerate_arm(2, &eval.summary)
@@ -269,6 +348,14 @@ impl KillSwitchServer {
         if !temp_port_file.is_symlink() {
             let _ = std::fs::remove_file(&temp_port_file);
         }
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                let exe_port_file = dir.join("active_port.txt");
+                if !exe_port_file.is_symlink() {
+                    let _ = std::fs::remove_file(&exe_port_file);
+                }
+            }
+        }
         info!("🛡️ [KILLSWITCH-SERVER] Server stopped cleanly.");
         Ok(())
     }
@@ -278,10 +365,12 @@ impl KillSwitchServer {
 pub async fn run_server(config: ServerConfig, mut state: ServerState) -> Result<(), ServerError> {
     state.config = config;
     let server = KillSwitchServer::new(Arc::new(state));
-    server.run_with_shutdown(async {
-        // Wait for shutdown or let caller manage
-        tokio::signal::ctrl_c().await.ok();
-    }).await
+    server
+        .run_with_shutdown(async {
+            // Wait for shutdown or let caller manage
+            tokio::signal::ctrl_c().await.ok();
+        })
+        .await
 }
 
 /// Automatically opens the WebUI Dashboard URL in the default system browser
@@ -304,9 +393,7 @@ pub fn open_browser_cross_platform(url: &str) {
 
         #[cfg(target_os = "macos")]
         {
-            let _ = std::process::Command::new("open")
-                .arg(&target_url)
-                .spawn();
+            let _ = std::process::Command::new("open").arg(&target_url).spawn();
         }
 
         #[cfg(target_os = "linux")]

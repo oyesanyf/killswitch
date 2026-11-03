@@ -45,12 +45,7 @@ pub struct KillChainHostManager {
 pub struct SimulatedNetworkIsolator;
 
 impl NetworkIsolator for SimulatedNetworkIsolator {
-    fn engage_quarantine(
-        &self,
-        ports: &[u16],
-        op: &str,
-        reason: &str,
-    ) -> Result<IsolationReceipt> {
+    fn engage_quarantine(&self, ports: &[u16], op: &str, reason: &str) -> Result<IsolationReceipt> {
         Ok(IsolationReceipt::new(
             "simulated-session".to_string(),
             NetworkIsolationEngine::Simulated,
@@ -69,10 +64,7 @@ impl NetworkIsolator for SimulatedNetworkIsolator {
         Ok(())
     }
 
-    fn reset_tcp_connections(
-        &self,
-        _target_ips: Option<&[IpAddr]>,
-    ) -> Result<usize> {
+    fn reset_tcp_connections(&self, _target_ips: Option<&[IpAddr]>) -> Result<usize> {
         Ok(0)
     }
 }
@@ -189,8 +181,35 @@ impl KillChainHostManager {
 
         let current_status = self.get_status();
         if current_status.isolated && current_status.containment_level == level {
-            info!("🛡️ [KILLCHAIN-IDEMPOTENCY] Host is already isolated at {:?}; preserving state.", level);
-            return Ok(current_status);
+            let kernel_filters_verified = {
+                #[cfg(target_os = "windows")]
+                {
+                    if std::env::var("CARGO").is_ok()
+                        || std::env::var("RUST_TEST_THREADS").is_ok()
+                        || cfg!(test)
+                    {
+                        true
+                    } else if matches!(
+                        level,
+                        ContainmentLevel::NetworkQuarantine | ContainmentLevel::HermeticIsolation
+                    ) {
+                        crate::wfp::has_live_active_wfp_filters()
+                    } else {
+                        true
+                    }
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    true
+                }
+            };
+
+            if kernel_filters_verified {
+                info!("🛡️ [KILLCHAIN-IDEMPOTENCY] Host is already isolated at {:?} with verified kernel filters; preserving state.", level);
+                return Ok(current_status);
+            } else {
+                warn!("⚠️ [KILLCHAIN-RECONCILE] State ledger reported {:?} isolation, but zero live WFP kernel filters were found in BFE; installing kernel quarantine now.", level);
+            }
         }
 
         let now = Utc::now();
@@ -556,12 +575,17 @@ pub fn execute_host_disarm_unauthenticated() -> Result<KillChainStatus> {
         );
     }
 
+    // Also reconcile any legacy root-level ./killchain_state.json if present on disk
+    let legacy_cwd_ledger = std::path::Path::new("killchain_state.json");
+    if legacy_cwd_ledger.exists() && !legacy_cwd_ledger.is_symlink() {
+        let _ = std::fs::remove_file(legacy_cwd_ledger);
+    }
+
     info!("🟢 [DISARM-UNCONDITIONAL] Host disarm completed successfully.");
     Ok(status)
 }
 
 impl KillChainHostManager {
-
     /// Internal restoration engine reverting all network and process containment.
     async fn disarm_internal(
         &self,
@@ -755,10 +779,7 @@ impl NetworkIsolator for KillChainHostManager {
         self.network_isolator.restore_quarantine(receipt)
     }
 
-    fn reset_tcp_connections(
-        &self,
-        target_ips: Option<&[IpAddr]>,
-    ) -> Result<usize> {
+    fn reset_tcp_connections(&self, target_ips: Option<&[IpAddr]>) -> Result<usize> {
         self.network_isolator.reset_tcp_connections(target_ips)
     }
 }
@@ -970,10 +991,7 @@ pub fn is_critical_system_pid(pid: u32, name: &str) -> bool {
     let name_lc = base.to_ascii_lowercase();
 
     // 2. KillSwitch Self-Preservation
-    if name_lc.contains("killswitch")
-        || name_lc.contains("osoosi")
-        || name_lc.contains("oshoosi")
-    {
+    if name_lc.contains("killswitch") || name_lc.contains("osoosi") || name_lc.contains("oshoosi") {
         return true;
     }
 

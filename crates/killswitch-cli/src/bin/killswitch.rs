@@ -6,9 +6,9 @@
 //!
 //! Also provides all operator subcommands (`status`, `isolate`, `restore`, `service`, `lineage`, `graph`, `verify`, `containment-suite`).
 
-use std::path::PathBuf;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 use tracing::info;
 
 use killswitch_cli::client::KillSwitchClient;
@@ -74,6 +74,10 @@ struct Cli {
     /// Internal elevated helper flag for Windows Filtering Platform (WFP) kernel delegation
     #[arg(long, hide = true)]
     wfp_kernel_apply: Option<String>,
+
+    /// Internal marker set after startup UAC elevation relaunch
+    #[arg(long, hide = true)]
+    elevated_relaunch: bool,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -314,7 +318,10 @@ async fn main() -> Result<()> {
                 println!("\n================================================================================");
                 println!("🛡️  CAGE GOVERNANCE SELF-DIAGNOSTIC REPORT");
                 println!("================================================================================");
-                println!("  Status:       {}", if report.passed { "PASS" } else { "FAIL" });
+                println!(
+                    "  Status:       {}",
+                    if report.passed { "PASS" } else { "FAIL" }
+                );
                 println!("  Phase:        {}", report.name);
                 println!("  Duration:     {} ms", report.duration_ms);
                 println!("  Details:      {}", report.details);
@@ -323,15 +330,25 @@ async fn main() -> Result<()> {
                 std::process::exit(0);
             }
             Err(e) => {
-                eprintln!("❌ [KILLSWITCH.EXE] CAGE Governance verification failed: {}", e);
+                eprintln!(
+                    "❌ [KILLSWITCH.EXE] CAGE Governance verification failed: {}",
+                    e
+                );
                 std::process::exit(1);
             }
         }
     }
 
     if cli.verify {
-        let count = if cli.cage_governance { "8-Phase" } else { "7-Phase" };
-        println!("🛡️  [KILLSWITCH.EXE] Executing {} Subsystem Self-Diagnostics...", count);
+        let count = if cli.cage_governance {
+            "8-Phase"
+        } else {
+            "7-Phase"
+        };
+        println!(
+            "🛡️  [KILLSWITCH.EXE] Executing {} Subsystem Self-Diagnostics...",
+            count
+        );
         match SubsystemVerifier::run_with_governance(cli.cage_governance).await {
             Ok(report) => {
                 report.print_summary();
@@ -395,6 +412,14 @@ async fn main() -> Result<()> {
 
     match cli.command {
         None | Some(Commands::Run) => {
+            if !cli.daemon {
+                if let Ok(true) =
+                    killswitch_core::wfp::relaunch_self_elevated_for_webui(cli.elevated_relaunch)
+                {
+                    println!("🔐 [KILLSWITCH.EXE] Launched elevated Administrator WebUI host via Windows UAC.");
+                    std::process::exit(0);
+                }
+            }
             boot_unified_webui_runtime(cli.host, cli.port, cli.mode, cli.db_dir).await?;
         }
         Some(Commands::Status) => handle_status(&client).await?,
@@ -418,15 +443,13 @@ async fn main() -> Result<()> {
             reason,
             token,
         }) => handle_restore(&client, &operator, &reason, token.as_deref()).await?,
-        Some(Commands::WfpKernelApply { action }) => {
-            match handle_wfp_kernel_apply(&action) {
-                Ok(()) => std::process::exit(0),
-                Err(e) => {
-                    eprintln!("❌ [KILLSWITCH.EXE] WFP kernel delegation failed: {}", e);
-                    std::process::exit(1);
-                }
+        Some(Commands::WfpKernelApply { action }) => match handle_wfp_kernel_apply(&action) {
+            Ok(()) => std::process::exit(0),
+            Err(e) => {
+                eprintln!("❌ [KILLSWITCH.EXE] WFP kernel delegation failed: {}", e);
+                std::process::exit(1);
             }
-        }
+        },
         Some(Commands::Service { action }) => handle_service(&client, Some(&action)).await?,
         Some(Commands::Lineage {
             action,

@@ -11,20 +11,19 @@
 
 use killswitch_core::{
     wfp::{
-        WfpGuid,
-        FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_CONNECT_V6,
+        WfpGuid, FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_CONNECT_V6,
         FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6,
-        FWPM_LAYER_DATAGRAM_DATA_V4, FWPM_LAYER_DATAGRAM_DATA_V6,
-        FWPM_LAYER_INBOUND_ICMP_ERROR_V4, FWPM_LAYER_INBOUND_ICMP_ERROR_V6,
-        FWPM_LAYER_INBOUND_MAC_FRAME_ETHERNET, FWPM_LAYER_INBOUND_MAC_FRAME_NATIVE,
-        FWPM_LAYER_INBOUND_TRANSPORT_V4, FWPM_LAYER_INBOUND_TRANSPORT_V6,
-        FWPM_LAYER_OUTBOUND_ICMP_ERROR_V4, FWPM_LAYER_OUTBOUND_ICMP_ERROR_V6,
-        FWPM_LAYER_OUTBOUND_MAC_FRAME_ETHERNET, FWPM_LAYER_OUTBOUND_MAC_FRAME_NATIVE,
-        FWPM_LAYER_OUTBOUND_TRANSPORT_V4, FWPM_LAYER_OUTBOUND_TRANSPORT_V6,
+        FWPM_LAYER_DATAGRAM_DATA_V4, FWPM_LAYER_DATAGRAM_DATA_V6, FWPM_LAYER_INBOUND_ICMP_ERROR_V4,
+        FWPM_LAYER_INBOUND_ICMP_ERROR_V6, FWPM_LAYER_INBOUND_MAC_FRAME_ETHERNET,
+        FWPM_LAYER_INBOUND_MAC_FRAME_NATIVE, FWPM_LAYER_INBOUND_TRANSPORT_V4,
+        FWPM_LAYER_INBOUND_TRANSPORT_V6, FWPM_LAYER_OUTBOUND_ICMP_ERROR_V4,
+        FWPM_LAYER_OUTBOUND_ICMP_ERROR_V6, FWPM_LAYER_OUTBOUND_MAC_FRAME_ETHERNET,
+        FWPM_LAYER_OUTBOUND_MAC_FRAME_NATIVE, FWPM_LAYER_OUTBOUND_TRANSPORT_V4,
+        FWPM_LAYER_OUTBOUND_TRANSPORT_V6,
     },
     UniversalProtocolCatalog,
 };
-use killswitch_types::protocol::{ALL_DOMAINS};
+use killswitch_types::protocol::ALL_DOMAINS;
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
@@ -125,7 +124,10 @@ fn test_all_256_iana_ip_protocols_isolated_externally() {
     }
 
     assert_eq!(blocked_count, total_checks);
-    assert!(total_checks > 10_000, "Should have executed exhaustive multi-trial checks");
+    assert!(
+        total_checks > 10_000,
+        "Should have executed exhaustive multi-trial checks"
+    );
 }
 
 // =============================================================================
@@ -274,7 +276,6 @@ fn test_quantum_and_hardware_protocols_registered() {
     }
 }
 
-
 // =============================================================================
 // Test 6: WFP Kernel Layer GUIDs Integrity (All 22 Layers)
 // =============================================================================
@@ -319,5 +320,34 @@ fn test_wfp_22_layers_guid_uniqueness() {
                 "Layer GUID at {i} and {j} must be unique"
             );
         }
+    }
+}
+
+// =============================================================================
+// Test 7: Fallback GUI Control Port Discovery & Unified Ledger Path Invariants
+// =============================================================================
+
+#[test]
+fn test_discover_active_control_ports_covers_fallback_gui_ports() {
+    let ports = killswitch_core::wfp::discover_active_control_ports();
+    for expected in [3030u16, 3031, 3032, 3033, 3045, 4040] {
+        assert!(
+            ports.contains(&expected),
+            "discover_active_control_ports() must preserve fallback WebUI port {expected}"
+        );
+    }
+}
+
+#[test]
+fn test_unified_state_ledger_default_storage_path_prevents_split_brain() {
+    if std::env::var("KILLSWITCH_DATABASE_DIR").is_err()
+        && std::env::var("OSOOSI_DATABASE_DIR").is_err()
+    {
+        let resolved = killswitch_core::state_ledger::StateLedger::resolve_storage_path(None);
+        assert_eq!(
+            resolved,
+            std::path::PathBuf::from("database").join("killchain_state.json"),
+            "Default StateLedger path must resolve to database/killchain_state.json so start.exe and killswitch.exe share a single ledger"
+        );
     }
 }

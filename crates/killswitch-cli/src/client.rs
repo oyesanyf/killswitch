@@ -5,10 +5,10 @@
 //! Features automatic in-process fallback across all operations when the HTTP daemon is not
 //! running or when port 3030 is occupied by another service (such as `OshoosiClaw`).
 
-use std::sync::Arc;
-use std::time::Duration;
 use anyhow::{Context, Result};
 use chrono::Utc;
+use std::sync::Arc;
+use std::time::Duration;
 use tracing::{info, warn};
 
 use killswitch_adjudication::ZeroFalsePositiveAdjudicator;
@@ -48,12 +48,19 @@ impl KillSwitchClient {
     }
 
     fn discover_active_port() -> Option<u16> {
-        let candidates = [
+        let mut candidates = vec![
             std::path::PathBuf::from("active_port.txt"),
             std::path::PathBuf::from("..").join("active_port.txt"),
-            std::path::PathBuf::from("..").join("..").join("active_port.txt"),
+            std::path::PathBuf::from("..")
+                .join("..")
+                .join("active_port.txt"),
             std::env::temp_dir().join("killswitch_active_port.txt"),
         ];
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                candidates.insert(0, dir.join("active_port.txt"));
+            }
+        }
         for path in candidates {
             if path.is_symlink() {
                 continue;
@@ -107,7 +114,8 @@ impl KillSwitchClient {
         } else {
             "No active KillSwitch trigger.".to_string()
         };
-        let (connected_peers_count, connected_peer_endpoints) = killswitch_core::wfp::count_active_non_loopback_tcp_peers();
+        let (connected_peers_count, connected_peer_endpoints) =
+            killswitch_core::wfp::count_active_non_loopback_tcp_peers();
         let tpm = mgr.tpm_status_report();
         Ok(StatusResponse {
             tpm_present: tpm.tpm_present,
@@ -151,7 +159,11 @@ impl KillSwitchClient {
         })
     }
 
-    pub async fn get_history(&self, limit: Option<usize>, offset: Option<usize>) -> Result<HistoryResponse> {
+    pub async fn get_history(
+        &self,
+        limit: Option<usize>,
+        offset: Option<usize>,
+    ) -> Result<HistoryResponse> {
         let mut url = format!("{}/history", self.base_url);
         let mut query = Vec::new();
         if let Some(l) = limit {
@@ -191,7 +203,8 @@ impl KillSwitchClient {
                 reason: e.reason,
                 prev_hash: e.prev_event_hash,
                 entry_hash: e.event_hash,
-                containment_level: format!("{:?}", mgr.get_status().containment_level).to_lowercase(),
+                containment_level: format!("{:?}", mgr.get_status().containment_level)
+                    .to_lowercase(),
             })
             .collect();
 
@@ -251,7 +264,9 @@ impl KillSwitchClient {
 
         Ok(EngageResponse {
             success: true,
-            message: "Direct native host containment engaged in-process (WFP + BFE + TCP Reset active)".to_string(),
+            message:
+                "Direct native host containment engaged in-process (WFP + BFE + TCP Reset active)"
+                    .to_string(),
             status,
             blind_killswitch_prevented: false,
             swe_bench_report: None,
@@ -282,16 +297,16 @@ impl KillSwitchClient {
             }
         }
 
-        warn!(
-            "🛡️ Executing direct in-process native host disarm & network restoration..."
-        );
+        warn!("🛡️ Executing direct in-process native host disarm & network restoration...");
         let fallback_status = execute_host_disarm_unauthenticated()
             .context("Emergency direct in-process disarm failed")?;
 
         info!("✅ Emergency host disarm executed successfully in process.");
         Ok(DisarmResponse {
             success: true,
-            message: "Direct in-process emergency restore & native host network restoration executed".to_string(),
+            message:
+                "Direct in-process emergency restore & native host network restoration executed"
+                    .to_string(),
             status: fallback_status,
         })
     }
@@ -363,7 +378,10 @@ impl KillSwitchClient {
             threat_score: g.aggregate_threat_score,
             is_isolated: g.containment_status.isolated,
             is_paused: g.mode == OrchestratorMode::Manual,
-            summary: format!("Transitioned {:?} -> {:?}", transition.from_stage, transition.to_stage),
+            summary: format!(
+                "Transitioned {:?} -> {:?}",
+                transition.from_stage, transition.to_stage
+            ),
         })
     }
 
@@ -482,7 +500,13 @@ impl KillSwitchClient {
         })
     }
 
-    pub async fn seed_lineage(&self, path: &str, sha256: &str, class: &str, policy: &str) -> Result<LineageSeedResponse> {
+    pub async fn seed_lineage(
+        &self,
+        path: &str,
+        sha256: &str,
+        class: &str,
+        policy: &str,
+    ) -> Result<LineageSeedResponse> {
         let url = format!("{}/lineage/seed", self.base_url);
         let req = LineageSeedRequest {
             path: path.to_string(),
@@ -525,7 +549,11 @@ impl KillSwitchClient {
         })
     }
 
-    pub async fn evaluate_lineage(&self, pid: u32, destination_url: &str) -> Result<LineageEvaluateResponse> {
+    pub async fn evaluate_lineage(
+        &self,
+        pid: u32,
+        destination_url: &str,
+    ) -> Result<LineageEvaluateResponse> {
         let url = format!("{}/lineage/evaluate", self.base_url);
         let req = LineageEvaluateRequest {
             pid,
@@ -736,12 +764,11 @@ impl KillSwitchClient {
             .attack_vector
             .clone()
             .unwrap_or_else(|| "Autonomous sandbox escape".to_string());
-        let (has_code_repo, repo_url) =
-            killswitch_telemetry::detect_verified_code_repo_from_texts(
-                &arxiv_id,
-                req.code_repo_url.as_deref(),
-                &[&quote, &title],
-            );
+        let (has_code_repo, repo_url) = killswitch_telemetry::detect_verified_code_repo_from_texts(
+            &arxiv_id,
+            req.code_repo_url.as_deref(),
+            &[&quote, &title],
+        );
         let indicator_pattern = req
             .indicator_pattern
             .clone()
@@ -834,12 +861,11 @@ impl KillSwitchClient {
             .source_quote
             .clone()
             .unwrap_or_else(|| "zombie agent cross-session memory persistence payload".to_string());
-        let (has_code_repo, repo_url) =
-            killswitch_telemetry::detect_verified_code_repo_from_texts(
-                &arxiv_id,
-                req.code_repo_url.as_deref(),
-                &[&source_quote, &title],
-            );
+        let (has_code_repo, repo_url) = killswitch_telemetry::detect_verified_code_repo_from_texts(
+            &arxiv_id,
+            req.code_repo_url.as_deref(),
+            &[&source_quote, &title],
+        );
         let indicator_pattern = req
             .indicator_pattern
             .clone()
@@ -946,7 +972,10 @@ impl KillSwitchClient {
         let url = format!("{}/api/cage/status", self.base_url);
         if let Ok(resp) = self.client.get(&url).send().await {
             if resp.status().is_success() {
-                if let Ok(body) = resp.json::<killswitch_telemetry::CageKernelStatusReport>().await {
+                if let Ok(body) = resp
+                    .json::<killswitch_telemetry::CageKernelStatusReport>()
+                    .await
+                {
                     return Ok(body);
                 }
             }
@@ -962,7 +991,10 @@ impl KillSwitchClient {
         let url = format!("{}/api/cage/evaluate", self.base_url);
         if let Ok(resp) = self.client.post(&url).json(req).send().await {
             if resp.status().is_success() {
-                if let Ok(body) = resp.json::<killswitch_telemetry::CageEvaluationResponse>().await {
+                if let Ok(body) = resp
+                    .json::<killswitch_telemetry::CageEvaluationResponse>()
+                    .await
+                {
                     return Ok(body);
                 }
             }
@@ -978,7 +1010,10 @@ impl KillSwitchClient {
         let url = format!("{}/api/cage/compile-substrate", self.base_url);
         if let Ok(resp) = self.client.post(&url).json(payload).send().await {
             if resp.status().is_success() {
-                if let Ok(body) = resp.json::<killswitch_telemetry::CompiledSubstrateArtifact>().await {
+                if let Ok(body) = resp
+                    .json::<killswitch_telemetry::CompiledSubstrateArtifact>()
+                    .await
+                {
                     return Ok(body);
                 }
             }
@@ -995,7 +1030,10 @@ impl KillSwitchClient {
         let url = format!("{}/api/cage/verify-trace", self.base_url);
         if let Ok(resp) = self.client.post(&url).json(trace).send().await {
             if resp.status().is_success() {
-                if let Ok(body) = resp.json::<killswitch_telemetry::TraceConformanceReport>().await {
+                if let Ok(body) = resp
+                    .json::<killswitch_telemetry::TraceConformanceReport>()
+                    .await
+                {
                     return Ok(body);
                 }
             }
@@ -1004,4 +1042,3 @@ impl KillSwitchClient {
         Ok(killswitch_telemetry::CageTraceVerifier::verify_trace_conformance(trace))
     }
 }
-

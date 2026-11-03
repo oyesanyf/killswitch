@@ -2,9 +2,9 @@
 //!
 //! Exposes all dedicated endpoints with layered security middleware.
 
-use std::sync::Arc;
 use axum::routing::{get, post};
 use axum::Router;
+use std::sync::Arc;
 
 use crate::handlers;
 use crate::middleware;
@@ -38,10 +38,22 @@ pub fn build_router(state: Arc<ServerState>) -> Router {
         // 6. SWE-Bench Two-Gate (`FAIL_TO_PASS` + `PASS_TO_PASS`) Anti-Blind-KillSwitch Harness
         .route("/api/edr-bench/tasks", get(handlers::get_edr_bench_tasks))
         .route("/edr-bench/tasks", get(handlers::get_edr_bench_tasks))
-        .route("/api/killswitch-bench/tasks", get(handlers::get_edr_bench_tasks))
-        .route("/api/edr-bench/evaluate", post(handlers::post_edr_bench_evaluate))
-        .route("/edr-bench/evaluate", post(handlers::post_edr_bench_evaluate))
-        .route("/api/killswitch-bench/evaluate", post(handlers::post_edr_bench_evaluate))
+        .route(
+            "/api/killswitch-bench/tasks",
+            get(handlers::get_edr_bench_tasks),
+        )
+        .route(
+            "/api/edr-bench/evaluate",
+            post(handlers::post_edr_bench_evaluate),
+        )
+        .route(
+            "/edr-bench/evaluate",
+            post(handlers::post_edr_bench_evaluate),
+        )
+        .route(
+            "/api/killswitch-bench/evaluate",
+            post(handlers::post_edr_bench_evaluate),
+        )
         // 7. Connected Peers Inspection & 1-Click Disable/Enable Control
         .route("/peers/status", get(handlers::get_peers_status))
         .route("/api/peers/status", get(handlers::get_peers_status))
@@ -65,68 +77,185 @@ pub fn build_router(state: Arc<ServerState>) -> Router {
         .route("/rl/benchmark", get(handlers::get_rl_benchmark))
         .route("/api/rl/benchmark", get(handlers::get_rl_benchmark))
         .route("/octopus/breakout", post(handlers::post_octopus_breakout))
-        .route("/api/octopus/breakout", post(handlers::post_octopus_breakout))
+        .route(
+            "/api/octopus/breakout",
+            post(handlers::post_octopus_breakout),
+        )
         // 11. Adapted EDR Multi-Protocol Rate-Limit Backoff, RETE 3-Voter Ensemble & Agent Velocity Gate
         .route("/rate-limit/status", get(handlers::get_rate_limit_status))
-        .route("/api/rate-limit/status", get(handlers::get_rate_limit_status))
-        .route("/rate-limit/evaluate", post(handlers::post_rate_limit_evaluate))
-        .route("/api/rate-limit/evaluate", post(handlers::post_rate_limit_evaluate))
-        .route("/rate-limit/allowlist", post(handlers::post_rate_limit_allowlist))
-        .route("/api/rate-limit/allowlist", post(handlers::post_rate_limit_allowlist))
+        .route(
+            "/api/rate-limit/status",
+            get(handlers::get_rate_limit_status),
+        )
+        .route(
+            "/rate-limit/evaluate",
+            post(handlers::post_rate_limit_evaluate),
+        )
+        .route(
+            "/api/rate-limit/evaluate",
+            post(handlers::post_rate_limit_evaluate),
+        )
+        .route(
+            "/rate-limit/allowlist",
+            post(handlers::post_rate_limit_allowlist),
+        )
+        .route(
+            "/api/rate-limit/allowlist",
+            post(handlers::post_rate_limit_allowlist),
+        )
         // 12. Continuous Security Architecture (Oyesanya 2026 Taxonomy, Vassilev Sisyphean Bound & MTTD/MTTR)
         .route("/resilience/status", get(handlers::get_resilience_status))
-        .route("/api/resilience/status", get(handlers::get_resilience_status))
-        .route("/octopus/inspect-boundary", post(handlers::post_inspect_boundary))
-        .route("/api/octopus/inspect-boundary", post(handlers::post_inspect_boundary))
+        .route(
+            "/api/resilience/status",
+            get(handlers::get_resilience_status),
+        )
+        .route(
+            "/octopus/inspect-boundary",
+            post(handlers::post_inspect_boundary),
+        )
+        .route(
+            "/api/octopus/inspect-boundary",
+            post(handlers::post_inspect_boundary),
+        )
         // 13. Conformal Sequential Jailbreak Detection (Persist-L, SR-DKW, LayeredGuardrail)
         .route("/conformal/status", get(handlers::get_conformal_status))
         .route("/api/conformal/status", get(handlers::get_conformal_status))
-        .route("/conformal/evaluate", post(handlers::post_conformal_evaluate))
-        .route("/api/conformal/evaluate", post(handlers::post_conformal_evaluate))
+        .route(
+            "/conformal/evaluate",
+            post(handlers::post_conformal_evaluate),
+        )
+        .route(
+            "/api/conformal/evaluate",
+            post(handlers::post_conformal_evaluate),
+        )
         // 14. Research Breakout Ingestion, Verification, 4-Arm LangGraph Swarm & User Approval Menu
         .route("/research/status", get(handlers::get_research_status))
         .route("/api/research/status", get(handlers::get_research_status))
-        .route("/research/active-rules", get(handlers::get_research_active_rules))
-        .route("/api/research/active-rules", get(handlers::get_research_active_rules))
-        .route("/research/verify-accuracy", post(handlers::post_research_verify_accuracy))
-        .route("/api/research/verify-accuracy", post(handlers::post_research_verify_accuracy))
-        .route("/api/v1/research/verify-accuracy", post(handlers::post_research_verify_accuracy))
+        .route(
+            "/research/active-rules",
+            get(handlers::get_research_active_rules),
+        )
+        .route(
+            "/api/research/active-rules",
+            get(handlers::get_research_active_rules),
+        )
+        .route(
+            "/research/verify-accuracy",
+            post(handlers::post_research_verify_accuracy),
+        )
+        .route(
+            "/api/research/verify-accuracy",
+            post(handlers::post_research_verify_accuracy),
+        )
+        .route(
+            "/api/v1/research/verify-accuracy",
+            post(handlers::post_research_verify_accuracy),
+        )
         .route("/research/validate", post(handlers::post_research_validate))
-        .route("/api/research/validate", post(handlers::post_research_validate))
-        .route("/research/novelty-check", post(handlers::post_research_novelty_check))
-        .route("/api/research/novelty-check", post(handlers::post_research_novelty_check))
+        .route(
+            "/api/research/validate",
+            post(handlers::post_research_validate),
+        )
+        .route(
+            "/research/novelty-check",
+            post(handlers::post_research_novelty_check),
+        )
+        .route(
+            "/api/research/novelty-check",
+            post(handlers::post_research_novelty_check),
+        )
         .route("/research/clear", post(handlers::post_research_clear))
         .route("/api/research/clear", post(handlers::post_research_clear))
         .route("/research/ingest", post(handlers::post_research_ingest))
         .route("/api/research/ingest", post(handlers::post_research_ingest))
-        .route("/research/langgraph-swarm", post(handlers::post_research_langgraph_swarm))
-        .route("/api/research/langgraph-swarm", post(handlers::post_research_langgraph_swarm))
-        .route("/research/candidates", get(handlers::get_research_candidates))
-        .route("/api/research/candidates", get(handlers::get_research_candidates))
+        .route(
+            "/research/langgraph-swarm",
+            post(handlers::post_research_langgraph_swarm),
+        )
+        .route(
+            "/api/research/langgraph-swarm",
+            post(handlers::post_research_langgraph_swarm),
+        )
+        .route(
+            "/research/candidates",
+            get(handlers::get_research_candidates),
+        )
+        .route(
+            "/api/research/candidates",
+            get(handlers::get_research_candidates),
+        )
         .route("/research/discover", post(handlers::post_research_discover))
-        .route("/api/research/discover", post(handlers::post_research_discover))
+        .route(
+            "/api/research/discover",
+            post(handlers::post_research_discover),
+        )
         .route("/research/approve", post(handlers::post_research_approve))
-        .route("/api/research/approve", post(handlers::post_research_approve))
+        .route(
+            "/api/research/approve",
+            post(handlers::post_research_approve),
+        )
         // 15. Continuous EDR Behavioral Anomaly, Stateful Process Lineage Tree & Statistical Baseline
-        .route("/edr/behavioral/status", get(handlers::get_edr_behavioral_status))
-        .route("/api/edr/behavioral/status", get(handlers::get_edr_behavioral_status))
-        .route("/edr/behavioral/ingest", post(handlers::post_edr_behavioral_ingest))
-        .route("/api/edr/behavioral/ingest", post(handlers::post_edr_behavioral_ingest))
-        .route("/edr/behavioral/scan-host", post(handlers::post_edr_behavioral_scan_host))
-        .route("/api/edr/behavioral/scan-host", post(handlers::post_edr_behavioral_scan_host))
+        .route(
+            "/edr/behavioral/status",
+            get(handlers::get_edr_behavioral_status),
+        )
+        .route(
+            "/api/edr/behavioral/status",
+            get(handlers::get_edr_behavioral_status),
+        )
+        .route(
+            "/edr/behavioral/ingest",
+            post(handlers::post_edr_behavioral_ingest),
+        )
+        .route(
+            "/api/edr/behavioral/ingest",
+            post(handlers::post_edr_behavioral_ingest),
+        )
+        .route(
+            "/edr/behavioral/scan-host",
+            post(handlers::post_edr_behavioral_scan_host),
+        )
+        .route(
+            "/api/edr/behavioral/scan-host",
+            post(handlers::post_edr_behavioral_scan_host),
+        )
         // 16. OshoosiClaw Migrated Modules: Oso/AWS R1-R5, APC, Tamper Guard & Cognitive Red-Team HITL
-        .route("/oso-aws-containment/status", get(handlers::get_oso_aws_containment_status))
-        .route("/api/oso-aws-containment/status", get(handlers::get_oso_aws_containment_status))
-        .route("/oso-aws-containment/watchdog-verify", post(handlers::post_oso_aws_watchdog_verify))
-        .route("/api/oso-aws-containment/watchdog-verify", post(handlers::post_oso_aws_watchdog_verify))
-        .route("/oso-aws-containment/evaluate-intersection", post(handlers::post_oso_aws_evaluate_intersection))
-        .route("/api/oso-aws-containment/evaluate-intersection", post(handlers::post_oso_aws_evaluate_intersection))
+        .route(
+            "/oso-aws-containment/status",
+            get(handlers::get_oso_aws_containment_status),
+        )
+        .route(
+            "/api/oso-aws-containment/status",
+            get(handlers::get_oso_aws_containment_status),
+        )
+        .route(
+            "/oso-aws-containment/watchdog-verify",
+            post(handlers::post_oso_aws_watchdog_verify),
+        )
+        .route(
+            "/api/oso-aws-containment/watchdog-verify",
+            post(handlers::post_oso_aws_watchdog_verify),
+        )
+        .route(
+            "/oso-aws-containment/evaluate-intersection",
+            post(handlers::post_oso_aws_evaluate_intersection),
+        )
+        .route(
+            "/api/oso-aws-containment/evaluate-intersection",
+            post(handlers::post_oso_aws_evaluate_intersection),
+        )
         .route("/apc/status", get(handlers::get_apc_status))
         .route("/api/apc/status", get(handlers::get_apc_status))
         .route("/apc/evaluate", post(handlers::post_apc_evaluate))
         .route("/api/apc/evaluate", post(handlers::post_apc_evaluate))
-        .route("/tamper-guard/status", get(handlers::get_tamper_guard_status_handler))
-        .route("/api/tamper-guard/status", get(handlers::get_tamper_guard_status_handler))
+        .route(
+            "/tamper-guard/status",
+            get(handlers::get_tamper_guard_status_handler),
+        )
+        .route(
+            "/api/tamper-guard/status",
+            get(handlers::get_tamper_guard_status_handler),
+        )
         .route("/hitl/status", get(handlers::get_hitl_status))
         .route("/api/hitl/status", get(handlers::get_hitl_status))
         .route("/hitl/pending", get(handlers::get_hitl_pending))
@@ -142,24 +271,52 @@ pub fn build_router(state: Arc<ServerState>) -> Router {
         .route("/api/cage/status", get(handlers::get_cage_status))
         .route("/cage/evaluate", post(handlers::post_cage_evaluate))
         .route("/api/cage/evaluate", post(handlers::post_cage_evaluate))
-        .route("/cage/compile-substrate", post(handlers::post_cage_compile_substrate))
-        .route("/api/cage/compile-substrate", post(handlers::post_cage_compile_substrate))
+        .route(
+            "/cage/compile-substrate",
+            post(handlers::post_cage_compile_substrate),
+        )
+        .route(
+            "/api/cage/compile-substrate",
+            post(handlers::post_cage_compile_substrate),
+        )
         .route("/cage/verify-trace", post(handlers::post_cage_verify_trace))
-        .route("/api/cage/verify-trace", post(handlers::post_cage_verify_trace))
+        .route(
+            "/api/cage/verify-trace",
+            post(handlers::post_cage_verify_trace),
+        )
         // 18. Signed Ring-0 Kernel Driver Loader (ELAM / Minifilter / eBPF) & Distributed Raft/Valkey Consensus
         .route("/ring0/status", get(handlers::get_ring0_status))
         .route("/api/ring0/status", get(handlers::get_ring0_status))
-        .route("/ring0/verify-driver", post(handlers::post_ring0_verify_driver))
-        .route("/api/ring0/verify-driver", post(handlers::post_ring0_verify_driver))
+        .route(
+            "/ring0/verify-driver",
+            post(handlers::post_ring0_verify_driver),
+        )
+        .route(
+            "/api/ring0/verify-driver",
+            post(handlers::post_ring0_verify_driver),
+        )
         .route("/consensus/status", get(handlers::get_consensus_status))
         .route("/api/consensus/status", get(handlers::get_consensus_status))
         .route("/consensus/propose", post(handlers::post_consensus_propose))
-        .route("/api/consensus/propose", post(handlers::post_consensus_propose))
+        .route(
+            "/api/consensus/propose",
+            post(handlers::post_consensus_propose),
+        )
         // 19. Universal Protocol Isolation Catalog & 16-Domain Quarantine Matrix
         .route("/protocol-catalog", get(handlers::get_protocol_catalog))
         .route("/api/protocol-catalog", get(handlers::get_protocol_catalog))
-        .route("/protocol-catalog/domain", get(handlers::get_protocol_catalog_domain))
-        .route("/api/protocol-catalog/domain", get(handlers::get_protocol_catalog_domain))
+        .route(
+            "/api/protocols/catalog",
+            get(handlers::get_protocol_catalog),
+        )
+        .route(
+            "/protocol-catalog/domain",
+            get(handlers::get_protocol_catalog_domain),
+        )
+        .route(
+            "/api/protocol-catalog/domain",
+            get(handlers::get_protocol_catalog_domain),
+        )
         // Middleware Layers (applied bottom-up)
         .layer(axum::middleware::from_fn(middleware::rate_limit_middleware))
         .layer(middleware::cors_layer())
