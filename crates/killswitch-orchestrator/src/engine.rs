@@ -407,7 +407,7 @@ pub fn evaluate_cage_guard(
     let resp = kernel.evaluate(&req);
 
     match resp.verdict {
-        CageVerdict::Clear => {
+        CageVerdict::Clear | CageVerdict::Allow => {
             state.metadata.insert(
                 "cage_receipt_digest".to_string(),
                 resp.receipt.decision_digest.clone(),
@@ -437,11 +437,15 @@ pub fn evaluate_cage_guard(
 
             Ok(resp.receipt)
         }
-        CageVerdict::Refuse => {
+        CageVerdict::Refuse
+        | CageVerdict::Deny
+        | CageVerdict::Narrow
+        | CageVerdict::RequireApproval
+        | CageVerdict::Defer => {
             let reason = resp.receipt.refusal_reason.clone().unwrap_or_else(|| {
                 resp.error_message
                     .clone()
-                    .unwrap_or_else(|| "CAGE policy refusal".to_string())
+                    .unwrap_or_else(|| format!("CAGE policy verdict: {:?}", resp.verdict))
             });
 
             state.metadata.insert("cage_refusal".to_string(), reason.clone());
@@ -465,8 +469,8 @@ pub fn evaluate_cage_guard(
                 "cage_receipt_id".to_string(),
                 resp.receipt.receipt_id.clone(),
             );
-            state.metadata.insert("cage_verdict".to_string(), "Refuse".to_string());
-            state.metadata.insert("cage_last_verdict".to_string(), "Refuse".to_string());
+            state.metadata.insert("cage_verdict".to_string(), format!("{:?}", resp.verdict));
+            state.metadata.insert("cage_last_verdict".to_string(), format!("{:?}", resp.verdict));
             state.metadata.insert("cage_rule_id".to_string(), resp.rule_id.clone());
             state.metadata.insert("cage_last_rule_id".to_string(), resp.rule_id.clone());
             state.metadata.insert("cage_tier".to_string(), format!("{:?}", resp.tier));

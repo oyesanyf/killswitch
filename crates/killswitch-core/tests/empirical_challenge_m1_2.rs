@@ -100,7 +100,7 @@ async fn test_challenge_task1_dns_and_dhcp_strictly_excluded_from_killchain_isol
     ));
 
     let mut auth_manager = OperatorAuthManager::new(None, Some(temp_dir.path().to_path_buf()));
-    auth_manager.set_custom_master_token("MasterSecretKey123".to_string());
+    auth_manager.set_custom_master_token("MasterSecretKey123_32_chars_long".to_string());
     let auth = Arc::new(auth_manager);
     let freezer = Arc::new(NativeProcessFreezer::new());
 

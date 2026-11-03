@@ -12,8 +12,13 @@ pub const DEFAULT_INTERMEDIATE_HEALTH_PROBE_INTERVAL_SECS: u64 = 60; // 60s prob
 pub const DEFAULT_REQUIRED_CONSECUTIVE_HEALTHY_PROBES: u32 = 3; // 3 clean probes -> early rollback
 pub const DEFAULT_CONTROL_PORT: u16 = 3030; // Local HTTP API & WebUI control port
 
-pub const KILLCHAIN_ISOLATE_TOKEN: &str = "CONFIRM ISOLATE";
-pub const KILLCHAIN_RESTORE_TOKEN: &str = "CONFIRM RESTORE";
+pub const KILLCHAIN_ISOLATE_CONFIRMATION_PHRASE: &str = "CONFIRM ISOLATE";
+pub const KILLCHAIN_RESTORE_CONFIRMATION_PHRASE: &str = "CONFIRM RESTORE";
+
+#[deprecated(note = "Deprecated as auth credentials; use high-entropy CSPRNG master tokens >=32 chars. Retained for UI confirmation phrases.")]
+pub const KILLCHAIN_ISOLATE_TOKEN: &str = KILLCHAIN_ISOLATE_CONFIRMATION_PHRASE;
+#[deprecated(note = "Deprecated as auth credentials; use high-entropy CSPRNG master tokens >=32 chars. Retained for UI confirmation phrases.")]
+pub const KILLCHAIN_RESTORE_TOKEN: &str = KILLCHAIN_RESTORE_CONFIRMATION_PHRASE;
 pub const MAX_FAILED_ATTEMPTS: u32 = 3;
 pub const LOCKOUT_DURATION_SECS: u64 = 300; // 5 minutes
 

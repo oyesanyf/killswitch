@@ -357,6 +357,8 @@ async fn test_c3_boundary_evaluations_amounts_and_dose() {
     assert_eq!(resp_dose_consensus.tier, CageTier::Tier6Consensus);
 
     // 6c. Dose 100.0 mg with valid human consensus approval -> Clears
+    kernel.dose_tracker.reset();
+    kernel.keyed_dose_tracker.reset();
     let med_hitl = HitlConsensusApproval {
         operator_id: "chief_medical_officer".to_string(),
         is_approved: true,

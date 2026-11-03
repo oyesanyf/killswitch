@@ -50,17 +50,18 @@ impl KillSwitchClient {
     fn discover_active_port() -> Option<u16> {
         let mut candidates = vec![
             std::path::PathBuf::from("active_port.txt"),
-            std::path::PathBuf::from("..").join("active_port.txt"),
-            std::path::PathBuf::from("..")
-                .join("..")
-                .join("active_port.txt"),
-            std::env::temp_dir().join("killswitch_active_port.txt"),
         ];
         if let Ok(exe) = std::env::current_exe() {
             if let Some(dir) = exe.parent() {
                 candidates.insert(0, dir.join("active_port.txt"));
             }
         }
+        #[cfg(windows)]
+        if let Ok(program_data) = std::env::var("ProgramData") {
+            candidates.push(std::path::PathBuf::from(program_data).join("KillSwitch").join("active_port.txt"));
+        }
+        #[cfg(target_os = "linux")]
+        candidates.push(std::path::PathBuf::from("/var/run/killswitch/active_port.txt"));
         for path in candidates {
             if path.is_symlink() {
                 continue;
@@ -614,7 +615,13 @@ impl KillSwitchClient {
             }
         }
 
-        let reg = ArmRingRegistry::new(b"killswitch_master_octopus_seed_00");
+        let octopus_seed = {
+            let mut s = [0u8; 32];
+            use rand::RngCore;
+            rand::rngs::OsRng.fill_bytes(&mut s);
+            s
+        };
+        let reg = ArmRingRegistry::new(&octopus_seed);
         let mut arms_json = Vec::new();
         for id in 0..18 {
             if let Some(arm) = reg.get_ring(id).await {
@@ -639,6 +646,7 @@ impl KillSwitchClient {
         let req = HealthProbeRequest {
             operator: Some("operator".to_string()),
             force_rollback: Some(force_rollback),
+            token: None,
         };
 
         if let Ok(resp) = self.client.post(&url).json(&req).send().await {

@@ -178,7 +178,13 @@ impl UnifiedRuntime {
 
         info!("🛡️ [LOADER] Booting Phase 3: Telemetry, DLP Lineage Engine & Standalone Breakout Defense");
         let lineage_engine = Arc::new(EndpointLineageEngine::new_in_memory());
-        let arm_registry = Arc::new(ArmRingRegistry::new(b"killswitch_master_octopus_seed_00"));
+        let octopus_seed = {
+            let mut s = [0u8; 32];
+            use rand::RngCore;
+            rand::rngs::OsRng.fill_bytes(&mut s);
+            s
+        };
+        let arm_registry = Arc::new(ArmRingRegistry::new(&octopus_seed));
         let event_correlator = Arc::new(EventCorrelator::default());
         let phaselock_manager = Arc::new(PhaseLockManager::default());
 

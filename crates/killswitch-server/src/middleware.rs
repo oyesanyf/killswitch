@@ -19,7 +19,7 @@ use serde_json::json;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::LazyLock;
 use std::time::Instant;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -158,6 +158,7 @@ pub static GLOBAL_HTTP_RATE_LIMITER: LazyLock<Port3030RateLimiter> =
     LazyLock::new(Port3030RateLimiter::new);
 
 pub fn extract_client_key(req: &Request<Body>) -> String {
+    #[cfg(test)]
     if let Some(test_ip) = req
         .headers()
         .get("x-test-client-ip")
@@ -168,18 +169,11 @@ pub fn extract_client_key(req: &Request<Body>) -> String {
             return trimmed.to_string();
         }
     }
-    if let Some(forwarded) = req
-        .headers()
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-    {
-        if let Some(first_ip) = forwarded.split(',').next() {
-            let trimmed = first_ip.trim();
-            if !trimmed.is_empty() {
-                return trimmed.to_string();
-            }
-        }
+
+    if let Some(connect_info) = req.extensions().get::<axum::extract::ConnectInfo<std::net::SocketAddr>>() {
+        return connect_info.0.ip().to_string();
     }
+
     "127.0.0.1".to_string()
 }
 
@@ -197,6 +191,7 @@ pub async fn rate_limit_middleware(
         || path == "/status"
         || path == "/"
         || path == "/ui"
+        || path == "/.well-known/jwks.json"
     {
         return Ok(next.run(req).await);
     }
@@ -220,10 +215,47 @@ pub async fn rate_limit_middleware(
 }
 
 pub fn cors_layer() -> CorsLayer {
+    use axum::http::{header, HeaderName, HeaderValue, Method};
+    use tower_http::cors::AllowOrigin;
+
+    let mut origins = Vec::new();
+    for scheme in &["http", "https"] {
+        for host in &["127.0.0.1", "localhost", "[::1]"] {
+            for port in 3030..=3045 {
+                if let Ok(val) = format!("{}://{}:{}", scheme, host, port).parse::<HeaderValue>() {
+                    origins.push(val);
+                }
+            }
+            for port in [4040, 5000, 8000, 8080] {
+                if let Ok(val) = format!("{}://{}:{}", scheme, host, port).parse::<HeaderValue>() {
+                    origins.push(val);
+                }
+            }
+            if let Ok(val) = format!("{}://{}", scheme, host).parse::<HeaderValue>() {
+                origins.push(val);
+            }
+        }
+    }
+
     CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any)
+        .allow_origin(AllowOrigin::list(origins))
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::OPTIONS,
+            Method::PUT,
+            Method::DELETE,
+        ])
+        .allow_headers([
+            header::CONTENT_TYPE,
+            header::AUTHORIZATION,
+            header::ACCEPT,
+            HeaderName::from_static("x-killswitch-csrf"),
+            HeaderName::from_static("x-killswitch-auth"),
+            HeaderName::from_static("x-cage-quarantine-assertion"),
+            HeaderName::from_static("x-cage-quarantine-release"),
+            HeaderName::from_static("x-cage-signer-kid"),
+        ])
 }
 
 pub fn body_limit_layer(max_body_bytes: usize) -> DefaultBodyLimit {

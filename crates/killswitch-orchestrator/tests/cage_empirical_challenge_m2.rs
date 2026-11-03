@@ -353,7 +353,11 @@ async fn test_challenge_concurrent_orchestrator_fiscal_cap_stress() {
             match res {
                 Ok(_) => Ok(task_id),
                 Err(KillSwitchError::GraphHalted(msg)) => {
-                    assert!(msg.contains(FISCAL_CAP_EXCEEDED), "Refusal must be fiscal cap exceeded: {}", msg);
+                    assert!(
+                        msg.contains(FISCAL_CAP_EXCEEDED) || msg.contains("CTRL_CBF_FINANCE_001"),
+                        "Refusal must be fiscal cap or CBF limit exceeded: {}",
+                        msg
+                    );
                     Err(task_id)
                 }
                 Err(other) => panic!("Unexpected error: {:?}", other),

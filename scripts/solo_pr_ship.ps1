@@ -146,7 +146,7 @@ try:
                 print('WAITING')
 except Exception as e:
     sys.stderr.write('Review check error: ' + str(e) + '\n')
-    print('APPROVED')
+    print('WAITING')
 " "$prNumber" "$repoSlug"
 
     $trimmed = if ($reviewState) { $reviewState.ToString().Trim() } else { "" }

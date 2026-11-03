@@ -39,6 +39,15 @@ pub enum ServerError {
     #[error("Port {0} already in use")]
     PortInUse(u16),
 
+    #[error("Signature verification failed: {0}")]
+    SignatureInvalid(String),
+
+    #[error("Unknown signer kid: {0}")]
+    UnknownSignerKid(String),
+
+    #[error("Nonce replay detected: {0}")]
+    ReplayDetected(String),
+
     #[error("KillSwitch core error: {0}")]
     Core(#[from] killswitch_types::errors::KillSwitchError),
 }
@@ -56,6 +65,9 @@ impl IntoResponse for ServerError {
             Self::ServiceError(_) => (StatusCode::INTERNAL_SERVER_ERROR, "SERVICE_ERROR"),
             Self::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR"),
             Self::PortInUse(_) => (StatusCode::SERVICE_UNAVAILABLE, "PORT_IN_USE"),
+            Self::SignatureInvalid(_) => (StatusCode::UNAUTHORIZED, "SIGNATURE_INVALID"),
+            Self::UnknownSignerKid(_) => (StatusCode::FORBIDDEN, "UNKNOWN_SIGNER_KID"),
+            Self::ReplayDetected(_) => (StatusCode::CONFLICT, "REPLAY_DETECTED"),
             Self::Core(err) => match err {
                 killswitch_types::errors::KillSwitchError::AuthenticationFailed(_) => {
                     (StatusCode::UNAUTHORIZED, "AUTHENTICATION_FAILED")

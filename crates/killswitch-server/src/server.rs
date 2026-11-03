@@ -5,7 +5,11 @@
 use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+use base64::Engine;
+use dashmap::DashMap;
+use ed25519_dalek::{SigningKey, VerifyingKey};
+use sha2::Digest;
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 use tracing::info;
@@ -20,8 +24,103 @@ use killswitch_telemetry::phaselock::PhaseLockManager;
 use killswitch_types::graph::OrchestratorMode;
 
 use crate::error::ServerError;
+use crate::journal::QuarantineJournal;
 use crate::orchestrator_bridge::{InMemoryOrchestratorBridge, OrchestratorBridge};
 use crate::routes::build_router;
+
+/// Thread-safe TTL-bounded anti-replay cache for single-use CAGE directive nonces.
+#[derive(Clone)]
+pub struct NonceReplayCache {
+    entries: Arc<DashMap<String, Instant>>,
+    ttl: Duration,
+}
+
+impl NonceReplayCache {
+    pub fn new(ttl: Duration) -> Self {
+        Self {
+            entries: Arc::new(DashMap::new()),
+            ttl,
+        }
+    }
+
+    pub fn check_and_record(&self, nonce: &str) -> Result<(), String> {
+        let now = Instant::now();
+        if self.entries.len() > 2000 {
+            self.purge_expired();
+        }
+
+        if let Some(entry) = self.entries.get(nonce) {
+            if now.duration_since(*entry) < self.ttl {
+                return Err(format!("Nonce '{}' was already consumed within TTL", nonce));
+            }
+        }
+
+        self.entries.insert(nonce.to_string(), now);
+        Ok(())
+    }
+
+    pub fn purge_expired(&self) {
+        let now = Instant::now();
+        self.entries.retain(|_, &mut inserted_at| now.duration_since(inserted_at) < self.ttl);
+    }
+}
+
+/// Out-of-band CAGE verification key manifest resolver.
+#[derive(Clone)]
+pub struct CageKeyManifestResolver {
+    keys: Arc<DashMap<String, VerifyingKey>>,
+}
+
+impl CageKeyManifestResolver {
+    pub fn new() -> Self {
+        Self {
+            keys: Arc::new(DashMap::new()),
+        }
+    }
+
+    pub fn register_key(&self, kid: &str, key: VerifyingKey) {
+        self.keys.insert(kid.to_string(), key);
+    }
+
+    pub fn resolve_key(&self, kid: &str) -> Option<VerifyingKey> {
+        self.keys.get(kid).map(|k| *k)
+    }
+
+    pub fn load_jwks_json(&self, json_str: &str) -> Result<usize, String> {
+        let val: serde_json::Value = serde_json::from_str(json_str)
+            .map_err(|e| format!("Invalid JWKS JSON: {}", e))?;
+        let keys_arr = val
+            .get("keys")
+            .and_then(|k| k.as_array())
+            .ok_or_else(|| "Missing 'keys' array in JWKS".to_string())?;
+
+        let mut count = 0;
+        for key_obj in keys_arr {
+            let kty = key_obj.get("kty").and_then(|v| v.as_str());
+            let crv = key_obj.get("crv").and_then(|v| v.as_str());
+            let kid = key_obj.get("kid").and_then(|v| v.as_str());
+            let x = key_obj.get("x").and_then(|v| v.as_str());
+
+            if kty == Some("OKP") && crv == Some("Ed25519") {
+                if let (Some(kid_str), Some(x_str)) = (kid, x) {
+                    if let Ok(raw_bytes) =
+                        base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(x_str)
+                    {
+                        if raw_bytes.len() == 32 {
+                            let mut arr = [0u8; 32];
+                            arr.copy_from_slice(&raw_bytes);
+                            if let Ok(vk) = VerifyingKey::from_bytes(&arr) {
+                                self.register_key(kid_str, vk);
+                                count += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(count)
+    }
+}
 
 /// Configuration for local Axum HTTP control server.
 #[derive(Debug, Clone)]
@@ -61,6 +160,14 @@ pub struct ServerState {
     pub active_bound_port: Arc<std::sync::atomic::AtomicU16>,
     pub fprime_supervisor: Arc<killswitch_core::fprime::FPrimeSupervisor>,
     pub config: ServerConfig,
+
+    // --- CAGE Substrate Integration State ---
+    pub signing_key: Arc<SigningKey>,
+    pub ed25519_kid: String,
+    pub jwks_cache: Arc<serde_json::Value>,
+    pub cage_key_manifest: Arc<CageKeyManifestResolver>,
+    pub replay_cache: Arc<NonceReplayCache>,
+    pub journal: Arc<QuarantineJournal>,
 }
 
 pub type AppState = ServerState;
@@ -73,11 +180,66 @@ impl ServerState {
         orchestrator_bridge: Arc<dyn OrchestratorBridge>,
         service_manager: Arc<dyn NativeServiceManager>,
     ) -> Self {
+        // 1. CSPRNG 32-byte seed for ArmRingRegistry
+        let octopus_master_seed = {
+            let mut s = [0u8; 32];
+            use rand::RngCore;
+            rand::rngs::OsRng.fill_bytes(&mut s);
+            s
+        };
+
+        // 2. Generate asymmetric Ed25519 keypair
+        let signing_key = Arc::new(SigningKey::generate(&mut rand::rngs::OsRng));
+        let verifying_key = signing_key.verifying_key();
+        let pub_bytes = verifying_key.to_bytes();
+
+        // 3. Derive 64-hex SHA-256 kid
+        let ed25519_kid = hex::encode(sha2::Sha256::digest(pub_bytes));
+
+        // 4. Encode x base64url unpadded
+        let x_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(pub_bytes);
+
+        // 5. Pre-render RFC 8037 JWKS
+        let jwks_cache = Arc::new(serde_json::json!({
+            "keys": [
+                {
+                    "kty": "OKP",
+                    "crv": "Ed25519",
+                    "kid": ed25519_kid,
+                    "x": x_b64,
+                    "use": "sig",
+                    "alg": "EdDSA"
+                }
+            ]
+        }));
+
+        // 6. Initialize manifest & replay cache (TTL 300s)
+        let cage_key_manifest = Arc::new(CageKeyManifestResolver::new());
+        if let Ok(manifest_path) = std::env::var("CAGE_TRUSTED_JWKS_PATH") {
+            if let Ok(content) = std::fs::read_to_string(&manifest_path) {
+                let _ = cage_key_manifest.load_jwks_json(&content);
+            }
+        }
+        if let Ok(manifest_json) = std::env::var("CAGE_TRUSTED_JWKS_JSON") {
+            let _ = cage_key_manifest.load_jwks_json(&manifest_json);
+        }
+        let replay_cache = Arc::new(NonceReplayCache::new(Duration::from_secs(300)));
+
+        // 7. Initialize QuarantineJournal
+        let state_dir = std::env::var("KILLSWITCH_STATE_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::env::temp_dir().join("killswitch_state"));
+        let journal = Arc::new(QuarantineJournal::new(
+            state_dir,
+            Arc::clone(&signing_key),
+            ed25519_kid.clone(),
+        ));
+
         Self {
             containment_manager,
             adjudicator,
             lineage_engine,
-            arm_registry: Arc::new(ArmRingRegistry::new(b"killswitch_master_octopus_seed_00")),
+            arm_registry: Arc::new(ArmRingRegistry::new(&octopus_master_seed)),
             event_correlator: Arc::new(EventCorrelator::default()),
             phaselock_manager: Arc::new(PhaseLockManager::default()),
             service_manager,
@@ -89,6 +251,13 @@ impl ServerState {
             active_bound_port: Arc::new(std::sync::atomic::AtomicU16::new(3030)),
             fprime_supervisor: Arc::new(killswitch_core::fprime::FPrimeSupervisor::new()),
             config: ServerConfig::default(),
+
+            signing_key,
+            ed25519_kid,
+            jwks_cache,
+            cage_key_manifest,
+            replay_cache,
+            journal,
         }
     }
 
@@ -216,10 +385,6 @@ impl KillSwitchServer {
         // Persist the active port so CLI subcommands and elevated helpers can auto-discover it
         let port_str = bound_port.to_string();
         let _ = std::fs::write("active_port.txt", &port_str);
-        let temp_port_file = std::env::temp_dir().join("killswitch_active_port.txt");
-        if !temp_port_file.is_symlink() {
-            let _ = std::fs::write(&temp_port_file, &port_str);
-        }
         if let Ok(exe) = std::env::current_exe() {
             if let Some(dir) = exe.parent() {
                 let exe_port_file = dir.join("active_port.txt");
@@ -334,20 +499,26 @@ impl KillSwitchServer {
             }
         });
 
+        // Re-enforce unexpired leases from journal fail-closed on startup
+        let _ = self
+            .state
+            .journal
+            .recover_and_re_enforce(&self.state.containment_manager)
+            .await;
+
         let app = build_router(Arc::clone(&self.state));
 
-        axum::serve(listener, app)
-            .with_graceful_shutdown(shutdown_signal)
-            .await
-            .map_err(|e| ServerError::Internal(format!("Server error: {}", e)))?;
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .with_graceful_shutdown(shutdown_signal)
+        .await
+        .map_err(|e| ServerError::Internal(format!("Server error: {}", e)))?;
 
         sentinel_handle.abort();
 
         let _ = std::fs::remove_file("active_port.txt");
-        let temp_port_file = std::env::temp_dir().join("killswitch_active_port.txt");
-        if !temp_port_file.is_symlink() {
-            let _ = std::fs::remove_file(&temp_port_file);
-        }
         if let Ok(exe) = std::env::current_exe() {
             if let Some(dir) = exe.parent() {
                 let exe_port_file = dir.join("active_port.txt");

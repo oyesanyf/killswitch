@@ -368,7 +368,7 @@ fn test_operator_auth_tier3_stored_blake3_hash() {
 #[test]
 fn test_operator_auth_3_strike_lockout_and_master_bypass() {
     let temp = tempdir().expect("tempdir");
-    let master_token = "MasterBypassSecret999";
+    let master_token = "MasterBypassSecret999_32_chars_long";
     let mut auth = OperatorAuthManager::new(None, Some(temp.path().to_path_buf()));
     auth.set_custom_master_token(master_token.to_string());
 
@@ -573,7 +573,7 @@ async fn test_killchain_host_manager_lifecycle_and_probes() {
     let isolator = Arc::new(SimulatedNetworkIsolator);
     let freezer = Arc::new(NativeProcessFreezer::new());
     let mut auth_manager = OperatorAuthManager::new(None, Some(temp.path().to_path_buf()));
-    auth_manager.set_custom_master_token("MasterSecretKey123".to_string());
+    auth_manager.set_custom_master_token("MasterSecretKey123_32_chars_long".to_string());
     let auth = Arc::new(auth_manager);
     let ledger = Arc::new(RwLock::new(
         StateLedger::open_or_init(Some(temp.path())).expect("Init ledger"),
@@ -643,7 +643,7 @@ async fn test_killchain_host_manager_lifecycle_and_probes() {
     // 5. Disarm Quarantine with Valid Credentials
     let creds = OperatorCredentials {
         operator_id: "test_operator".to_string(),
-        auth_token: Some("MasterSecretKey123".to_string()),
+        auth_token: Some("MasterSecretKey123_32_chars_long".to_string()),
         password: None,
         caller_pid: Some(std::process::id()),
         confirmation_phrase: None,

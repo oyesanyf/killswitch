@@ -2,11 +2,12 @@
 //!
 //! Pure Rust asynchronous handlers communicating directly with KillSwitch core subsystems.
 
-use axum::extract::{Query, State};
+use axum::extract::{ConnectInfo, Query, State};
 use axum::Json;
 use chrono::Utc;
+use std::net::SocketAddr;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, warn};
 
 use killswitch_adjudication::{load_all_bench_tasks, EdrBenchHarness};
 use killswitch_core::killchain::execute_host_disarm_unauthenticated;
@@ -341,8 +342,10 @@ fn cause_details_short(operator: &str, reason: &str) -> String {
 }
 
 /// POST /disarm
+/// POST /disarm
 pub async fn post_disarm(
     State(state): State<Arc<ServerState>>,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
     Json(req): Json<DisarmRequest>,
 ) -> Result<Json<DisarmResponse>, ServerError> {
     let operator = req.operator.as_deref().unwrap_or("secops_operator");
@@ -352,44 +355,77 @@ pub async fn post_disarm(
         .unwrap_or("Operator authorized disarm");
 
     info!(
-        "ðŸ›¡ï¸ [SERVER] Received containment disarm request by '{}'",
+        "🛡️ [SERVER] Received containment disarm request by '{}'",
         operator
     );
 
-    let creds = req.token.as_ref().map(|t| OperatorCredentials {
+    // Resolve peer PID from OS kernel TCP socket table if available
+    let effective_pid = if let Some(ConnectInfo(addr)) = connect_info {
+        let bound_port = state
+            .active_bound_port
+            .load(std::sync::atomic::Ordering::SeqCst);
+        match killswitch_core::peer_pid::resolve_loopback_peer_pid(addr, bound_port) {
+            Ok(pid) => {
+                if let Some(claimed) = req.caller_pid {
+                    if claimed != pid {
+                        warn!(
+                            "🚨 [SERVER] Caller PID mismatch: claimed={}, actual_peer_pid={}",
+                            claimed, pid
+                        );
+                        return Err(ServerError::Core(
+                            killswitch_types::errors::KillSwitchError::AuthenticationFailed(format!(
+                                "Caller PID spoofing detected: claimed PID {} does not match authenticated peer PID {}",
+                                claimed, pid
+                            )),
+                        ));
+                    }
+                }
+                Some(pid)
+            }
+            Err(e) => {
+                warn!(
+                    "🚨 [SERVER] Loopback peer PID resolution failed for {}: {}",
+                    addr, e
+                );
+                return Err(ServerError::Core(
+                    killswitch_types::errors::KillSwitchError::AuthenticationFailed(format!(
+                        "Loopback peer PID verification failed on connected socket: {}",
+                        e
+                    )),
+                ));
+            }
+        }
+    } else {
+        req.caller_pid
+    };
+
+    let token = match req.token.as_deref() {
+        Some(t) if !t.trim().is_empty() => t.trim(),
+        _ => {
+            return Err(ServerError::Core(
+                killswitch_types::errors::KillSwitchError::AuthenticationFailed(
+                    "Missing required authentication token for containment disarm".to_string(),
+                ),
+            ));
+        }
+    };
+
+    let creds = OperatorCredentials {
         operator_id: operator.to_string(),
-        auth_token: Some(t.clone()),
+        auth_token: Some(token.to_string()),
         password: None,
-        caller_pid: req.caller_pid,
-        confirmation_phrase: Some(t.clone()),
-    });
+        caller_pid: effective_pid,
+        confirmation_phrase: Some(token.to_string()),
+    };
 
     let mut new_status = match state
         .containment_manager
-        .disarm_isolation(operator, reason, creds.as_ref())
+        .disarm_isolation(operator, reason, Some(&creds))
         .await
     {
         Ok(s) => {
             let _ = execute_host_disarm_unauthenticated();
             s
-        }
-        Err(killswitch_types::errors::KillSwitchError::AuthenticationFailed(msg)) => {
-            let tok = req.token.as_deref().unwrap_or("");
-            if tok.eq_ignore_ascii_case("CONFIRM RESTORE")
-                || tok.eq_ignore_ascii_case("CONFIRM ISOLATE")
-                || operator == "user_console"
-                || operator == "secops_admin"
-            {
-                let _ = state
-                    .containment_manager
-                    .execute_unauthenticated_emergency_disarm(reason)
-                    .await;
-                execute_host_disarm_unauthenticated()?
-            } else {
-                return Err(ServerError::Core(
-                    killswitch_types::errors::KillSwitchError::AuthenticationFailed(msg),
-                ));
-            }
         }
         Err(killswitch_types::errors::KillSwitchError::CallerQuarantined { pid }) => {
             return Err(ServerError::CallerQuarantined(pid));
@@ -397,12 +433,11 @@ pub async fn post_disarm(
         Err(e @ killswitch_types::errors::KillSwitchError::InsufficientPrivileges { .. }) => {
             return Err(ServerError::Core(e));
         }
-        Err(_) => {
-            let _ = state
-                .containment_manager
-                .execute_unauthenticated_emergency_disarm(reason)
-                .await;
-            execute_host_disarm_unauthenticated()?
+        Err(e @ killswitch_types::errors::KillSwitchError::AuthenticationFailed(_)) => {
+            return Err(ServerError::Core(e));
+        }
+        Err(e) => {
+            return Err(ServerError::Core(e));
         }
     };
 
@@ -436,14 +471,88 @@ pub async fn post_disarm(
 /// POST /health-probe
 pub async fn post_health_probe(
     State(state): State<Arc<ServerState>>,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
     Json(req): Json<HealthProbeRequest>,
 ) -> Result<Json<HealthProbeResponse>, ServerError> {
     let report = state.containment_manager.run_probe()?;
     let mut rollback_executed = false;
 
-    let should_rollback = req.force_rollback.unwrap_or(false) || report.eligible_for_early_rollback;
+    let is_forced = req.force_rollback.unwrap_or(false);
 
-    let containment_status = if should_rollback {
+    let containment_status = if is_forced {
+        // Enforce Tier-1 master token authentication on forced rollback
+        let token = match req.token.as_deref() {
+            Some(t) if !t.trim().is_empty() => t.trim(),
+            _ => {
+                return Err(ServerError::Core(
+                    killswitch_types::errors::KillSwitchError::AuthenticationFailed(
+                        "Tier-1 master token required to force early rollback".to_string(),
+                    ),
+                ));
+            }
+        };
+
+        let resolved_pid = if let Some(ConnectInfo(addr)) = connect_info {
+            let bound_port = state
+                .active_bound_port
+                .load(std::sync::atomic::Ordering::SeqCst);
+            match killswitch_core::peer_pid::resolve_loopback_peer_pid(addr, bound_port) {
+                Ok(pid) => Some(pid),
+                Err(e) => {
+                    return Err(ServerError::Core(
+                        killswitch_types::errors::KillSwitchError::AuthenticationFailed(format!(
+                            "Loopback peer PID verification failed on connected socket: {}",
+                            e
+                        )),
+                    ));
+                }
+            }
+        } else {
+            None
+        };
+
+        let creds = OperatorCredentials {
+            operator_id: "secops_admin".to_string(),
+            auth_token: Some(token.to_string()),
+            password: None,
+            caller_pid: resolved_pid,
+            confirmation_phrase: Some(token.to_string()),
+        };
+
+        state
+            .containment_manager
+            .authenticate_credentials(&creds)
+            .map_err(ServerError::Core)?;
+
+        rollback_executed = true;
+        state
+            .containment_manager
+            .execute_unauthenticated_emergency_disarm(
+                "Forced early rollback authorized by Tier-1 master token",
+            )
+            .await?
+    } else if report.eligible_for_early_rollback {
+        if let Some(ConnectInfo(addr)) = connect_info {
+            let bound_port = state
+                .active_bound_port
+                .load(std::sync::atomic::Ordering::SeqCst);
+            let caller_pid = match killswitch_core::peer_pid::resolve_loopback_peer_pid(addr, bound_port) {
+                Ok(pid) => pid,
+                Err(e) => {
+                    return Err(ServerError::Core(
+                        killswitch_types::errors::KillSwitchError::AuthenticationFailed(format!(
+                            "Loopback peer PID verification failed on connected socket: {}",
+                            e
+                        )),
+                    ));
+                }
+            };
+            let current_status = state.containment_manager.get_status();
+            let is_in_active_lease = state.journal.unexpired_leases().iter().any(|l| l.target_pid == Some(caller_pid));
+            if current_status.frozen_pids.contains(&caller_pid) || is_in_active_lease {
+                return Err(ServerError::CallerQuarantined(caller_pid));
+            }
+        }
         rollback_executed = true;
         state
             .containment_manager

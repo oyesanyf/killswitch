@@ -40,10 +40,12 @@
 //! - Evidence Writer: Fail-closed append with pre-commit digest verification and hash chaining.
 //! - Formal Trace Verifier: Independent state-machine conformance model checker.
 
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use chrono::Utc;
+use ed25519_dalek::{Signer, Verifier};
 use hmac::{Hmac, Mac};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -554,19 +556,69 @@ impl CageTier {
     }
 }
 
-/// Verdict emitted by the CAGE governance kernel.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// Verdict emitted by the CAGE governance kernel (5-verdict lattice with Clear/Refuse aliases).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum CageVerdict {
+    #[serde(rename = "ALLOW", alias = "Allow", alias = "allow")]
+    Allow,
+    #[serde(rename = "NARROW", alias = "Narrow", alias = "narrow")]
+    Narrow,
+    #[serde(rename = "REQUIRE_APPROVAL", alias = "RequireApproval", alias = "require_approval")]
+    RequireApproval,
+    #[serde(rename = "DEFER", alias = "Defer", alias = "defer")]
+    Defer,
+    #[serde(rename = "DENY", alias = "Deny", alias = "deny")]
+    Deny,
+    #[serde(rename = "Clear", alias = "clear")]
     Clear,
+    #[serde(rename = "Refuse", alias = "refuse")]
     Refuse,
+}
+
+impl PartialEq for CageVerdict {
+    fn eq(&self, other: &Self) -> bool {
+        match (*self, *other) {
+            (Self::Allow | Self::Clear, Self::Allow | Self::Clear) => true,
+            (Self::Deny | Self::Refuse, Self::Deny | Self::Refuse) => true,
+            (Self::Narrow, Self::Narrow) => true,
+            (Self::RequireApproval, Self::RequireApproval) => true,
+            (Self::Defer, Self::Defer) => true,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for CageVerdict {}
+
+impl std::hash::Hash for CageVerdict {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            Self::Allow | Self::Clear => 0u8.hash(state),
+            Self::Narrow => 1u8.hash(state),
+            Self::RequireApproval => 2u8.hash(state),
+            Self::Defer => 3u8.hash(state),
+            Self::Deny | Self::Refuse => 4u8.hash(state),
+        }
+    }
 }
 
 impl CageVerdict {
     pub const fn as_str(&self) -> &'static str {
         match self {
-            Self::Clear => "Clear",
-            Self::Refuse => "Refuse",
+            Self::Allow | Self::Clear => "ALLOW",
+            Self::Narrow => "NARROW",
+            Self::RequireApproval => "REQUIRE_APPROVAL",
+            Self::Defer => "DEFER",
+            Self::Deny | Self::Refuse => "DENY",
         }
+    }
+
+    pub const fn is_allowed(&self) -> bool {
+        matches!(self, Self::Allow | Self::Clear)
+    }
+
+    pub const fn is_denied(&self) -> bool {
+        matches!(self, Self::Deny | Self::Refuse)
     }
 }
 
@@ -663,6 +715,8 @@ pub struct CageDecisionReceipt {
     pub blake3_digest: String,
     pub decision_digest: String,
     pub receipt_signature: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kid: Option<String>,
 }
 
 impl CageDecisionReceipt {
@@ -715,6 +769,7 @@ impl CageDecisionReceipt {
             blake3_digest: String::new(),
             decision_digest: String::new(),
             receipt_signature: String::new(),
+            kid: None,
         };
 
         let canonical = unhashed.compute_canonical_payload();
@@ -727,10 +782,23 @@ impl CageDecisionReceipt {
         unhashed.blake3_digest = blake3_hex;
         unhashed.decision_digest = sha256_hex.clone();
 
-        // Sign decision_digest using HMAC-SHA256
-        let mut mac = HmacSha256::new_from_slice(secret_key).expect("HMAC supports keys of any length");
-        mac.update(sha256_hex.as_bytes());
-        unhashed.receipt_signature = hex::encode(mac.finalize().into_bytes());
+        // If secret_key is 32 bytes, sign with Ed25519; otherwise fallback to HMAC-SHA256
+        if secret_key.len() == 32 {
+            let mut key_arr = [0u8; 32];
+            key_arr.copy_from_slice(secret_key);
+            let signing_key = ed25519_dalek::SigningKey::from_bytes(&key_arr);
+            let vk = signing_key.verifying_key();
+            let mut kid_hasher = Sha256::new();
+            kid_hasher.update(vk.as_bytes());
+            unhashed.kid = Some(hex::encode(kid_hasher.finalize()));
+
+            let sig = signing_key.sign(sha256_hex.as_bytes());
+            unhashed.receipt_signature = hex::encode(sig.to_bytes());
+        } else {
+            let mut mac = HmacSha256::new_from_slice(secret_key).expect("HMAC supports keys of any length");
+            mac.update(sha256_hex.as_bytes());
+            unhashed.receipt_signature = hex::encode(mac.finalize().into_bytes());
+        }
 
         unhashed
     }
@@ -751,18 +819,43 @@ impl CageDecisionReceipt {
         (sha_ok & blake_ok & decision_ok).into()
     }
 
-    /// Verifies the HMAC-SHA256 signature in constant time against a secret key.
+    /// Verifies the signature in constant time against a secret or public key.
     pub fn verify_signature(&self, secret_key: &[u8]) -> bool {
         if self.receipt_signature.is_empty() {
             return false;
         }
-        let mut mac = match HmacSha256::new_from_slice(secret_key) {
-            Ok(m) => m,
-            Err(_) => return false,
-        };
-        mac.update(self.decision_digest.as_bytes());
-        let expected_sig = hex::encode(mac.finalize().into_bytes());
-        self.receipt_signature.as_bytes().ct_eq(expected_sig.as_bytes()).into()
+        if secret_key.len() == 32 {
+            let mut key_arr = [0u8; 32];
+            key_arr.copy_from_slice(secret_key);
+            if let Ok(sig_bytes) = hex::decode(&self.receipt_signature) {
+                if sig_bytes.len() == 64 {
+                    let mut sig_arr = [0u8; 64];
+                    sig_arr.copy_from_slice(&sig_bytes);
+                    let sig = ed25519_dalek::Signature::from_bytes(&sig_arr);
+
+                    // 1. If secret_key is the 32-byte signing key, derive its verifying key
+                    let sk = ed25519_dalek::SigningKey::from_bytes(&key_arr);
+                    if sk.verifying_key().verify(self.decision_digest.as_bytes(), &sig).is_ok() {
+                        return true;
+                    }
+
+                    // 2. Otherwise try treating secret_key as the 32-byte verifying (public) key
+                    if let Ok(vk) = ed25519_dalek::VerifyingKey::from_bytes(&key_arr) {
+                        if vk.verify(self.decision_digest.as_bytes(), &sig).is_ok() {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        if let Ok(mut mac) = HmacSha256::new_from_slice(secret_key) {
+            mac.update(self.decision_digest.as_bytes());
+            let expected_sig = hex::encode(mac.finalize().into_bytes());
+            if bool::from(self.receipt_signature.as_bytes().ct_eq(expected_sig.as_bytes())) {
+                return true;
+            }
+        }
+        false
     }
 
     /// Full verification of both digest integrity and signature authenticity.
@@ -839,14 +932,41 @@ impl CageEvidenceWriter {
         let prev_hash = guard
             .last()
             .map(|e| e.entry_hash.clone())
-            .unwrap_or_else(|| "0000000000000000000000000000000000000000000000000000000000000000".to_string());
+            .unwrap_or_default();
 
         let timestamp_ms = receipt.timestamp_ms;
-        let chain_input = format!(
-            "{}|{}|{}|{}|{}",
-            seq, prev_hash, receipt.decision_digest, receipt.receipt_signature, timestamp_ms
-        );
-        let entry_hash = blake3::hash(chain_input.as_bytes()).to_hex().to_string();
+        let event_type = if receipt.verdict.is_allowed() {
+            "GOVERNANCE_DECISION"
+        } else {
+            "ACTUATION_REFUSAL_RECEIPT"
+        };
+
+        // Construct canonical cage-audit/3.0 wire header and payload
+        let audit_header = serde_json::json!({
+            "canonicalization": "RFC8785",
+            "chain_id": "cage:evidence:stream",
+            "control_id": receipt.rule_id,
+            "event_type": event_type,
+            "hash_algorithm": "SHA-256",
+            "schema": "cage-audit/3.0",
+            "sequence": seq,
+            "trace_id": receipt.receipt_id,
+        });
+
+        let header_jcs = crate::jcs::canonicalize_jcs(&audit_header)
+            .map_err(|e| format!("JCS canonicalization of header failed: {}", e))?;
+        let payload_val = serde_json::to_value(&receipt)
+            .map_err(|e| format!("Serialization of receipt payload failed: {}", e))?;
+        let payload_jcs = crate::jcs::canonicalize_jcs(&payload_val)
+            .map_err(|e| format!("JCS canonicalization of payload failed: {}", e))?;
+
+        let mut material = prev_hash.as_bytes().to_vec();
+        material.extend_from_slice(&header_jcs);
+        material.extend_from_slice(&payload_jcs);
+
+        let mut hasher = Sha256::new();
+        hasher.update(&material);
+        let entry_hash = hex::encode(hasher.finalize());
 
         let entry = CageEvidenceEntry {
             sequence_no: seq,
@@ -863,7 +983,7 @@ impl CageEvidenceWriter {
     /// Formally verifies the entire cryptographic hash chain and each embedded receipt digest.
     pub fn verify_chain_integrity(&self) -> bool {
         let guard = self.records.read();
-        let mut expected_prev = "0000000000000000000000000000000000000000000000000000000000000000".to_string();
+        let mut expected_prev = String::new();
 
         for (idx, entry) in guard.iter().enumerate() {
             if entry.sequence_no != idx {
@@ -880,15 +1000,40 @@ impl CageEvidenceWriter {
                     return false;
                 }
             }
-            let chain_input = format!(
-                "{}|{}|{}|{}|{}",
-                entry.sequence_no,
-                entry.prev_hash,
-                entry.receipt.decision_digest,
-                entry.receipt.receipt_signature,
-                entry.timestamp_ms
-            );
-            let recomputed = blake3::hash(chain_input.as_bytes()).to_hex().to_string();
+            let event_type = if entry.receipt.verdict.is_allowed() {
+                "GOVERNANCE_DECISION"
+            } else {
+                "ACTUATION_REFUSAL_RECEIPT"
+            };
+            let audit_header = serde_json::json!({
+                "canonicalization": "RFC8785",
+                "chain_id": "cage:evidence:stream",
+                "control_id": entry.receipt.rule_id,
+                "event_type": event_type,
+                "hash_algorithm": "SHA-256",
+                "schema": "cage-audit/3.0",
+                "sequence": entry.sequence_no,
+                "trace_id": entry.receipt.receipt_id,
+            });
+            let header_jcs = match crate::jcs::canonicalize_jcs(&audit_header) {
+                Ok(j) => j,
+                Err(_) => return false,
+            };
+            let payload_val = match serde_json::to_value(&entry.receipt) {
+                Ok(v) => v,
+                Err(_) => return false,
+            };
+            let payload_jcs = match crate::jcs::canonicalize_jcs(&payload_val) {
+                Ok(j) => j,
+                Err(_) => return false,
+            };
+            let mut material = entry.prev_hash.as_bytes().to_vec();
+            material.extend_from_slice(&header_jcs);
+            material.extend_from_slice(&payload_jcs);
+
+            let mut hasher = Sha256::new();
+            hasher.update(&material);
+            let recomputed = hex::encode(hasher.finalize());
             if entry.entry_hash != recomputed {
                 return false;
             }
@@ -896,6 +1041,30 @@ impl CageEvidenceWriter {
         }
 
         true
+    }
+
+    /// Formats an evidence entry as a cage-audit/3.0 JSON stream record.
+    pub fn to_cage_audit_json(&self, entry: &CageEvidenceEntry) -> serde_json::Value {
+        let event_type = if entry.receipt.verdict.is_allowed() {
+            "GOVERNANCE_DECISION"
+        } else {
+            "ACTUATION_REFUSAL_RECEIPT"
+        };
+        let payload_val = serde_json::to_value(&entry.receipt).unwrap_or_default();
+        let payload_json = crate::jcs::canonicalize_jcs_string(&payload_val).unwrap_or_default();
+        serde_json::json!({
+            "schema": "cage-audit/3.0",
+            "canonicalization": "RFC8785",
+            "hash_algorithm": "SHA-256",
+            "chain_id": "cage:evidence:stream",
+            "trace_id": entry.receipt.receipt_id,
+            "sequence": entry.sequence_no,
+            "prev_hash": entry.prev_hash,
+            "event_type": event_type,
+            "control_id": entry.receipt.rule_id,
+            "payload_json": payload_json,
+            "record_hash": entry.entry_hash,
+        })
     }
 
     pub fn list_receipts(&self) -> Vec<CageDecisionReceipt> {
@@ -1044,6 +1213,84 @@ impl HealthcareDoseBarrier {
         }
 
         Ok(())
+    }
+}
+
+/// Thread-safe 24-hour sliding window accumulator for CBF dose and financial exposure tracking (KS-05).
+#[derive(Debug, Default)]
+pub struct Cumulative24hTracker {
+    entries: parking_lot::RwLock<VecDeque<(u64, f64)>>,
+}
+
+impl Cumulative24hTracker {
+    pub fn new() -> Self {
+        Self {
+            entries: parking_lot::RwLock::new(VecDeque::new()),
+        }
+    }
+
+    /// Prunes entries older than 24 hours (86,400,000 ms) before `now_ms` and returns the current cumulative total.
+    pub fn get_cumulative_24h(&self, now_ms: u64) -> f64 {
+        let mut guard = self.entries.write();
+        let cutoff = now_ms.saturating_sub(86_400_000);
+        while let Some(&(ts, _)) = guard.front() {
+            if ts < cutoff {
+                guard.pop_front();
+            } else {
+                break;
+            }
+        }
+        guard.iter().map(|(_, amt)| *amt).sum()
+    }
+
+    /// Records an approved expenditure or dose at `now_ms`.
+    pub fn record(&self, now_ms: u64, amount: f64) {
+        if amount > 0.0 {
+            let mut guard = self.entries.write();
+            guard.push_back((now_ms, amount));
+        }
+    }
+
+    /// Clears all recorded entries.
+    pub fn reset(&self) {
+        self.entries.write().clear();
+    }
+}
+
+/// Keyed 24-hour sliding window accumulator tracking exposure per agent/workload/patient.
+#[derive(Debug, Default)]
+pub struct KeyedCumulative24hTracker {
+    trackers: dashmap::DashMap<String, Arc<Cumulative24hTracker>>,
+}
+
+impl KeyedCumulative24hTracker {
+    pub fn new() -> Self {
+        Self {
+            trackers: dashmap::DashMap::new(),
+        }
+    }
+
+    pub fn get_cumulative_24h(&self, key: &str, now_ms: u64) -> f64 {
+        if let Some(tracker) = self.trackers.get(key) {
+            tracker.get_cumulative_24h(now_ms)
+        } else {
+            0.0
+        }
+    }
+
+    pub fn record(&self, key: &str, now_ms: u64, amount: f64) {
+        if amount > 0.0 {
+            let tracker = self
+                .trackers
+                .entry(key.to_string())
+                .or_insert_with(|| Arc::new(Cumulative24hTracker::new()))
+                .clone();
+            tracker.record(now_ms, amount);
+        }
+    }
+
+    pub fn reset(&self) {
+        self.trackers.clear();
     }
 }
 
@@ -1282,8 +1529,10 @@ impl CageTraceVerifier {
                 }
                 GovernanceTraceEventType::ReceiptSigned => {
                     match event.verdict {
-                        Some(CageVerdict::Clear) => clear_receipt_signed = true,
-                        Some(CageVerdict::Refuse) => refuse_receipt_signed = true,
+                        Some(CageVerdict::Clear | CageVerdict::Allow) => clear_receipt_signed = true,
+                        Some(CageVerdict::Refuse | CageVerdict::Deny) => refuse_receipt_signed = true,
+                        Some(CageVerdict::Narrow) => clear_receipt_signed = true,
+                        Some(CageVerdict::RequireApproval | CageVerdict::Defer) => {},
                         None => violations.push(format!(
                             "RECEIPT_MISSING_VERDICT: ReceiptSigned event at step {} lacks verdict",
                             event.step
@@ -1400,7 +1649,14 @@ pub struct CageGovernanceKernel {
     active_substrate: RwLock<CompiledSubstrateArtifact>,
     fiscal_barrier: AtomicFiscalBarrier,
     evidence_writer: Arc<CageEvidenceWriter>,
+    pub signing_key: ed25519_dalek::SigningKey,
+    pub verifying_key: ed25519_dalek::VerifyingKey,
+    pub kid: String,
     secret_key: Vec<u8>,
+    pub dose_tracker: Arc<Cumulative24hTracker>,
+    pub exposure_tracker: Arc<Cumulative24hTracker>,
+    pub keyed_dose_tracker: Arc<KeyedCumulative24hTracker>,
+    pub keyed_exposure_tracker: Arc<KeyedCumulative24hTracker>,
     total_evaluations: AtomicU64,
     total_cleared: AtomicU64,
     total_refused: AtomicU64,
@@ -1451,24 +1707,34 @@ impl CageGovernanceKernel {
     /// Instantiates kernel with a specific pre-compiled substrate artifact.
     pub fn with_substrate(artifact: CompiledSubstrateArtifact) -> Self {
         let fiscal_barrier = AtomicFiscalBarrier::new(artifact.fiscal_cap_usd);
-        // Ephemeral 32-byte secret key for kernel epoch HMAC signing
-        let secret_key = {
-            let mut key = [0u8; 32];
-            let seed = Utc::now().timestamp_nanos_opt().unwrap_or(42);
-            for (idx, b) in key.iter_mut().enumerate() {
-                *b = ((seed >> (idx % 8 * 8)) & 0xFF) as u8 ^ ((idx as u8).wrapping_mul(31));
-            }
-            key.to_vec()
+        let signing_key = ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng);
+        let verifying_key = signing_key.verifying_key();
+        let kid = {
+            let mut hasher = Sha256::new();
+            hasher.update(verifying_key.as_bytes());
+            hex::encode(hasher.finalize())
         };
+        let secret_key = signing_key.to_bytes().to_vec();
 
         let evidence_writer = Arc::new(CageEvidenceWriter::new(true, Some(secret_key.clone())));
+        let dose_tracker = Arc::new(Cumulative24hTracker::new());
+        let exposure_tracker = Arc::new(Cumulative24hTracker::new());
+        let keyed_dose_tracker = Arc::new(KeyedCumulative24hTracker::new());
+        let keyed_exposure_tracker = Arc::new(KeyedCumulative24hTracker::new());
 
         Self {
             llm_clients_in_kernel: false,
             active_substrate: RwLock::new(artifact),
             fiscal_barrier,
             evidence_writer,
+            signing_key,
+            verifying_key,
+            kid,
             secret_key,
+            dose_tracker,
+            exposure_tracker,
+            keyed_dose_tracker,
+            keyed_exposure_tracker,
             total_evaluations: AtomicU64::new(0),
             total_cleared: AtomicU64::new(0),
             total_refused: AtomicU64::new(0),
@@ -1491,9 +1757,18 @@ impl CageGovernanceKernel {
         self.evidence_writer.clone()
     }
 
-    /// Resets the cumulative fiscal spend counter.
+    /// Resets CBF dose and exposure trackers.
+    pub fn reset_cbf(&self) {
+        self.dose_tracker.reset();
+        self.exposure_tracker.reset();
+        self.keyed_dose_tracker.reset();
+        self.keyed_exposure_tracker.reset();
+    }
+
+    /// Resets the cumulative fiscal spend and CBF counters.
     pub fn reset_fiscal(&self) {
         self.fiscal_barrier.reset();
+        self.reset_cbf();
     }
 
     /// Returns status report confirming structural invariants.
@@ -1918,7 +2193,8 @@ impl CageGovernanceKernel {
         // --------------------------------------------------------------------
         step += 1;
         if let Some(dose) = req.dose_mg {
-            let dose_barrier = HealthcareDoseBarrier::new(sub.max_dose_mg, sub.max_dose_mg * 2.0, 0.0, 0.50);
+            let cum_dose = self.dose_tracker.get_cumulative_24h(now_ms);
+            let dose_barrier = HealthcareDoseBarrier::new(sub.max_dose_mg, sub.max_dose_mg * 2.0, cum_dose, 0.50);
             if let Err((code, reason)) = dose_barrier.evaluate(dose) {
                 return self.emit_refusal(
                     req,
@@ -1935,7 +2211,8 @@ impl CageGovernanceKernel {
             }
         }
         if let Some(amt) = req.amount_usd {
-            let fin_barrier = FinanceBoundingBarrier::new(sub.max_single_transfer_usd, sub.fiscal_cap_usd, 0.0, 0.50);
+            let cum_exposure = self.exposure_tracker.get_cumulative_24h(now_ms);
+            let fin_barrier = FinanceBoundingBarrier::new(sub.max_single_transfer_usd, sub.fiscal_cap_usd, cum_exposure, 1.0);
             if let Err((code, reason)) = fin_barrier.evaluate(amt) {
                 return self.emit_refusal(
                     req,
@@ -1995,6 +2272,16 @@ impl CageGovernanceKernel {
             requires_warrant: sub.requires_warrant,
             details: "Atomic fiscal spend committed without overflow".to_string(),
         });
+
+        // Accumulate approved dose and exposure into 24h sliding window trackers
+        if let Some(dose) = req.dose_mg {
+            self.dose_tracker.record(now_ms, dose);
+            self.keyed_dose_tracker.record(&req.agent_id, now_ms, dose);
+        }
+        if let Some(amt) = req.amount_usd {
+            self.exposure_tracker.record(now_ms, amt);
+            self.keyed_exposure_tracker.record(&req.agent_id, now_ms, amt);
+        }
 
         // --------------------------------------------------------------------
         // All 8 Tiers Cleared: Sign Decision Receipt & Commit Evidence
@@ -2134,6 +2421,107 @@ pub static GLOBAL_CAGE_KERNEL: std::sync::OnceLock<CageGovernanceKernel> = std::
 /// Returns the process-wide CAGE Governance Kernel singleton.
 pub fn global_cage_kernel() -> &'static CageGovernanceKernel {
     GLOBAL_CAGE_KERNEL.get_or_init(CageGovernanceKernel::new)
+}
+
+/// Exports an evaluation request and response as standard CAGE GOVERNANCE_TRACE v1 JSON objects (KS-06).
+pub fn export_cage_governance_trace_v1(
+    _req: &CageEvaluationRequest,
+    resp: &CageEvaluationResponse,
+) -> Vec<serde_json::Value> {
+    let is_allowed = resp.verdict.is_allowed();
+    let phase = if is_allowed { "SEAL_ISSUED" } else { "DENIED" };
+    let verdict_str = if is_allowed { "ALLOW" } else { "DENY" };
+
+    let plan = vec![
+        serde_json::json!(["ftra", 1]),
+        serde_json::json!(["stpa", 1]),
+        serde_json::json!(["opa", 1]),
+        serde_json::json!(["confidence", 1]),
+        serde_json::json!(["consensus", 1]),
+        serde_json::json!(["cbf", 2]),
+        serde_json::json!(["fiscal", 2]),
+    ];
+
+    let outcomes = if is_allowed {
+        vec![
+            serde_json::json!(["ftra", "PASS"]),
+            serde_json::json!(["stpa", "PASS"]),
+            serde_json::json!(["opa", "PASS"]),
+            serde_json::json!(["confidence", "PASS"]),
+            serde_json::json!(["consensus", "PASS"]),
+            serde_json::json!(["cbf", "PASS"]),
+            serde_json::json!(["fiscal", "PASS"]),
+        ]
+    } else {
+        match resp.tier {
+            CageTier::Tier1Ftra => vec![serde_json::json!(["ftra", "FAIL"])],
+            CageTier::Tier2Stpa => vec![
+                serde_json::json!(["ftra", "PASS"]),
+                serde_json::json!(["stpa", "FAIL"]),
+            ],
+            CageTier::Tier3Opa => vec![
+                serde_json::json!(["ftra", "PASS"]),
+                serde_json::json!(["stpa", "PASS"]),
+                serde_json::json!(["opa", "FAIL"]),
+            ],
+            CageTier::Tier4Confidence => vec![
+                serde_json::json!(["ftra", "PASS"]),
+                serde_json::json!(["stpa", "PASS"]),
+                serde_json::json!(["opa", "PASS"]),
+                serde_json::json!(["confidence", "FAIL"]),
+            ],
+            CageTier::Tier5Warrant | CageTier::Tier6Consensus => vec![
+                serde_json::json!(["ftra", "PASS"]),
+                serde_json::json!(["stpa", "PASS"]),
+                serde_json::json!(["opa", "PASS"]),
+                serde_json::json!(["confidence", "PASS"]),
+                serde_json::json!(["consensus", "FAIL"]),
+            ],
+            CageTier::Tier7Cbf => vec![
+                serde_json::json!(["ftra", "PASS"]),
+                serde_json::json!(["stpa", "PASS"]),
+                serde_json::json!(["opa", "PASS"]),
+                serde_json::json!(["confidence", "PASS"]),
+                serde_json::json!(["consensus", "PASS"]),
+                serde_json::json!(["cbf", "FAIL"]),
+            ],
+            CageTier::Tier8Fiscal => vec![
+                serde_json::json!(["ftra", "PASS"]),
+                serde_json::json!(["stpa", "PASS"]),
+                serde_json::json!(["opa", "PASS"]),
+                serde_json::json!(["confidence", "PASS"]),
+                serde_json::json!(["consensus", "PASS"]),
+                serde_json::json!(["cbf", "PASS"]),
+                serde_json::json!(["fiscal", "FAIL"]),
+            ],
+        }
+    };
+
+    let mut events = Vec::new();
+    let decision_event = serde_json::json!({
+        "type": "GOVERNANCE_TRACE",
+        "schema_version": 1,
+        "phase": phase,
+        "profile": "FULL",
+        "verdict": verdict_str,
+        "seal_present": is_allowed,
+        "seal_ref": resp.receipt.receipt_id,
+        "plan": plan,
+        "outcomes": outcomes,
+    });
+    events.push(decision_event);
+
+    if is_allowed {
+        let executed_event = serde_json::json!({
+            "type": "GOVERNANCE_TRACE",
+            "schema_version": 1,
+            "phase": "EXECUTED",
+            "seal_ref": resp.receipt.receipt_id,
+        });
+        events.push(executed_event);
+    }
+
+    events
 }
 
 // ============================================================================

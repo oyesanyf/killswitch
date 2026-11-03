@@ -360,6 +360,34 @@ impl KillChainHostManager {
         Ok(new_status)
     }
 
+    /// Exposes the underlying authenticator.
+    pub fn authenticator(&self) -> &Arc<dyn OperatorAuthenticator> {
+        &self.authenticator
+    }
+
+    /// Validates caller PID and verifies operator credentials.
+    pub fn authenticate_credentials(&self, credentials: &OperatorCredentials) -> Result<()> {
+        self.authenticator.validate_caller(credentials.caller_pid)?;
+        let auth_res = self.authenticator.authenticate(credentials);
+        if !auth_res.is_success() {
+            return Err(KillSwitchError::AuthenticationFailed(format!(
+                "{:?}",
+                auth_res
+            )));
+        }
+        Ok(())
+    }
+
+    /// Suspends an OS process by PID via the configured ProcessFreezer.
+    pub fn freeze_process(&self, pid: u32) -> Result<killswitch_types::ProcessIsolationState> {
+        self.process_freezer.freeze_process(pid)
+    }
+
+    /// Resumes an OS process by PID via the configured ProcessFreezer.
+    pub fn resume_process(&self, pid: u32) -> Result<killswitch_types::ProcessIsolationState> {
+        self.process_freezer.resume_process(pid)
+    }
+
     /// Disarms host containment and reverts all installed kernel filters and process suspensions.
     pub async fn disarm_isolation(
         &self,
@@ -369,14 +397,7 @@ impl KillChainHostManager {
     ) -> Result<KillChainStatus> {
         // Stage 1: Authenticate operator credentials if provided
         if let Some(creds) = credentials {
-            self.authenticator.validate_caller(creds.caller_pid)?;
-            let auth_res = self.authenticator.authenticate(creds);
-            if !auth_res.is_success() {
-                return Err(KillSwitchError::AuthenticationFailed(format!(
-                    "{:?}",
-                    auth_res
-                )));
-            }
+            self.authenticate_credentials(creds)?;
         }
 
         self.disarm_internal(operator, reason, "DISARMED").await

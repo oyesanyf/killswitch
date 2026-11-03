@@ -44,6 +44,7 @@ chrono = { workspace = true, features = ["serde"] }
 
 # Cryptography & hashing
 blake3 = { workspace = true }
+rand = { workspace = true }
 anyhow = { workspace = true }
 
 [dev-dependencies]

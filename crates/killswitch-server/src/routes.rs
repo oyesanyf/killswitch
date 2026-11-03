@@ -6,6 +6,7 @@ use axum::routing::{get, post};
 use axum::Router;
 use std::sync::Arc;
 
+use crate::cage_substrate;
 use crate::handlers;
 use crate::middleware;
 use crate::server::ServerState;
@@ -284,6 +285,18 @@ pub fn build_router(state: Arc<ServerState>) -> Router {
             "/api/cage/verify-trace",
             post(handlers::post_cage_verify_trace),
         )
+        // CAGE Interoperability Substrate & Cryptographic Quarantine Receipts
+        .route("/.well-known/jwks.json", get(cage_substrate::handle_jwks))
+        .route("/v1/cage/quarantine", post(cage_substrate::handle_cage_quarantine))
+        .route("/api/v1/cage/quarantine", post(cage_substrate::handle_cage_quarantine))
+        .route("/v1/cage/release", post(cage_substrate::handle_cage_release))
+        .route("/api/v1/cage/release", post(cage_substrate::handle_cage_release))
+        .route("/v1/cage/attest", get(cage_substrate::handle_cage_attest))
+        .route("/api/v1/cage/attest", get(cage_substrate::handle_cage_attest))
+        .route("/v1/cage/normative-baseline/:region", get(cage_substrate::handle_conformal_baseline))
+        .route("/api/v1/cage/normative-baseline/:region", get(cage_substrate::handle_conformal_baseline))
+        .route("/v1/cage/conformal/validate", post(cage_substrate::handle_conformal_validate))
+        .route("/api/v1/cage/conformal/validate", post(cage_substrate::handle_conformal_validate))
         // 18. Signed Ring-0 Kernel Driver Loader (ELAM / Minifilter / eBPF) & Distributed Raft/Valkey Consensus
         .route("/ring0/status", get(handlers::get_ring0_status))
         .route("/api/ring0/status", get(handlers::get_ring0_status))

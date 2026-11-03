@@ -14,7 +14,6 @@ use killswitch_types::{
     errors::KillSwitchError,
     status::{
         AuthMethod, AuthResult, LockoutState, OperatorAuthenticator, OperatorCredentials,
-        KILLCHAIN_ISOLATE_TOKEN, KILLCHAIN_RESTORE_TOKEN,
     },
 };
 use parking_lot::RwLock;
@@ -105,29 +104,26 @@ impl OperatorAuthManager {
     }
 
     /// Internal evaluation of Tier 1: Master Token Bypass.
+    /// Requires a high-entropy CSPRNG-generated master token or explicit secret (>= 32 chars).
     fn verify_tier1_master_token(&self, candidate: &str) -> bool {
         let trimmed = candidate.trim();
-        if trimmed.is_empty() {
+        if trimmed.len() < 32 {
+            // Reject low-entropy, empty, or static confirmation phrases ("CONFIRM RESTORE" is only 15 chars)
             return false;
         }
 
-        // Predefined emergency tokens
-        if constant_time_eq(trimmed, KILLCHAIN_RESTORE_TOKEN)
-            || constant_time_eq(trimmed, KILLCHAIN_ISOLATE_TOKEN)
-        {
-            return true;
-        }
-
-        // Custom configured master token
+        // Custom configured master token (CSPRNG provisioned at startup, >= 32 chars)
         if let Some(ref master) = self.custom_master_token {
-            if !master.trim().is_empty() && constant_time_eq(trimmed, master.trim()) {
+            let m_trimmed = master.trim();
+            if m_trimmed.len() >= 32 && constant_time_eq(trimmed, m_trimmed) {
                 return true;
             }
         }
 
-        // Environment master token
+        // Environment master token (>= 32 chars)
         if let Ok(env_master) = std::env::var("KILLSWITCH_MASTER_TOKEN") {
-            if !env_master.trim().is_empty() && constant_time_eq(trimmed, env_master.trim()) {
+            let env_trimmed = env_master.trim();
+            if env_trimmed.len() >= 32 && constant_time_eq(trimmed, env_trimmed) {
                 return true;
             }
         }
@@ -439,10 +435,11 @@ impl OperatorAuthenticator for OperatorAuthManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use killswitch_types::status::KILLCHAIN_RESTORE_CONFIRMATION_PHRASE;
 
     #[test]
     fn test_tier1_master_token_bypass_and_lockout_reset() {
-        let auth = OperatorAuthManager::new(None, None);
+        let mut auth = OperatorAuthManager::new(None, None);
 
         // Intentionally rack up 3 failures to trigger lockout
         for _ in 0..3 {
@@ -458,13 +455,28 @@ mod tests {
 
         assert!(auth.check_lockout().is_locked);
 
-        // Operator supplies master bypass phrase
-        let master_creds = OperatorCredentials {
+        // Static "CONFIRM RESTORE" must be REJECTED and lockout preserved
+        let static_bypass_creds = OperatorCredentials {
             operator_id: "admin".to_string(),
             auth_token: None,
             password: None,
             caller_pid: Some(5000),
-            confirmation_phrase: Some(KILLCHAIN_RESTORE_TOKEN.to_string()),
+            confirmation_phrase: Some(KILLCHAIN_RESTORE_CONFIRMATION_PHRASE.to_string()),
+        };
+        let static_res = auth.authenticate(&static_bypass_creds);
+        assert!(!static_res.is_success());
+        assert!(auth.check_lockout().is_locked);
+
+        // Operator configures valid CSPRNG >= 32-char master token
+        let secure_token = "a_cryptographically_secure_token_32_chars_long_1234567";
+        auth.set_custom_master_token(secure_token.to_string());
+
+        let master_creds = OperatorCredentials {
+            operator_id: "admin".to_string(),
+            auth_token: Some(secure_token.to_string()),
+            password: None,
+            caller_pid: Some(5000),
+            confirmation_phrase: None,
         };
 
         let result = auth.authenticate(&master_creds);
