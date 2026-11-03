@@ -327,6 +327,7 @@ async fn test_adversarial_conformal_signature_verification_and_replay_attack() {
         "alpha": val_resp.alpha,
         "voter_consensus": val_resp.voter_consensus,
         "timestamp_utc": val_resp.timestamp_utc,
+        "envelope_digest": val_resp.envelope_digest,
         "kid": val_resp.kid
     });
     let canonical = killswitch_telemetry::canonicalize_jcs(&unsigned_val).unwrap();

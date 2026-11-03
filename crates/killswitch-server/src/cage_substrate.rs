@@ -162,12 +162,14 @@ pub async fn handle_cage_quarantine(
     }
 
     // 11. Construct unsigned receipt
+    let envelope_digest = hex::encode(sha2::Sha256::digest(&canonical_body));
     let mut unsigned_receipt = serde_json::json!({
         "status": "QUARANTINED",
         "quarantined": true,
         "enforcement_plane": "HOST_OS_KERNEL",
         "rule_id": rule_id,
         "quarantined_at": now_utc,
+        "envelope_digest": envelope_digest.clone(),
         "kid": state.ed25519_kid.clone()
     });
     if let Some(pid) = req.target_pid {
@@ -190,6 +192,7 @@ pub async fn handle_cage_quarantine(
         rule_id,
         quarantined_at: now_utc,
         target_pid: req.target_pid,
+        envelope_digest: Some(envelope_digest),
         kid: state.ed25519_kid.clone(),
         signature: receipt_sig_b64,
     }))
@@ -321,6 +324,7 @@ pub async fn handle_cage_release(
 
     // 11. Construct signed release receipt
     let now_utc = Utc::now().to_rfc3339();
+    let envelope_digest = hex::encode(sha2::Sha256::digest(&canonical_body));
     let unsigned_receipt = serde_json::json!({
         "released": true,
         "enforcement_plane": "HOST_OS_KERNEL",
@@ -328,6 +332,7 @@ pub async fn handle_cage_release(
         "epoch_after": epoch_after,
         "outcome": "RELEASED",
         "released_at": now_utc,
+        "envelope_digest": envelope_digest.clone(),
         "kid": state.ed25519_kid.clone()
     });
 
@@ -346,6 +351,7 @@ pub async fn handle_cage_release(
         epoch_after,
         outcome: "RELEASED".to_string(),
         released_at: now_utc,
+        envelope_digest: Some(envelope_digest),
         kid: state.ed25519_kid.clone(),
         signature: receipt_sig_b64,
     }))
@@ -462,13 +468,21 @@ pub async fn handle_conformal_baseline(
 /// validation result.
 pub async fn handle_conformal_validate(
     State(state): State<Arc<ServerState>>,
-    Json(req): Json<CageConformalValidateRequest>,
+    body_bytes: Bytes,
 ) -> Result<Json<CageConformalValidateResponse>, ServerError> {
-    // 1. Anti-replay nonce check
+    // 1. Parse request JSON and JCS canonicalize
+    let parsed_val: serde_json::Value = serde_json::from_slice(&body_bytes)
+        .map_err(|e| ServerError::Validation(format!("Invalid request JSON: {}", e)))?;
+    let canonical_body = killswitch_telemetry::canonicalize_jcs(&parsed_val)
+        .map_err(|e| ServerError::Internal(format!("JCS canonicalization error: {}", e)))?;
+    let req: CageConformalValidateRequest = serde_json::from_value(parsed_val)
+        .map_err(|e| ServerError::Validation(format!("Failed to parse validate request: {}", e)))?;
+
+    // Anti-replay nonce check
     state
         .replay_cache
         .check_and_record(&req.nonce)
-        .map_err(|e| ServerError::ReplayDetected(e))?;
+        .map_err(ServerError::ReplayDetected)?;
 
     let alpha = req.alpha.unwrap_or(0.05);
 
@@ -534,12 +548,14 @@ pub async fn handle_conformal_validate(
     };
 
     let now_utc = Utc::now().to_rfc3339();
+    let envelope_digest = hex::encode(sha2::Sha256::digest(&canonical_body));
     let unsigned_resp = serde_json::json!({
         "admitted": admitted,
         "p_value": p_value,
         "alpha": alpha,
         "voter_consensus": voter_consensus,
         "timestamp_utc": now_utc,
+        "envelope_digest": envelope_digest.clone(),
         "kid": state.ed25519_kid.clone()
     });
 
@@ -557,6 +573,7 @@ pub async fn handle_conformal_validate(
         alpha,
         voter_consensus,
         timestamp_utc: now_utc,
+        envelope_digest: Some(envelope_digest),
         kid: state.ed25519_kid.clone(),
         signature: sig_b64,
     }))

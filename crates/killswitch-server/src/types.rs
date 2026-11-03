@@ -919,6 +919,8 @@ pub struct CageQuarantineReceiptResponse {
     pub quarantined_at: String,    // ISO 8601 / RFC 3339
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub envelope_digest: Option<String>,
     pub kid: String,               // KillSwitch Ed25519 public key ID
     pub signature: String,         // base64url Ed25519 signature over CAGE_QUARANTINE_RECEIPT_V1:<JCS>
 }
@@ -946,6 +948,8 @@ pub struct CageQuarantineReleaseReceiptResponse {
     pub epoch_after: u64,
     pub outcome: String,           // "RELEASED"
     pub released_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub envelope_digest: Option<String>,
     pub kid: String,
     pub signature: String,         // base64url Ed25519 signature over CAGE_QUARANTINE_RELEASE_RECEIPT_V1:<JCS>
 }
@@ -989,6 +993,8 @@ pub struct CageConformalValidateResponse {
     pub alpha: f64,
     pub voter_consensus: String,
     pub timestamp_utc: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub envelope_digest: Option<String>,
     pub kid: String,
     pub signature: String,
 }

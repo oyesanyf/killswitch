@@ -276,6 +276,7 @@ async fn test_substrate_endpoint_5_quarantine() {
     assert_eq!(receipt.enforcement_plane, "HOST_OS_KERNEL");
     assert_eq!(receipt.kid, state.ed25519_kid);
     assert_eq!(receipt.target_pid, Some(12345));
+    assert!(receipt.envelope_digest.is_some());
     assert!(!receipt.signature.is_empty());
 
     // Verify lease is active in journal
@@ -371,6 +372,7 @@ async fn test_substrate_endpoint_6_release() {
         "epoch_after": 2,
         "outcome": "RELEASED",
         "released_at": receipt.released_at,
+        "envelope_digest": receipt.envelope_digest,
         "kid": receipt.kid
     });
     let canonical_receipt = killswitch_telemetry::canonicalize_jcs(&unsigned_val).unwrap();
