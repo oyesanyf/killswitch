@@ -123,11 +123,7 @@ fn format_ecma_float(f: f64) -> String {
         // Scientific notation with 'e-' per ECMAScript / RFC 8785
         format!("{:e}", f)
     } else if f.fract() == 0.0 {
-        if abs_f <= i64::MAX as f64 {
-            (f as i64).to_string()
-        } else {
-            (f as i128).to_string()
-        }
+        (f as i128).to_string()
     } else {
         f.to_string()
     }
@@ -193,6 +189,8 @@ mod tests {
         assert_eq!(canonicalize_jcs_string(&json!(1e19)).unwrap(), "10000000000000000000");
         assert_eq!(canonicalize_jcs_string(&json!(-1e19)).unwrap(), "-10000000000000000000");
         assert_eq!(canonicalize_jcs_string(&json!(1e20)).unwrap(), "100000000000000000000");
+        assert_eq!(canonicalize_jcs_string(&json!(9223372036854775808.0)).unwrap(), "9223372036854775808");
+        assert_eq!(canonicalize_jcs_string(&json!(-9223372036854775808.0)).unwrap(), "-9223372036854775808");
         assert_eq!(canonicalize_jcs_string(&json!(1e21)).unwrap(), "1e+21");
         assert_eq!(canonicalize_jcs_string(&json!(1e-7)).unwrap(), "1e-7");
     }
