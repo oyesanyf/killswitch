@@ -1,26 +1,45 @@
 //! # CLI Command Handlers & Formatters
 
-use anyhow::{bail, Result};
 use crate::client::KillSwitchClient;
 use crate::verify::SubsystemVerifier;
+use anyhow::{bail, Result};
 
 pub async fn handle_status(client: &KillSwitchClient) -> Result<()> {
     let status = client.get_status().await?;
     println!("\n================================================================================");
     println!("🛡️  KILLSWITCH SECURITY AGENT STATUS");
     println!("================================================================================");
-    println!("  Isolated:               {}", if status.isolated { "YES (HOST CONTAINED)" } else { "NO (Normal Operation)" });
+    println!(
+        "  Isolated:               {}",
+        if status.isolated {
+            "YES (HOST CONTAINED)"
+        } else {
+            "NO (Normal Operation)"
+        }
+    );
     println!("  Containment Level:      {}", status.containment_level);
     println!("  Active Mode:            {}", status.active_mode);
     println!("  Uptime:                 {} seconds", status.uptime_secs);
     println!("  Version:                {}", status.version);
     println!("  State Hash (BLAKE3):    {}", status.state_hash_blake3);
     println!("  Network Isolated:       {}", status.network_isolated);
-    println!("  Processes Frozen:       {}", status.processes_frozen_count);
-    println!("  Processes Tarpitted:    {}", status.processes_tarpitted_count);
-    println!("  Kernel Lockdown Active: {}", status.kernel_lockdown_active);
+    println!(
+        "  Processes Frozen:       {}",
+        status.processes_frozen_count
+    );
+    println!(
+        "  Processes Tarpitted:    {}",
+        status.processes_tarpitted_count
+    );
+    println!(
+        "  Kernel Lockdown Active: {}",
+        status.kernel_lockdown_active
+    );
     if !status.platform_os.is_empty() {
-        println!("  Platform / OS Engine:   {} ({})", status.platform_os, status.isolation_engine);
+        println!(
+            "  Platform / OS Engine:   {} ({})",
+            status.platform_os, status.isolation_engine
+        );
     }
     if !status.trigger_cause.is_empty() {
         println!("  KillSwitch Root Cause:  {}", status.trigger_cause);
@@ -75,16 +94,15 @@ pub async fn handle_restore(
     Ok(())
 }
 
-pub async fn handle_service(
-    client: &KillSwitchClient,
-    action: Option<&str>,
-) -> Result<()> {
+pub async fn handle_service(client: &KillSwitchClient, action: Option<&str>) -> Result<()> {
     match action {
         None | Some("status") => {
             let status = client.get_service_status().await?;
             println!("\n================================================================================");
             println!("🔧 NATIVE SERVICE STATUS: {}", status.name);
-            println!("================================================================================");
+            println!(
+                "================================================================================"
+            );
             println!("  Display Name: {}", status.display_name);
             println!("  State:        {}", status.state);
             println!("  Installed:    {}", status.is_installed);
@@ -117,16 +135,31 @@ pub async fn handle_lineage(
             let status = client.get_lineage_status().await?;
             println!("\n================================================================================");
             println!("🧬 DLP OPENLINEAGE STATUS");
-            println!("================================================================================");
-            println!("  Total Processes Tracked:   {}", status.total_processes_tracked);
-            println!("  Tainted Processes Count:   {}", status.tainted_processes_count);
-            println!("  Total Sensitive Files:     {}", status.total_files_tracked);
-            println!("  Tainted Files Count:       {}", status.tainted_files_count);
+            println!(
+                "================================================================================"
+            );
+            println!(
+                "  Total Processes Tracked:   {}",
+                status.total_processes_tracked
+            );
+            println!(
+                "  Tainted Processes Count:   {}",
+                status.tainted_processes_count
+            );
+            println!(
+                "  Total Sensitive Files:     {}",
+                status.total_files_tracked
+            );
+            println!(
+                "  Tainted Files Count:       {}",
+                status.tainted_files_count
+            );
             println!("================================================================================\n");
         }
         "seed" => {
             let p = path_or_url.unwrap_or("C:\\confidential\\doc.docx");
-            let s = sha256.unwrap_or("0000000000000000000000000000000000000000000000000000000000000000");
+            let s = sha256
+                .unwrap_or("0000000000000000000000000000000000000000000000000000000000000000");
             let c = classification.unwrap_or("CrownJewel");
             let pol = policy.unwrap_or("Quarantine");
 
@@ -164,11 +197,16 @@ pub async fn handle_graph(
             let state = client.get_graph_state().await?;
             println!("\n================================================================================");
             println!("🕸️  LANGGRAPH ORCHESTRATOR STATE");
-            println!("================================================================================");
+            println!(
+                "================================================================================"
+            );
             println!("  Incident ID:           {}", state.incident_id);
             println!("  Current Node:          {}", state.current_node);
             println!("  Mode:                  {}", state.mode);
-            println!("  Aggregate Threat Score: {:.2}", state.aggregate_threat_score);
+            println!(
+                "  Aggregate Threat Score: {:.2}",
+                state.aggregate_threat_score
+            );
             println!("  Active Threats:        {}", state.active_threats_count);
             println!("  Execution Trace Len:   {}", state.execution_trace_len);
             println!("  Trace Chain Valid:     {}", state.trace_chain_valid);
@@ -414,7 +452,10 @@ pub async fn handle_edr_behavior(action: &str) -> Result<()> {
         report.total_baseline_deviations,
         report.automated_containments_triggered
     );
-    println!("  Active Sensor Hooks: {}", report.active_sensor_hooks.join(" | "));
+    println!(
+        "  Active Sensor Hooks: {}",
+        report.active_sensor_hooks.join(" | ")
+    );
     println!("--------------------------------------------------------------------------------");
     for nar in &report.active_narratives {
         println!(
@@ -428,7 +469,6 @@ pub async fn handle_edr_behavior(action: &str) -> Result<()> {
     println!("================================================================================");
     Ok(())
 }
-
 
 pub async fn handle_containment_suite() -> Result<()> {
     let oso_status = killswitch_telemetry::global_oso_aws_containment().status_report();
@@ -478,24 +518,47 @@ pub async fn handle_cage(
             let status = client.get_cage_status().await?;
             println!("\n================================================================================");
             println!("🛡️  GOOGLE CAGE GOVERNANCE KERNEL STATUS (arXiv:2606.12320)");
-            println!("================================================================================");
-            println!("  Kernel Status:            {}", if !status.llm_clients_in_kernel { "ACTIVE (Deterministic LLM-Free)" } else { "INACTIVE" });
-            println!("  Active Substrate Digest:  {}", status.substrate_contract_digest);
+            println!(
+                "================================================================================"
+            );
+            println!(
+                "  Kernel Status:            {}",
+                if !status.llm_clients_in_kernel {
+                    "ACTIVE (Deterministic LLM-Free)"
+                } else {
+                    "INACTIVE"
+                }
+            );
+            println!(
+                "  Active Substrate Digest:  {}",
+                status.substrate_contract_digest
+            );
             println!("  Active Contract ID:       {}", status.active_contract_id);
             println!("  Substrate Format:         {:?}", status.substrate_format);
             println!("  Total Evaluations:        {}", status.total_evaluations);
             println!("  Clear Verdicts:           {}", status.total_cleared);
             println!("  Refusal Verdicts:         {}", status.total_refused);
-            println!("  Cumulative Fiscal Spend:  ${:.2} / ${:.2}", status.fiscal_spent_usd, status.fiscal_cap_usd);
-            println!("  Receipts in Evidence Log: {}", status.evidence_receipt_count);
+            println!(
+                "  Cumulative Fiscal Spend:  ${:.2} / ${:.2}",
+                status.fiscal_spent_usd, status.fiscal_cap_usd
+            );
+            println!(
+                "  Receipts in Evidence Log: {}",
+                status.evidence_receipt_count
+            );
             println!("================================================================================\n");
         }
         "verify" => {
             let report = SubsystemVerifier::verify_cage_governance().await?;
             println!("\n================================================================================");
             println!("🛡️  CAGE GOVERNANCE SELF-DIAGNOSTIC VERIFICATION");
-            println!("================================================================================");
-            println!("  Status:       {}", if report.passed { "PASS" } else { "FAIL" });
+            println!(
+                "================================================================================"
+            );
+            println!(
+                "  Status:       {}",
+                if report.passed { "PASS" } else { "FAIL" }
+            );
             println!("  Details:      {}", report.details);
             println!("  Duration:     {} ms", report.duration_ms);
             println!("================================================================================\n");
@@ -510,16 +573,22 @@ pub async fn handle_cage(
             } else {
                 bail!("Missing --spec parameter with path or specification string");
             };
-            let artifact = killswitch_telemetry::SubstrateCompiler::detect_and_compile_str(&spec_content)
-                .map_err(|e| anyhow::anyhow!("Compilation failed: {}", e))?;
+            let artifact =
+                killswitch_telemetry::SubstrateCompiler::detect_and_compile_str(&spec_content)
+                    .map_err(|e| anyhow::anyhow!("Compilation failed: {}", e))?;
             println!("\n================================================================================");
             println!("🛡️  COMPILED CAGE SUBSTRATE CONTRACT");
-            println!("================================================================================");
+            println!(
+                "================================================================================"
+            );
             println!("  Contract ID:     {}", artifact.contract_id);
             println!("  Detected Format: {:?}", artifact.format);
             println!("  SHA-256 Digest:  {}", artifact.substrate_contract_digest);
             println!("  Allowed Tools:   {:?}", artifact.allowed_tools);
-            println!("  Max Transfer:    ${:.2}", artifact.max_single_transfer_usd);
+            println!(
+                "  Max Transfer:    ${:.2}",
+                artifact.max_single_transfer_usd
+            );
             println!("  Fiscal Cap:      ${:.2}", artifact.fiscal_cap_usd);
             println!("  Digest Verified: {}", artifact.verify_digest());
             println!("================================================================================\n");
@@ -541,11 +610,18 @@ pub async fn handle_cage(
             let resp = client.evaluate_cage(&req).await?;
             println!("\n================================================================================");
             println!("🛡️  CAGE POLICY ENFORCEMENT POINT EVALUATION");
-            println!("================================================================================");
+            println!(
+                "================================================================================"
+            );
             println!("  Verdict:        {:?}", resp.verdict);
             println!("  Tier:           {:?}", resp.tier);
             println!("  Rule ID:        {}", resp.rule_id);
-            println!("  Details:        {}", resp.error_message.as_deref().unwrap_or("Action cleared all 8 tiers"));
+            println!(
+                "  Details:        {}",
+                resp.error_message
+                    .as_deref()
+                    .unwrap_or("Action cleared all 8 tiers")
+            );
             println!("  Receipt Digest: {}", resp.receipt.decision_digest);
             println!("================================================================================\n");
         }
@@ -559,17 +635,23 @@ pub async fn handle_cage(
             } else {
                 bail!("Missing --trace parameter with file path or JSON array");
             };
-            let events: Vec<killswitch_telemetry::GovernanceTraceEvent> = serde_json::from_str(&trace_content)?;
+            let events: Vec<killswitch_telemetry::GovernanceTraceEvent> =
+                serde_json::from_str(&trace_content)?;
             let report = client.verify_cage_trace(&events).await?;
             println!("\n================================================================================");
             println!("🛡️  CAGE TRACE MODEL CONFORMANCE REPORT");
-            println!("================================================================================");
+            println!(
+                "================================================================================"
+            );
             println!("  Conformant:     {}", report.is_conformant);
             println!("  Events:         {}", report.total_events);
             println!("  Violations:     {:?}", report.violations);
             println!("================================================================================\n");
         }
-        other => bail!("Unknown CAGE action '{}'. Use status, verify, compile, evaluate, or verify-trace.", other),
+        other => bail!(
+            "Unknown CAGE action '{}'. Use status, verify, compile, evaluate, or verify-trace.",
+            other
+        ),
     }
     Ok(())
 }
@@ -579,15 +661,22 @@ pub async fn handle_cage(
 pub fn handle_wfp_kernel_apply(action: &str) -> Result<()> {
     #[cfg(windows)]
     {
+        let normalized = action.to_lowercase();
+        if normalized != "engage" && normalized != "disarm" {
+            bail!(
+                "Unknown --wfp-kernel-apply action '{}'. Expected 'engage' or 'disarm'.",
+                action
+            );
+        }
         if !killswitch_core::wfp::is_current_process_elevated() {
             bail!("Administrator privileges required to apply WFP kernel filters. Please run with elevated privileges.");
         }
-        match action.to_lowercase().as_str() {
+        match normalized.as_str() {
             "engage" => {
                 let receipt = killswitch_core::wfp::engage_windows_network_quarantine_with_ports(
                     "UAC-Elevated",
                     "UAC delegation",
-                    &[3030],
+                    &[],
                 )
                 .map_err(|e| anyhow::anyhow!("WFP kernel quarantine installation failed: {}", e))?;
                 println!(
@@ -619,5 +708,3 @@ pub fn handle_wfp_kernel_apply(action: &str) -> Result<()> {
         bail!("--wfp-kernel-apply is only supported on Windows platforms");
     }
 }
-
-

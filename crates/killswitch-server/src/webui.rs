@@ -3619,11 +3619,19 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
         const tr = document.createElement('tr');
 
         const tdProto = document.createElement('td');
-        tdProto.innerHTML = '<strong>' + escapeHtml(p.id) + '</strong><br><small>' + escapeHtml(p.name) + '</small>';
+        const protoStrong = document.createElement('strong');
+        protoStrong.textContent = p.id || '';
+        const protoBr = document.createElement('br');
+        const protoSmall = document.createElement('small');
+        protoSmall.textContent = p.name || '';
+        tdProto.append(protoStrong, protoBr, protoSmall);
         tr.appendChild(tdProto);
 
         const tdDomain = document.createElement('td');
-        tdDomain.innerHTML = '<span class="badge">' + escapeHtml(formatDomainShort(p.domain)) + '</span>';
+        const domainBadge = document.createElement('span');
+        domainBadge.className = 'badge';
+        domainBadge.textContent = formatDomainShort(p.domain);
+        tdDomain.appendChild(domainBadge);
         tr.appendChild(tdDomain);
 
         const tdLayer = document.createElement('td');
@@ -3650,9 +3658,10 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
         tr.appendChild(tdVector);
 
         const tdStatus = document.createElement('td');
-        tdStatus.innerHTML = isIsolated
-          ? '<span class="badge danger">🚨 100% BLOCKED</span>'
-          : '<span class="badge ok">🟢 Monitored</span>';
+        const statusBadge = document.createElement('span');
+        statusBadge.className = isIsolated ? 'badge danger' : 'badge ok';
+        statusBadge.textContent = isIsolated ? '🚨 100% BLOCKED' : '🟢 Monitored';
+        tdStatus.appendChild(statusBadge);
         tr.appendChild(tdStatus);
 
         const tdKernel = document.createElement('td');
@@ -3719,4 +3728,3 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
 </body>
 </html>
 "#;
-

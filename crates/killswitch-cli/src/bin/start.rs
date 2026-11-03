@@ -12,9 +12,9 @@
 //!
 //! Provides `--verify` / `--check` flags for immediate self-diagnostics exit 0.
 
-use std::path::PathBuf;
 use anyhow::Result;
 use clap::Parser;
+use std::path::PathBuf;
 use tracing::info;
 
 use killswitch_cli::loader::{UnifiedConfig, UnifiedRuntime};
@@ -58,6 +58,10 @@ struct StartCli {
     /// Internal elevated helper flag for Windows Filtering Platform (WFP) kernel delegation
     #[arg(long, hide = true)]
     wfp_kernel_apply: Option<String>,
+
+    /// Internal marker set after startup UAC elevation relaunch
+    #[arg(long, hide = true)]
+    elevated_relaunch: bool,
 }
 
 #[tokio::main]
@@ -77,13 +81,18 @@ async fn main() -> Result<()> {
 
     // Standalone --cage-governance flag invocation
     if cli.cage_governance && !cli.verify {
-        println!("🛡️  [START.EXE] Executing CAGE Governance Self-Diagnostics (--cage-governance)...");
+        println!(
+            "🛡️  [START.EXE] Executing CAGE Governance Self-Diagnostics (--cage-governance)..."
+        );
         match SubsystemVerifier::verify_cage_governance().await {
             Ok(report) => {
                 println!("\n================================================================================");
                 println!("🛡️  CAGE GOVERNANCE SELF-DIAGNOSTIC REPORT");
                 println!("================================================================================");
-                println!("  Status:       {}", if report.passed { "PASS" } else { "FAIL" });
+                println!(
+                    "  Status:       {}",
+                    if report.passed { "PASS" } else { "FAIL" }
+                );
                 println!("  Phase:        {}", report.name);
                 println!("  Duration:     {} ms", report.duration_ms);
                 println!("  Details:      {}", report.details);
@@ -102,8 +111,15 @@ async fn main() -> Result<()> {
     // Self-Diagnostic Check Mode (--verify / --check)
     // -------------------------------------------------------------------------
     if cli.verify {
-        let count = if cli.cage_governance { "8-Phase" } else { "7-Phase" };
-        println!("🛡️  [START.EXE] Executing {} Subsystem Self-Diagnostics...", count);
+        let count = if cli.cage_governance {
+            "8-Phase"
+        } else {
+            "7-Phase"
+        };
+        println!(
+            "🛡️  [START.EXE] Executing {} Subsystem Self-Diagnostics...",
+            count
+        );
         match SubsystemVerifier::run_with_governance(cli.cage_governance).await {
             Ok(report) => {
                 report.print_summary();
@@ -120,6 +136,15 @@ async fn main() -> Result<()> {
     // -------------------------------------------------------------------------
     // Full Runtime Boot Mode ("load it all")
     // -------------------------------------------------------------------------
+    if !cli.daemon {
+        if let Ok(true) =
+            killswitch_core::wfp::relaunch_self_elevated_for_webui(cli.elevated_relaunch)
+        {
+            println!("🔐 [START.EXE] Launched elevated Administrator WebUI host via Windows UAC.");
+            std::process::exit(0);
+        }
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
@@ -156,7 +181,10 @@ async fn main() -> Result<()> {
         db_dir: cli.db_dir,
     };
 
-    info!("🛡️ [START.EXE] Initializing unified runtime with mode: {:?}", config.mode);
+    info!(
+        "🛡️ [START.EXE] Initializing unified runtime with mode: {:?}",
+        config.mode
+    );
     let runtime = UnifiedRuntime::boot(config).await?;
 
     println!("✅ [START.EXE] All Subsystems Loaded. System Operational.\n");

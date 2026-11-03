@@ -10,10 +10,10 @@
 //!
 //! Enforces Zero OS Subprocess spawning and guaranteed emergency restore upon exit.
 
-use std::path::PathBuf;
-use std::sync::Arc;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use std::path::PathBuf;
+use std::sync::Arc;
 use tracing::{info, warn};
 
 use killswitch_adjudication::ZeroFalsePositiveAdjudicator;
@@ -28,7 +28,9 @@ use killswitch_telemetry::octopus::ArmRingRegistry;
 use killswitch_telemetry::otel_lineage::EndpointLineageEngine;
 use killswitch_telemetry::phaselock::PhaseLockManager;
 use killswitch_types::adjudication::ThreatCandidate;
-use killswitch_types::graph::{GraphNodeId, GraphNodeOutput, KillSwitchGraphState, OrchestratorMode};
+use killswitch_types::graph::{
+    GraphNodeId, GraphNodeOutput, KillSwitchGraphState, OrchestratorMode,
+};
 
 /// Configuration options for booting the unified system.
 #[derive(Debug, Clone)]
@@ -97,7 +99,10 @@ impl OrchestratorBridge for LiveOrchestratorAdapter {
         })
     }
 
-    async fn submit_threat(&self, candidate: ThreatCandidate) -> Result<GraphNodeOutput, ServerError> {
+    async fn submit_threat(
+        &self,
+        candidate: ThreatCandidate,
+    ) -> Result<GraphNodeOutput, ServerError> {
         self.orchestrator
             .submit_threat(candidate.clone())
             .await
@@ -134,16 +139,39 @@ impl UnifiedRuntime {
     /// Boots 100% of the subsystems and links them into a single cohesive runtime.
     pub async fn boot(config: UnifiedConfig) -> Result<Self> {
         info!("🛡️ [LOADER] Booting Phase 1: Core Host Containment & State Ledger");
-        let storage_dir = config.db_dir.clone().unwrap_or_else(|| {
-            std::env::var("OSOOSI_DATABASE_DIR")
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| PathBuf::from("."))
-        });
+        // Clean up any legacy split-brain ./killchain_state.json when using standard database directory
+        if config.db_dir.is_none() {
+            let legacy_ledger = PathBuf::from("killchain_state.json");
+            if legacy_ledger.exists() && !legacy_ledger.is_symlink() {
+                let _ = std::fs::remove_file(&legacy_ledger);
+            }
+        }
 
         let containment_manager = Arc::new(
-            HostContainmentManager::new_default(Some(&storage_dir))
+            HostContainmentManager::new_default(config.db_dir.as_deref())
                 .context("Failed to initialize HostContainmentManager")?,
         );
+
+        #[cfg(target_os = "windows")]
+        if std::env::var("CARGO").is_err()
+            && std::env::var("RUST_TEST_THREADS").is_err()
+            && containment_manager.get_status().isolated
+            && !killswitch_core::wfp::has_live_active_wfp_filters()
+        {
+            warn!("⚠️ [LOADER] Reconciling stale ledger state on boot: ledger showed isolated=true with zero live WFP filters in BFE.");
+            let _ = containment_manager
+                .execute_unauthenticated_emergency_disarm(
+                    "Boot reconciliation: zero live WFP kernel filters active in BFE",
+                )
+                .await;
+        }
+
+        let storage_dir = config.db_dir.clone().unwrap_or_else(|| {
+            std::env::var("KILLSWITCH_DATABASE_DIR")
+                .or_else(|_| std::env::var("OSOOSI_DATABASE_DIR"))
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| PathBuf::from("database"))
+        });
 
         info!("🛡️ [LOADER] Booting Phase 2: Zero-False-Positive Adjudication Engine");
         let adjudicator = Arc::new(ZeroFalsePositiveAdjudicator::new());
@@ -182,6 +210,10 @@ impl UnifiedRuntime {
         server_state_raw.arm_registry = arm_registry.clone();
         server_state_raw.event_correlator = event_correlator.clone();
         server_state_raw.phaselock_manager = phaselock_manager.clone();
+        server_state_raw.active_mode = Arc::new(tokio::sync::RwLock::new(config.mode));
+        server_state_raw
+            .active_bound_port
+            .store(config.port, std::sync::atomic::Ordering::SeqCst);
         server_state_raw.config = ServerConfig {
             host: config.host.clone(),
             port: config.port,
