@@ -157,9 +157,10 @@ pub async fn handle_cage_quarantine(
         expires_at: None,
         nonce: req.nonce.clone(),
     };
-    if let Err(e) = state.journal.record_quarantine(lease) {
-        warn!("⚠️ [CAGE-SUBSTRATE] Journal recording warning: {}", e);
-    }
+    state
+        .journal
+        .record_quarantine(lease)
+        .map_err(|e| ServerError::Internal(format!("Failed to record quarantine lease in sealed journal: {}", e)))?;
 
     // 11. Construct unsigned receipt
     let envelope_digest = hex::encode(sha2::Sha256::digest(&canonical_body));
@@ -487,9 +488,12 @@ pub async fn handle_conformal_validate(
     let alpha = req.alpha.unwrap_or(0.05);
 
     // 2. Genuine Conformal nonconformity calculation using killswitch-conformal
-    let p_value = if req.scores.is_empty() {
-        1.0
-    } else if req.scores.len() == 1 {
+    if req.scores.is_empty() {
+        return Err(ServerError::Validation(
+            "Conformal validation scores vector cannot be empty".to_string(),
+        ));
+    }
+    let p_value = if req.scores.len() == 1 {
         // Scalar nonconformity score evaluated against calibrated sources
         let score = req.scores[0];
         let cal = killswitch_conformal::MultiSourceCalibration::default_calibrated(4, 4);

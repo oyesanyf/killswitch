@@ -260,7 +260,9 @@ pub fn resolve_loopback_peer_pid(peer_addr: SocketAddr, bound_port: u16) -> Resu
 
 #[cfg(not(any(windows, target_os = "linux")))]
 pub fn resolve_loopback_peer_pid(_peer_addr: SocketAddr, _bound_port: u16) -> Result<u32, KillSwitchError> {
-    Ok(std::process::id())
+    Err(KillSwitchError::NativeOsError(
+        "Loopback peer PID resolution is not supported on this platform (fail-closed)".to_string(),
+    ))
 }
 
 #[cfg(test)]
