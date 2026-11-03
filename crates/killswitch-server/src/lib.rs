@@ -8,8 +8,10 @@
 //! - Anti-lockout rate-limiting and caller PID validation
 //! - Zero external OS command subprocess spawning
 
+pub mod cage_substrate;
 pub mod error;
 pub mod handlers;
+pub mod journal;
 pub mod middleware;
 pub mod orchestrator_bridge;
 pub mod routes;

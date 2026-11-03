@@ -28,7 +28,7 @@ use killswitch_telemetry::otel_lineage::{
 };
 use killswitch_types::adjudication::{AdjudicationResult, EvidenceClass, ThreatCandidate, VetoReason};
 use killswitch_types::graph::OrchestratorMode;
-use killswitch_types::status::{ContainmentLevel, OperatorCredentials, KILLCHAIN_RESTORE_TOKEN};
+use killswitch_types::status::{ContainmentLevel, OperatorCredentials};
 
 // =============================================================================
 // Part 1: Subsystem Self-Diagnostics (`start.exe --verify` / `--check`)
@@ -629,6 +629,8 @@ async fn test_reversible_mode_emergency_unauthenticated_disarm() {
 
 #[tokio::test]
 async fn test_reversible_mode_authenticated_disarm_and_bad_credentials() {
+    let test_master_token = "test_master_token_0123456789abcdef0123456789abcdef";
+    std::env::set_var("KILLSWITCH_MASTER_TOKEN", test_master_token);
     let temp_dir = tempfile::tempdir().unwrap();
     let mgr = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
 
@@ -671,10 +673,10 @@ async fn test_reversible_mode_authenticated_disarm_and_bad_credentials() {
     // 3. Authenticated Disarm with Authorized Master Bypass Token
     let valid_creds = OperatorCredentials {
         operator_id: "SecOps-Lead".to_string(),
-        auth_token: Some(KILLCHAIN_RESTORE_TOKEN.to_string()),
+        auth_token: Some(test_master_token.to_string()),
         password: None,
         caller_pid: Some(std::process::id()),
-        confirmation_phrase: Some(KILLCHAIN_RESTORE_TOKEN.to_string()),
+        confirmation_phrase: Some(test_master_token.to_string()),
     };
     let restored = mgr
         .disarm_isolation("SecOps-Lead", "Incident remediated cleanly", Some(&valid_creds))

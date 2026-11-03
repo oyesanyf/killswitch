@@ -47,6 +47,8 @@ hmac = "0.12"
 subtle = "2.6"
 hex = "0.4"
 rand = "0.8"
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+base64 = "0.22"
 uuid = { version = "1.11", features = ["v4", "serde"] }
 
 # System inspection & concurrency
@@ -122,3 +124,9 @@ codegen-units = 1
 panic = "abort"
 strip = true
 overflow-checks = true
+
+[profile.release.build-override]
+opt-level = 0
+debug = true
+strip = false
+

@@ -8,12 +8,15 @@ pub mod fprime;
 pub mod freeze;
 pub mod killchain;
 pub mod landlock;
+pub mod peer_pid;
 pub mod pf;
 pub mod service;
 pub mod state_ledger;
 pub mod tarpit;
 pub mod tpm;
 pub mod wfp;
+
+pub use peer_pid::resolve_loopback_peer_pid;
 
 pub use auth::{FrozenPidsProvider, OperatorAuthManager};
 pub use fprime::{FPrimeDispatchResult, FPrimeOpcode, FPrimeSupervisor, FPrimeTopologyStatus};

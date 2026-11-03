@@ -14,7 +14,10 @@ use killswitch_server::routes::build_router;
 use killswitch_server::server::ServerState;
 use killswitch_server::types::*;
 
+const TEST_MASTER_TOKEN: &str = "test_master_token_0123456789abcdef0123456789abcdef";
+
 fn setup_test_server_state() -> Arc<ServerState> {
+    std::env::set_var("KILLSWITCH_MASTER_TOKEN", TEST_MASTER_TOKEN);
     let temp_dir = tempfile::tempdir().unwrap();
     let containment = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
     Arc::new(ServerState::with_defaults(containment))
@@ -94,7 +97,7 @@ async fn test_server_engage_and_disarm_lifecycle() {
     let disarm_body = serde_json::json!({
         "operator": "test_admin",
         "reason": "Threat neutralized",
-        "token": "CONFIRM RESTORE"
+        "token": TEST_MASTER_TOKEN
     });
 
     let req = Request::builder()
@@ -956,7 +959,7 @@ async fn test_manual_trigger_attribution_webui_reconnect_and_standalone_ui() {
     let disarm_body = serde_json::json!({
         "operator": "user_console",
         "reason": "User clicked Reconnect Internet in WebUI",
-        "token": "CONFIRM RESTORE"
+        "token": TEST_MASTER_TOKEN
     });
     let req_dis = Request::builder()
         .uri("/disarm")

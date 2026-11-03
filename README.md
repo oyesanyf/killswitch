@@ -215,8 +215,22 @@ To prevent an attacker or rootkit with local administrator access from tampering
   7. `CBF` (discrete-time Control Barrier Function $h(x_{k+1}) - (1-\gamma)h(x_k) \ge 0$ with `FinanceBoundingBarrier` and `HealthcareDoseBarrier` `CTRL_CBF_DOSE_001`)
   8. `Fiscal` (`AtomicFiscalBarrier` using lock-free `AtomicU64` compare-and-exchange refusing concurrent overspend with `FISCAL_CAP_EXCEEDED`)
 - **Tamper-Evident Receipts & Independent Trace Model Checker**: `CageDecisionReceipt`, `CageEvidenceWriter`, and `CageTraceVerifier::verify_trace_conformance`.
+- **4-Seam Out-of-Process Actuator Adapter (`actuator_04`)**:
+  Integrates with CAGE's Layer 1 execution boundary (`ActuatorRegistry` & `verify_and_consume_seal()`), implementing the 4 canonical seams:
+  1. `validate_seal()`: Validates cryptographic HMAC/Ed25519 routing seal and verifies single-use nonce consumption.
+  2. `execute()`: Atomic dispatch of authorized agent actions under deterministic governance contracts.
+  3. `quarantine()`: Fail-closed host process suspension and kernel network containment when critical security policies are breached.
+  4. `release()`: Monotonically sequenced and hash-chained lease release with cryptographic audit logging.
+- **6 CAGE Substrate Endpoints (`killswitch-server::cage_substrate`)**:
+  1. `GET /.well-known/jwks.json`: Public JWKS key discovery endpoint providing Ed25519 public keys with `kid`-based trust-anchor resolution.
+  2. `GET /v1/cage/normative-baseline/{region}`: Regional normative baseline and STERA risk thresholds.
+  3. `POST /v1/cage/attest`: Cryptographic attestation of substrate contract & runtime evidence.
+  4. `POST /v1/cage/conformal/validate`: Genuine Mahalanobis nonconformity $p$-value calibration and multi-voter consensus adjudication.
+  5. `POST /v1/cage/quarantine`: Instant fail-closed network and process quarantine under active breach.
+  6. `POST /v1/cage/release`: Monotonically sequenced and SHA-256 hash-chained quarantine release.
 
 ---
+
 
 ## 🛡️ Signed Kernel-Mode Driver Deployment (`ELAM / Minifilter / eBPF Ring-0 Loading`)
 

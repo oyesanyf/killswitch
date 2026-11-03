@@ -38,7 +38,10 @@ async fn body_to_bytes(body: axum::body::Body) -> axum::body::Bytes {
     axum::body::to_bytes(body, usize::MAX).await.unwrap()
 }
 
+const TEST_MASTER_TOKEN: &str = "test_master_token_0123456789abcdef0123456789abcdef";
+
 fn setup_test_server_state() -> (Arc<ServerState>, tempfile::TempDir) {
+    std::env::set_var("KILLSWITCH_MASTER_TOKEN", TEST_MASTER_TOKEN);
     let temp_dir = tempfile::tempdir().unwrap();
     let containment =
         Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
@@ -571,7 +574,7 @@ async fn test_challenge_axum_server_3_strike_rate_limit_lockout_and_bypass() {
         let master_body = serde_json::json!({
             "operator": "secops_admin",
             "reason": "Authorized emergency restore bypass",
-            "token": "CONFIRM RESTORE"
+            "token": TEST_MASTER_TOKEN
         });
 
         let req = Request::builder()

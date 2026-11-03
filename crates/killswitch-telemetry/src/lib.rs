@@ -18,6 +18,7 @@ pub mod correlator;
 pub mod distributed_consensus;
 pub mod edr_behavioral;
 pub mod honeytokens;
+pub mod jcs;
 pub mod octopus;
 pub mod oso_aws_containment;
 pub mod otel_lineage;
@@ -41,16 +42,18 @@ pub use bounded_agents_apc::{
     IntentEnforcementMode, IntentSpec, KTupleRestriction, KTupleStep, PairwiseRestriction,
 };
 pub use cage_governance::{
-    global_cage_kernel, AtomicFiscalBarrier, CageDecisionReceipt, CageEvidenceEntry,
-    CageEvidenceWriter, CageEvaluationRequest, CageEvaluationResponse, CageGovernanceKernel,
-    CageKernelStatusReport, CageTier, CageTraceVerifier, CageVerdict, CageWarrantToken,
-    CompiledSubstrateArtifact, FinanceBoundingBarrier, GovernanceTraceEvent,
-    GovernanceTraceEventType, HealthcareDoseBarrier, HitlConsensusApproval, SubstrateCompiler,
-    SubstrateFormat, SubstrateNorm, TraceConformanceReport, CTRL_CBF_DOSE_001, CTRL_CBF_FINANCE_001,
-    CTRL_CONF_001, CTRL_CONSENSUS_REQUIRED, CTRL_FTRA_001, CTRL_OPA_005, CTRL_STPA_UCA1,
-    CTRL_STPA_UCA2, CTRL_STPA_UCA3, CTRL_STPA_UCA4, CTRL_WARRANT_INVALID, CTRL_WARRANT_REQUIRED,
+    export_cage_governance_trace_v1, global_cage_kernel, AtomicFiscalBarrier, CageDecisionReceipt,
+    CageEvidenceEntry, CageEvidenceWriter, CageEvaluationRequest, CageEvaluationResponse,
+    CageGovernanceKernel, CageKernelStatusReport, CageTier, CageTraceVerifier, CageVerdict,
+    CageWarrantToken, CompiledSubstrateArtifact, Cumulative24hTracker, FinanceBoundingBarrier,
+    GovernanceTraceEvent, GovernanceTraceEventType, HealthcareDoseBarrier, HitlConsensusApproval,
+    KeyedCumulative24hTracker, SubstrateCompiler, SubstrateFormat, SubstrateNorm,
+    TraceConformanceReport, CTRL_CBF_DOSE_001, CTRL_CBF_FINANCE_001, CTRL_CONF_001,
+    CTRL_CONSENSUS_REQUIRED, CTRL_FTRA_001, CTRL_OPA_005, CTRL_STPA_UCA1, CTRL_STPA_UCA2,
+    CTRL_STPA_UCA3, CTRL_STPA_UCA4, CTRL_WARRANT_INVALID, CTRL_WARRANT_REQUIRED,
     FISCAL_CAP_EXCEEDED,
 };
+pub use jcs::{canonicalize_jcs, canonicalize_jcs_string, JcsError};
 pub use canary::{CanaryAuditReport, CanaryDecoyFile, CanaryManager};
 pub use causal::{CausalEdge, CausalEdgeKind, CausalNodeType, CausalSecurityGraph};
 pub use continuous_defense::{

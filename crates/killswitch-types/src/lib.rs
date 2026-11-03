@@ -20,6 +20,7 @@ pub use errors::{KillSwitchError, KillSwitchResult, Result};
 pub use identity::ProcessInstanceIdentity;
 
 // Re-export containment status & auth types
+#[allow(deprecated)]
 pub use status::{
     constant_time_eq, validate_arm_generation_epoch, validate_caller_pid,
     ActiveNetworkRule, AdminHashAlgorithm, AuthMethod, AuthResult,
@@ -30,7 +31,8 @@ pub use status::{
     ProcessIsolationState, QuarantinedArmEpoch, StoredAdminHash, ThreadTarpitMetrics,
     DEFAULT_CONTROL_PORT, DEFAULT_INTERMEDIATE_HEALTH_PROBE_INTERVAL_SECS,
     DEFAULT_REQUIRED_CONSECUTIVE_HEALTHY_PROBES, DEFAULT_ROLLBACK_WATCHDOG_MAX_SECS,
-    KILLCHAIN_ISOLATE_TOKEN, KILLCHAIN_RESTORE_TOKEN, LOCKOUT_DURATION_SECS,
+    KILLCHAIN_ISOLATE_CONFIRMATION_PHRASE, KILLCHAIN_ISOLATE_TOKEN,
+    KILLCHAIN_RESTORE_CONFIRMATION_PHRASE, KILLCHAIN_RESTORE_TOKEN, LOCKOUT_DURATION_SECS,
     MAX_FAILED_ATTEMPTS,
 };
 

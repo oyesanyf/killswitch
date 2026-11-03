@@ -132,6 +132,7 @@ pub struct DisarmResponse {
 pub struct HealthProbeRequest {
     pub operator: Option<String>,
     pub force_rollback: Option<bool>,
+    pub token: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -861,5 +862,134 @@ impl CageVerifyTracePayload {
             Self::Object { trace, .. } => trace,
         }
     }
+}
+
+// =============================================================================
+// CAGE Substrate Wire DTOs (RFC 8037 JWKS, Quarantine Assertion/Receipt, Attestation)
+// =============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JwkKeyDto {
+    pub kty: String,       // "OKP"
+    pub crv: String,       // "Ed25519"
+    pub kid: String,       // 64-hex SHA-256 of public key
+    pub x: String,         // base64url-encoded public key (32 bytes, unpadded)
+    pub r#use: String,     // "sig"
+    pub alg: String,       // "EdDSA"
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JwksResponse {
+    pub keys: Vec<JwkKeyDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CageQuarantineRequest {
+    #[serde(alias = "agent_svid")]
+    pub workload_id: String,
+    #[serde(default)]
+    pub target_pid: Option<u32>,
+    #[serde(alias = "reason", alias = "trigger_reason")]
+    pub trigger_reason: String,
+    #[serde(alias = "source_rule_id", default)]
+    pub rule_id: Option<String>,
+    #[serde(default = "default_enforcement_plane")]
+    pub enforcement_plane: String,
+    #[serde(alias = "governance_decision_digest", default)]
+    pub refusal_proof_hash: Option<String>,
+    pub nonce: String,
+    #[serde(alias = "issued_at", default)]
+    pub timestamp_utc: Option<serde_json::Value>,
+    #[serde(default)]
+    pub thread_id: Option<String>,
+    #[serde(default)]
+    pub correlation_id: Option<String>,
+}
+
+fn default_enforcement_plane() -> String {
+    "HOST_OS_KERNEL".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CageQuarantineReceiptResponse {
+    pub status: String,            // "QUARANTINED"
+    pub quarantined: bool,         // true
+    pub enforcement_plane: String, // "HOST_OS_KERNEL"
+    pub rule_id: String,
+    pub quarantined_at: String,    // ISO 8601 / RFC 3339
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_pid: Option<u32>,
+    pub kid: String,               // KillSwitch Ed25519 public key ID
+    pub signature: String,         // base64url Ed25519 signature over CAGE_QUARANTINE_RECEIPT_V1:<JCS>
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CageQuarantineReleaseRequest {
+    #[serde(alias = "agent_svid")]
+    pub workload_id: String,
+    pub quorum_approval_digest: String,
+    pub quorum_count: u32,
+    pub nonce: String,
+    #[serde(default)]
+    pub expected_min_epoch: Option<u64>,
+    #[serde(default)]
+    pub issued_at: Option<serde_json::Value>,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CageQuarantineReleaseReceiptResponse {
+    pub released: bool,            // true
+    pub enforcement_plane: String, // "HOST_OS_KERNEL"
+    pub epoch_before: u64,
+    pub epoch_after: u64,
+    pub outcome: String,           // "RELEASED"
+    pub released_at: String,
+    pub kid: String,
+    pub signature: String,         // base64url Ed25519 signature over CAGE_QUARANTINE_RELEASE_RECEIPT_V1:<JCS>
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CageAttestationResponse {
+    pub attestation_type: String,  // "HOST_TPM_PCR"
+    pub ring0_posture: String,     // "ACTIVE_WFP_FILTERED" | "ACTIVE_RING0_ENFORCED"
+    pub tpm_pcr_quote: String,     // 64-hex SHA-256 quote of PCRs 0..7
+    pub pcr_values: std::collections::BTreeMap<String, String>,
+    pub timestamp_utc: String,     // ISO 8601 / RFC 3339
+    pub kid: String,               // KillSwitch Ed25519 public key ID
+    pub signature: String,         // base64url Ed25519 signature over CAGE_ATTESTATION_RECEIPT_V1:<JCS>
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CageConformalBaselineResponse {
+    pub region: String,
+    pub alpha: f64,
+    pub calibration_size: usize,
+    pub nonconformity_threshold: f64,
+    pub timestamp_utc: String,
+    pub kid: String,
+    pub signature: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CageConformalValidateRequest {
+    pub scores: Vec<f64>,
+    #[serde(default)]
+    pub alpha: Option<f64>,
+    #[serde(default)]
+    pub action: Option<String>,
+    pub nonce: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CageConformalValidateResponse {
+    pub admitted: bool,
+    pub p_value: f64,
+    pub alpha: f64,
+    pub voter_consensus: String,
+    pub timestamp_utc: String,
+    pub kid: String,
+    pub signature: String,
 }
 

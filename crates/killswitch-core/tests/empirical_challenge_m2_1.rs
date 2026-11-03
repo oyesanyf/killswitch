@@ -542,7 +542,7 @@ fn test_stress_auth_tier1_master_token_bypass_and_lockout_reset() {
 fn test_stress_auth_predefined_master_tokens() {
     let auth = OperatorAuthManager::new(None, None);
 
-    // Test KILLCHAIN_RESTORE_TOKEN
+    // Test KILLCHAIN_RESTORE_TOKEN - MUST BE REJECTED per KS-01
     let restore_creds = OperatorCredentials {
         operator_id: "secops".to_string(),
         auth_token: None,
@@ -551,9 +551,9 @@ fn test_stress_auth_predefined_master_tokens() {
         confirmation_phrase: Some(KILLCHAIN_RESTORE_TOKEN.to_string()),
     };
     let r1 = auth.authenticate(&restore_creds);
-    assert!(r1.is_success());
+    assert!(!r1.is_success());
 
-    // Test KILLCHAIN_ISOLATE_TOKEN
+    // Test KILLCHAIN_ISOLATE_TOKEN - MUST BE REJECTED per KS-01
     let isolate_creds = OperatorCredentials {
         operator_id: "secops".to_string(),
         auth_token: Some(KILLCHAIN_ISOLATE_TOKEN.to_string()),
@@ -562,12 +562,14 @@ fn test_stress_auth_predefined_master_tokens() {
         confirmation_phrase: None,
     };
     let r2 = auth.authenticate(&isolate_creds);
-    assert!(r2.is_success());
+    assert!(!r2.is_success());
 }
 
 #[test]
 fn test_stress_auth_caller_pid_anti_hijacking_boundaries() {
     let mut auth = OperatorAuthManager::new(None, None);
+    let valid_token = "valid_secure_token_for_pid_test_32_chars";
+    auth.set_custom_master_token(valid_token.to_string());
     let quarantined_pid = 7777;
     auth.set_frozen_pids_provider(Arc::new(move || vec![quarantined_pid]));
 
@@ -575,7 +577,7 @@ fn test_stress_auth_caller_pid_anti_hijacking_boundaries() {
     for pid in [0, 1, 4] {
         let creds = OperatorCredentials {
             operator_id: "sys".to_string(),
-            auth_token: Some(KILLCHAIN_RESTORE_TOKEN.to_string()),
+            auth_token: Some(valid_token.to_string()),
             password: None,
             caller_pid: Some(pid),
             confirmation_phrase: None,
@@ -587,7 +589,7 @@ fn test_stress_auth_caller_pid_anti_hijacking_boundaries() {
     // Frozen caller PID must be rejected
     let creds_frozen = OperatorCredentials {
         operator_id: "compromised".to_string(),
-        auth_token: Some(KILLCHAIN_RESTORE_TOKEN.to_string()),
+        auth_token: Some(valid_token.to_string()),
         password: None,
         caller_pid: Some(quarantined_pid),
         confirmation_phrase: None,
@@ -598,7 +600,7 @@ fn test_stress_auth_caller_pid_anti_hijacking_boundaries() {
     // Valid PID 6000 is permitted
     let creds_valid = OperatorCredentials {
         operator_id: "valid".to_string(),
-        auth_token: Some(KILLCHAIN_RESTORE_TOKEN.to_string()),
+        auth_token: Some(valid_token.to_string()),
         password: None,
         caller_pid: Some(6000),
         confirmation_phrase: None,
