@@ -865,23 +865,12 @@ impl SemanticDlpEngine {
                     false
                 };
 
-                let has_magnitude = trimmed.ends_with('M')
+                let has_attached_magnitude = trimmed.ends_with('M')
                     || trimmed.ends_with('m')
                     || trimmed.ends_with('B')
-                    || trimmed.ends_with('b')
-                    || trimmed.ends_with('K')
-                    || trimmed.ends_with('k')
-                    || (i + 1 < tokens.len() && {
-                        let la = tokens[i + 1]
-                            .trim_matches([',', ';', ':', '(', ')', '[', ']', '"', '\''])
-                            .to_ascii_lowercase();
-                        matches!(
-                            la.as_str(),
-                            "million" | "m" | "billion" | "b" | "thousand" | "k"
-                        )
-                    });
+                    || trimmed.ends_with('b');
 
-                if has_currency_suffix || has_magnitude {
+                if has_currency_suffix || has_attached_magnitude {
                     currency_match = Some(CurrencyMatch::Attached(trimmed));
                 }
             }
