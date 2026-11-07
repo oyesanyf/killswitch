@@ -1000,6 +1000,94 @@ impl HealthProbeRunner for KillChainHostManager {
     }
 }
 
+/// Helper function strictly for immutable OS kernel anchors (PID 0, 1, 4, csrss, smss, wininit, systemd, launchd, etc.).
+/// Decoupled from developer tools and agent runtimes (wsl.exe, sudo, su, bash, powershell.exe, node, python, cursor, code.exe).
+pub fn is_immutable_os_kernel_pid(pid: u32, name: &str) -> bool {
+    // 1. Kernel, Idle, and Self PIDs
+    if pid <= 4 || pid == std::process::id() {
+        return true;
+    }
+
+    let trimmed = name.trim().trim_matches('"').trim_matches('\'');
+    let base = trimmed.rsplit(['\\', '/']).next().unwrap_or(trimmed);
+    let name_lc = base.to_ascii_lowercase();
+
+    // 2. KillSwitch Self-Preservation
+    if name_lc.contains("killswitch") || name_lc.contains("osoosi") || name_lc.contains("oshoosi") {
+        return true;
+    }
+
+    // 3. Immutable OS Kernel and Core System Subsystem Anchors ONLY
+    matches!(
+        name_lc.as_str(),
+        // Windows Core Kernel / Session Subsystem Anchors
+        "system"
+            | "smss.exe"
+            | "csrss.exe"
+            | "wininit.exe"
+            | "winlogon.exe"
+            | "services.exe"
+            | "lsass.exe"
+            | "lsm.exe"
+            | "fontdrvhost.exe"
+            // Linux Core Kernel / Init Anchors
+            | "init"
+            | "systemd"
+            | "systemd-journald"
+            | "systemd-udevd"
+            | "dbus-daemon"
+            | "kthreadd"
+            // macOS Core System Anchors
+            | "launchd"
+            | "kernel_task"
+            | "windowserver"
+            | "opendirectoryd"
+    )
+}
+
+/// Helper function to classify developer tools, shells, and agent runtimes.
+pub fn is_developer_or_agent_runtime(name: &str) -> bool {
+    let trimmed = name.trim().trim_matches('"').trim_matches('\'');
+    let base = trimmed.rsplit(['\\', '/']).next().unwrap_or(trimmed);
+    let name_lc = base.to_ascii_lowercase();
+
+    matches!(
+        name_lc.as_str(),
+        "wsl.exe"
+            | "wslservice.exe"
+            | "wslhost.exe"
+            | "vmmem"
+            | "vmmemwsl"
+            | "powershell.exe"
+            | "pwsh.exe"
+            | "cmd.exe"
+            | "sudo"
+            | "su"
+            | "bash"
+            | "sh"
+            | "zsh"
+            | "fish"
+            | "python.exe"
+            | "python"
+            | "python3"
+            | "python3.exe"
+            | "node.exe"
+            | "node"
+            | "cursor.exe"
+            | "cursor"
+            | "code.exe"
+            | "windsurf.exe"
+            | "docker.exe"
+            | "dockerd.exe"
+            | "cargo.exe"
+            | "cargo"
+            | "rustc.exe"
+            | "rustc"
+            | "git.exe"
+            | "git"
+    )
+}
+
 /// Helper function to classify critical system and developer processes.
 pub fn is_critical_system_pid(pid: u32, name: &str) -> bool {
     // 1. Kernel, Idle, and Self PIDs

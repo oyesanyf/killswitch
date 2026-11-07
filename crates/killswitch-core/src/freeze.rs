@@ -20,6 +20,12 @@ impl NativeProcessFreezer {
         Self
     }
 
+    /// Checks if a PID or process name is an immutable OS kernel anchor.
+    #[inline]
+    pub fn is_immutable_os_kernel(&self, pid: u32, proc_name: &str) -> bool {
+        crate::killchain::is_immutable_os_kernel_pid(pid, proc_name)
+    }
+
     /// Checks if a PID or process name is immune from freeze/tarpit containment.
     /// Delegates directly to `crate::killchain::is_critical_system_pid` to guarantee
     /// a single canonical source of truth across the entire workspace.
@@ -72,13 +78,13 @@ impl NativeProcessFreezer {
             let pid = pid_raw.as_u32();
             let name = proc.name();
 
-            if immune_pids.contains(&pid) || self.is_immune(pid, name) {
+            if immune_pids.contains(&pid) || self.is_immutable_os_kernel(pid, name) {
                 continue;
             }
 
             if let Some(exe_path) = proc.exe() {
                 let exe_str = exe_path.to_string_lossy();
-                if self.is_immune(pid, &exe_str) {
+                if self.is_immutable_os_kernel(pid, &exe_str) {
                     continue;
                 }
             }
@@ -118,12 +124,12 @@ impl ProcessFreezer for NativeProcessFreezer {
     fn freeze_process(&self, pid: u32) -> Result<ProcessIsolationState, KillSwitchError> {
         let proc_name = get_proc_name_by_pid(pid);
 
-        // Guard against freezing immune processes
-        if self.is_immune(pid, &proc_name) {
+        // Guard against freezing immutable OS kernel anchors
+        if self.is_immutable_os_kernel(pid, &proc_name) {
             return Err(KillSwitchError::ProtectedProcessImmune {
                 pid,
                 name: proc_name,
-                reason: "Protected system, shell, or developer binary",
+                reason: "Protected immutable OS kernel anchor",
             });
         }
 

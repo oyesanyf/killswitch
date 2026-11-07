@@ -49,3 +49,12 @@ anyhow = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[[test]]
+name = "e2e_peer_review_remediation"
+path = "../../tests/e2e_peer_review_remediation.rs"
+
+[[test]]
+name = "incident_a_reproduction"
+path = "../../tests/incident_a_reproduction.rs"
+
