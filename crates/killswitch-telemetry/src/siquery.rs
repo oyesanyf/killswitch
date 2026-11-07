@@ -238,7 +238,8 @@ impl SiqueryEngine {
             AuthAction::Select
             | AuthAction::Read { .. }
             | AuthAction::Function { .. }
-            | AuthAction::Pragma { .. } => Authorization::Allow,
+            | AuthAction::Pragma { .. }
+            | AuthAction::Recursive => Authorization::Allow,
             _ => Authorization::Deny,
         }));
 
