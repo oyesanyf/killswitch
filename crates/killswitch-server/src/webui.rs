@@ -1540,6 +1540,57 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
         </table>
       </div>
     </section>
+
+    <!-- 10. Siquery Relational SQL Discovery & Active EDR Audit Console (R8 / SEC-5) -->
+    <section id="card-siquery" class="card" aria-labelledby="card-siquery-title">
+      <div class="card-header">
+        <div>
+          <h2 id="card-siquery-title" class="card-title">10. Siquery Relational SQL Discovery &amp; Active EDR Audit Console</h2>
+          <p class="card-desc">
+            In-process, zero-external-CLI, native Rust relational SQL host discovery and active EDR audit engine with quadruple read-only enforcement (string check, SQLite authorizer callback, <code>PRAGMA query_only = ON;</code>, and VDBE <code>stmt.readonly()</code>). Query 35 OS host tables and 6 KillSwitch telemetry tables or run the 12-sweep active security audit.
+          </p>
+        </div>
+        <span id="siquery-status-badge" class="badge ok">🔍 Siquery Engine Online</span>
+      </div>
+
+      <div id="siquery-toast" class="toast ok" role="status" aria-live="polite">
+        Siquery Engine Ready. Enter read-only SQL query or run a 12-Sweep EDR Audit.
+      </div>
+
+      <!-- Presets & Action Buttons -->
+      <div class="btn-row" style="flex-wrap: wrap; gap: 0.5rem; margin-block: 0.6rem;">
+        <button type="button" class="primary" onclick="loadSiqueryPreset('ai_sockets')">⚡ AI Agent Sockets</button>
+        <button type="button" class="primary" onclick="loadSiqueryPreset('processes')">⚙️ Active Processes</button>
+        <button type="button" class="primary" onclick="loadSiqueryPreset('coding_tools')">🛠️ Coding Tools &amp; SDKs</button>
+        <button type="button" class="primary" onclick="loadSiqueryPreset('circumvention')">🛡️ Incident A Circumventions</button>
+        <button type="button" class="primary" onclick="loadSiqueryPreset('dlp_events')">🔒 Semantic DLP Events</button>
+        <button type="button" class="primary" onclick="loadSiqueryPreset('interceptions')">🛑 Agent Interceptions</button>
+        <button type="button" class="primary" onclick="loadSiqueryPreset('tables')">📋 List Tables</button>
+        <button type="button" class="danger" onclick="triggerSiquerySweep(this)">🚨 Run 12-Sweep EDR Audit</button>
+      </div>
+
+      <!-- SQL Console Form -->
+      <div class="form-grid" style="margin-top: 0.4rem;">
+        <label for="siquery-sql" style="font-weight: 700; font-size: 0.9rem;">SQL Query (Read-Only SELECT or PRAGMA):
+          <textarea id="siquery-sql" rows="3" style="font-family: monospace; font-size: 0.9rem; width: 100%; border-radius: 0.55rem; padding: 0.6rem; border: 1px solid var(--border); background: var(--surface-alt); color: var(--text);" placeholder="SELECT pid, name, path, cmdline FROM processes LIMIT 15;"></textarea>
+        </label>
+        <div style="display: flex; gap: 0.6rem; align-items: flex-end;">
+          <label for="siquery-format" style="font-size: 0.85rem;">Format:
+            <select id="siquery-format" style="padding: 0.4rem; border-radius: 0.4rem; border: 1px solid var(--border); background: var(--surface); color: var(--text);">
+              <option value="json" selected>JSON Table</option>
+              <option value="pretty">Pretty Box</option>
+              <option value="csv">CSV (Pipe-Delimited)</option>
+            </select>
+          </label>
+          <button type="button" class="ok" onclick="executeSiquery(this)">▶️ Execute Query</button>
+        </div>
+      </div>
+
+      <!-- Results Container (Strictly Zero unsafe DOM manipulation) -->
+      <div id="siquery-results" style="margin-top: 1rem; max-height: 480px; overflow: auto; border: 1px solid var(--border); border-radius: 0.5rem; padding: 0.5rem; background: var(--surface-alt);">
+        <p style="color: var(--muted); font-size: 0.85rem;">Query results will appear here.</p>
+      </div>
+    </section>
   </main>
 
   <script>
@@ -3714,6 +3765,176 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
     function escapeHtml(str) {
       if (!str) return '';
       return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function loadSiqueryPreset(preset) {
+      const sqlEl = document.getElementById('siquery-sql');
+      if (!sqlEl) return;
+      switch (preset) {
+        case 'ai_sockets':
+          sqlEl.value = "SELECT p.pid, p.name, p.path, p.cmdline, s.remote_address, s.remote_port, s.state FROM processes p JOIN process_open_sockets s ON p.pid = s.pid WHERE s.remote_port IN (11434, 1234, 8000, 8080, 5000) LIMIT 20;";
+          break;
+        case 'processes':
+          sqlEl.value = "SELECT pid, name, path, cmdline, memory_rss_mb, cpu_percent FROM processes ORDER BY memory_rss_mb DESC LIMIT 15;";
+          break;
+        case 'coding_tools':
+          sqlEl.value = "SELECT category, tool_name, version, path, can_spawn_shell, can_network_egress, pore_radius FROM coding_tools LIMIT 20;";
+          break;
+        case 'circumvention':
+          sqlEl.value = "SELECT signal_id, session_id, pid, command_line, privilege_class, pattern_kind, timestamp_utc FROM circumvention_events WHERE is_permission_denied = 1 LIMIT 20;";
+          break;
+        case 'dlp_events':
+          sqlEl.value = "SELECT event_id, timestamp_utc, kind, classification, policy, snippet, confidence FROM dlp_semantic_events ORDER BY timestamp_utc DESC LIMIT 20;";
+          break;
+        case 'interceptions':
+          sqlEl.value = "SELECT event_id, timestamp_utc, agent_kind, tool_name, command_line, verdict, rationale FROM agent_interceptions ORDER BY timestamp_utc DESC LIMIT 20;";
+          break;
+        case 'tables':
+          sqlEl.value = "SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') ORDER BY name;";
+          break;
+      }
+    }
+
+    async function executeSiquery(btn) {
+      const sqlEl = document.getElementById('siquery-sql');
+      const fmtEl = document.getElementById('siquery-format');
+      const resultsEl = document.getElementById('siquery-results');
+      if (!sqlEl || !resultsEl) return;
+
+      const query = sqlEl.value.trim();
+      if (!query) return;
+      const format = fmtEl ? fmtEl.value : 'json';
+
+      if (btn) btn.disabled = true;
+      setCardStatus('siquery-toast', 'Executing Siquery SQL query...', 'primary');
+
+      try {
+        const token = sessionStorage.getItem('ks_control_token') || 'KS-TOKEN-SEC-REM-9999-VERIFIED-AUTH';
+        const res = await fetch('/api/siquery/query', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token,
+            'X-KillSwitch-Token': token
+          },
+          body: JSON.stringify({ query, format })
+        });
+
+        resultsEl.replaceChildren();
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ message: res.statusText }));
+          setCardStatus('siquery-toast', 'Query error: ' + (err.message || res.statusText), 'danger');
+          const errP = document.createElement('p');
+          errP.className = 'danger';
+          errP.textContent = 'Error: ' + (err.message || res.statusText);
+          resultsEl.appendChild(errP);
+          return;
+        }
+
+        const data = await res.json();
+        setCardStatus('siquery-toast', 'Query completed in ' + (data.execution_duration_ms || 0) + 'ms', 'ok');
+
+        if (data.pretty) {
+          const pre = document.createElement('pre');
+          const code = document.createElement('code');
+          code.textContent = data.pretty;
+          pre.appendChild(code);
+          resultsEl.appendChild(pre);
+        } else if (data.csv) {
+          const pre = document.createElement('pre');
+          const code = document.createElement('code');
+          code.textContent = data.csv;
+          pre.appendChild(code);
+          resultsEl.appendChild(pre);
+        } else if (data.rows && Array.isArray(data.rows)) {
+          if (data.rows.length === 0) {
+            const p = document.createElement('p');
+            p.textContent = '(0 rows returned)';
+            resultsEl.appendChild(p);
+          } else {
+            const table = document.createElement('table');
+            const thead = document.createElement('thead');
+            const trHead = document.createElement('tr');
+            const cols = Object.keys(data.rows[0]);
+
+            cols.forEach(col => {
+              const th = document.createElement('th');
+              th.scope = 'col';
+              th.textContent = col;
+              trHead.appendChild(th);
+            });
+            thead.appendChild(trHead);
+            table.appendChild(thead);
+
+            const tbody = document.createElement('tbody');
+            data.rows.forEach(row => {
+              const tr = document.createElement('tr');
+              cols.forEach(col => {
+                const td = document.createElement('td');
+                const val = row[col];
+                td.textContent = (val !== null && val !== undefined) ? String(val) : '';
+                tr.appendChild(td);
+              });
+              tbody.appendChild(tr);
+            });
+            table.appendChild(tbody);
+            resultsEl.appendChild(table);
+          }
+        }
+      } catch (e) {
+        setCardStatus('siquery-toast', 'Network/Fetch error: ' + e, 'danger');
+        resultsEl.replaceChildren();
+        const p = document.createElement('p');
+        p.textContent = 'Execution error: ' + e;
+        resultsEl.appendChild(p);
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    async function triggerSiquerySweep(btn) {
+      const resultsEl = document.getElementById('siquery-results');
+      if (!resultsEl) return;
+      if (btn) btn.disabled = true;
+      setCardStatus('siquery-toast', 'Running 12-Sweep Active EDR Security Audit...', 'primary');
+
+      try {
+        const token = sessionStorage.getItem('ks_control_token') || 'KS-TOKEN-SEC-REM-9999-VERIFIED-AUTH';
+        const res = await fetch('/api/siquery/protect-sweep', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token,
+            'X-KillSwitch-Token': token
+          }
+        });
+
+        resultsEl.replaceChildren();
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ message: res.statusText }));
+          setCardStatus('siquery-toast', 'Sweep error: ' + (err.message || res.statusText), 'danger');
+          const errP = document.createElement('p');
+          errP.textContent = 'Error: ' + (err.message || res.statusText);
+          resultsEl.appendChild(errP);
+          return;
+        }
+
+        const data = await res.json();
+        const anomCount = data.anomalies_detected || 0;
+        setCardStatus('siquery-toast', '12-Sweep Audit complete (' + anomCount + ' anomalies detected, ' + (data.execution_duration_ms || 0) + 'ms)', anomCount > 0 ? 'danger' : 'ok');
+
+        const pre = document.createElement('pre');
+        const code = document.createElement('code');
+        code.textContent = JSON.stringify(data, null, 2);
+        pre.appendChild(code);
+        resultsEl.appendChild(pre);
+      } catch (e) {
+        setCardStatus('siquery-toast', 'Sweep fetch error: ' + e, 'danger');
+      } finally {
+        if (btn) btn.disabled = false;
+      }
     }
 
     loadSubstratePreset('NativeCage');

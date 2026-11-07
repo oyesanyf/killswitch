@@ -438,6 +438,12 @@ impl TemporalCircumventionCorrelator {
         self.active_denial_count()
     }
 
+    /// Returns a snapshot of all currently tracked denial signals.
+    pub fn snapshot_denials(&self) -> Vec<DynamicDenialSignal> {
+        let guard = self.denials.lock().unwrap();
+        guard.iter().cloned().collect()
+    }
+
     /// Explicitly purges all stored denial signals.
     pub fn clear(&self) {
         let mut guard = self.denials.lock().unwrap();

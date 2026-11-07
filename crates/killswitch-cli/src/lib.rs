@@ -5,7 +5,9 @@
 
 pub mod client;
 pub mod commands;
+pub mod hook_cli;
 pub mod loader;
+pub mod siquery_cli;
 pub mod verify;
 
 pub use client::KillSwitchClient;

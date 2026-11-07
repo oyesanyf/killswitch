@@ -113,7 +113,7 @@ pub async fn handle_cage_quarantine(
     state
         .replay_cache
         .check_and_record(&req.nonce)
-        .map_err(|e| ServerError::ReplayDetected(e))?;
+        .map_err(ServerError::ReplayDetected)?;
 
     // 8. Execute host OS kernel isolation
     info!(
@@ -282,7 +282,7 @@ pub async fn handle_cage_release(
     state
         .replay_cache
         .check_and_record(&req.nonce)
-        .map_err(|e| ServerError::ReplayDetected(e))?;
+        .map_err(ServerError::ReplayDetected)?;
 
     // 7. Advance generation epoch monotonically in journal (Gen N -> Gen N+1)
     let (epoch_before, epoch_after) = state

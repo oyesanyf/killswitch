@@ -236,6 +236,75 @@ enum Commands {
         #[arg(long)]
         trace: Option<String>,
     },
+
+    /// Manage and evaluate synchronous AI coding agent pre/post-execution hooks
+    Hook {
+        #[command(subcommand)]
+        subcommand: HookSubcommands,
+    },
+
+    /// Run an inline MCP stdio proxy intercepting tools/call
+    #[command(name = "mcp-proxy")]
+    McpProxy {
+        /// Target command to spawn as child MCP server
+        command: String,
+
+        /// Arguments to pass to the child command
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+
+    /// Relational SQL host discovery & active EDR audit engine
+    Siquery {
+        /// SQL query to execute (read-only SELECT or PRAGMA)
+        #[arg(short, long)]
+        query: Option<String>,
+
+        /// Output format: pretty, json, csv
+        #[arg(short, long, default_value = "pretty")]
+        format: String,
+
+        /// List all supported relational tables
+        #[arg(short, long)]
+        tables: bool,
+
+        /// Run the comprehensive 12-sweep active EDR security audit
+        #[arg(short, long)]
+        sweep: bool,
+
+        /// Control plane auth token (required if connecting to remote server)
+        #[arg(long)]
+        token: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum HookSubcommands {
+    /// Install agent hook configurations into workspace
+    Install {
+        /// Target workspace directory (default: current directory)
+        #[arg(short, long)]
+        workspace: Option<PathBuf>,
+
+        /// Comma-separated list of agents to configure (claude, cursor, copilot, opencode)
+        #[arg(short, long)]
+        agents: Option<String>,
+    },
+
+    /// Synchronously evaluate an incoming agent tool execution request on stdin
+    Evaluate {
+        /// Target agent kind (claude, cursor, copilot, opencode, mcp)
+        #[arg(short, long)]
+        agent: String,
+
+        /// Event name (e.g. beforeShellExecution, preToolUse, etc.)
+        #[arg(short, long)]
+        event: Option<String>,
+
+        /// Flag indicating post-tool execution outcome evaluation
+        #[arg(long)]
+        post: bool,
+    },
 }
 
 async fn boot_unified_webui_runtime(
@@ -517,6 +586,26 @@ async fn main() -> Result<()> {
                 trace.as_deref(),
             )
             .await?
+        }
+        Some(Commands::Hook { subcommand }) => match subcommand {
+            HookSubcommands::Install { workspace, agents } => {
+                killswitch_cli::hook_cli::handle_hook_install(workspace, agents)?;
+            }
+            HookSubcommands::Evaluate { agent, event, post } => {
+                killswitch_cli::hook_cli::handle_hook_evaluate(&agent, event.as_deref(), post)?;
+            }
+        },
+        Some(Commands::McpProxy { command, args }) => {
+            killswitch_cli::hook_cli::handle_mcp_proxy(command, args)?;
+        }
+        Some(Commands::Siquery {
+            query,
+            format,
+            tables,
+            sweep,
+            token,
+        }) => {
+            killswitch_cli::siquery_cli::handle_siquery(query, &format, tables, sweep, token)?;
         }
     }
 

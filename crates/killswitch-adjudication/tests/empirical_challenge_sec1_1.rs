@@ -143,7 +143,7 @@ fn test_challenge_synthetic_pe_as_invoker_not_privileged() {
 #[test]
 fn test_challenge_truncated_and_corrupt_pe_headers() {
     // 1. Single byte
-    let meta1 = inspect_binary_metadata_from_bytes(&[b'M']);
+    let meta1 = inspect_binary_metadata_from_bytes(b"M");
     assert_eq!(meta1.elevation_requirement, ElevationRequirement::None);
     assert!(!meta1.is_privileged_target());
 
@@ -262,33 +262,41 @@ fn test_challenge_subsystem_traits_and_mixed_case() {
 #[test]
 fn test_challenge_non_canonical_suid_and_capabilities() {
     // 1. Canonical Root SUID
-    let mut meta1 = DynamicBinaryMetadata::default();
-    meta1.is_suid = true;
-    meta1.file_uid = 0;
+    let meta1 = DynamicBinaryMetadata {
+        is_suid: true,
+        file_uid: 0,
+        ..Default::default()
+    };
     assert!(meta1.is_privileged_target(), "Root SUID must be privileged");
 
     // 2. Non-root SUID (e.g. user 1000)
-    let mut meta2 = DynamicBinaryMetadata::default();
-    meta2.is_suid = true;
-    meta2.file_uid = 1000;
+    let meta2 = DynamicBinaryMetadata {
+        is_suid: true,
+        file_uid: 1000,
+        ..Default::default()
+    };
     assert!(
         !meta2.is_privileged_target(),
         "Non-root SUID must NOT be privileged target"
     );
 
     // 3. SGID only without SUID
-    let mut meta3 = DynamicBinaryMetadata::default();
-    meta3.is_sgid = true;
-    meta3.file_uid = 0;
+    let meta3 = DynamicBinaryMetadata {
+        is_sgid: true,
+        file_uid: 0,
+        ..Default::default()
+    };
     assert!(
         !meta3.is_privileged_target(),
         "SGID alone without SUID must NOT be privileged target"
     );
 
     // 4. Linux capability xattr present
-    let mut meta4 = DynamicBinaryMetadata::default();
-    meta4.has_linux_capabilities = true;
-    meta4.linux_capabilities_mask = 0x00200000; // CAP_SYS_ADMIN
+    let meta4 = DynamicBinaryMetadata {
+        has_linux_capabilities: true,
+        linux_capabilities_mask: 0x00200000, // CAP_SYS_ADMIN
+        ..Default::default()
+    };
     assert!(
         meta4.is_privileged_target(),
         "Binary with Linux capabilities must be privileged target"

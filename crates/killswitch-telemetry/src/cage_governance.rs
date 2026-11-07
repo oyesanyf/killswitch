@@ -1747,6 +1747,13 @@ impl CageGovernanceKernel {
         *self.active_substrate.write() = artifact;
     }
 
+    /// Checks if a tool name is explicitly governed by the active substrate contract.
+    pub fn is_tool_governed(&self, tool_name: &str) -> bool {
+        let sub = self.active_substrate.read();
+        let tool_lc = tool_name.to_ascii_lowercase();
+        sub.allowed_tools.iter().any(|t| t == &tool_lc)
+    }
+
     /// Returns the SHA-256 digest of the currently loaded substrate contract.
     pub fn active_substrate_digest(&self) -> String {
         self.active_substrate.read().substrate_contract_digest.clone()

@@ -33,6 +33,7 @@ tracing = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 url = { workspace = true }
+rusqlite = { workspace = true }
 
 # OpenTelemetry & OpenLineage Integration
 opentelemetry = { workspace = true }
