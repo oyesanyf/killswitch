@@ -300,17 +300,31 @@ mod tests {
 
         // Now resolve peer PID from the client's local address
         let resolved_pid = resolve_loopback_peer_pid(client_local_addr, server_port);
-        assert!(
-            resolved_pid.is_ok(),
-            "Failed to resolve PID: {:?}",
-            resolved_pid
-        );
-        let pid = resolved_pid.unwrap();
-        assert_eq!(
-            pid,
-            std::process::id(),
-            "Resolved PID should match current test runner process"
-        );
+        #[cfg(any(windows, target_os = "linux"))]
+        {
+            assert!(
+                resolved_pid.is_ok(),
+                "Failed to resolve PID: {:?}",
+                resolved_pid
+            );
+            let pid = resolved_pid.unwrap();
+            assert_eq!(
+                pid,
+                std::process::id(),
+                "Resolved PID should match current test runner process"
+            );
+        }
+        #[cfg(not(any(windows, target_os = "linux")))]
+        {
+            assert!(
+                matches!(
+                    resolved_pid,
+                    Err(KillSwitchError::NativeOsError(ref msg)) if msg.contains("not supported on this platform")
+                ),
+                "Expected unsupported platform fail-closed error, got: {:?}",
+                resolved_pid
+            );
+        }
 
         drop(client);
         drop(server_stream);
