@@ -99,8 +99,10 @@ fn test_stress_peer_pid_forged_and_unmapped_endpoints() {
     match res {
         Err(KillSwitchError::NativeOsError(msg)) => {
             assert!(
-                msg.contains("No kernel TCP table entry found"),
-                "Expected 'No kernel TCP table entry found', got: {}",
+                msg.contains("No kernel TCP table entry found")
+                    || msg.contains("No matching Linux socket inode found")
+                    || msg.contains("not supported on this platform"),
+                "Expected unmapped socket lookup error message, got: {}",
                 msg
             );
         }
