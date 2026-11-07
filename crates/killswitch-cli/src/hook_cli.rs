@@ -198,11 +198,12 @@ pub fn handle_mcp_proxy(command: String, args: Vec<String>) -> Result<()> {
                     let decision = evaluate_hook_synchronously(&req);
                     if !decision.allowed {
                         should_forward = false;
-                        let id = req.rpc_id.as_ref().unwrap_or(&serde_json::Value::Null);
-                        let err_resp = format_mcp_error_response(id, &decision);
-                        let mut out = io::stdout().lock();
-                        let _ = writeln!(out, "{err_resp}");
-                        let _ = out.flush();
+                        if let Some(id) = &req.rpc_id {
+                            let err_resp = format_mcp_error_response(id, &decision);
+                            let mut out = io::stdout().lock();
+                            let _ = writeln!(out, "{err_resp}");
+                            let _ = out.flush();
+                        }
                     }
                 }
             }
