@@ -5,18 +5,24 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
 env:
   CARGO_TERM_COLOR: always
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build-windows:
     name: Windows x86_64 & MSI Installer
     runs-on: windows-latest
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - name: Build Windows Release Binaries
         run: cargo build --release --workspace
@@ -24,26 +30,27 @@ jobs:
         shell: pwsh
         run: |
           dotnet tool install --global wix --version 5.0.2
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          wix build installer/killswitch.wxs -arch x64 -out dist/KillSwitch-0.1.0-x86_64.msi
-          Copy-Item target/release/killswitch.exe dist/killswitch-0.1.0-windows-x86_64.exe
-          Copy-Item target/release/start.exe dist/start-0.1.0-windows-x86_64.exe
-      - uses: actions/upload-artifact@v4
+          New-Item -ItemType Directory -Force -Path release-out | Out-Null
+          wix build installer/killswitch.wxs -arch x64 -out release-out/KillSwitch-0.1.0-x86_64.msi
+          Copy-Item target/release/killswitch.exe release-out/killswitch-0.1.0-windows-x86_64.exe
+          Copy-Item target/release/start.exe release-out/start-0.1.0-windows-x86_64.exe
+      - uses: actions/upload-artifact@v7
         with:
           name: windows-artifacts
-          path: dist/*
+          path: release-out/*
 
   build-linux:
     name: Linux x86_64 (.tar.gz & .deb)
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - name: Build Linux Release Binaries
         run: cargo build --release --workspace
       - name: Package Linux Tarball & Deb
         run: |
-          mkdir -p dist stage-deb/usr/bin stage-deb/DEBIAN
+          mkdir -p release-out stage-deb/usr/bin stage-deb/DEBIAN
           cp target/release/killswitch stage-deb/usr/bin/killswitch
           cp target/release/start stage-deb/usr/bin/killswitch-start
           chmod 0755 stage-deb/usr/bin/*
@@ -56,40 +63,42 @@ jobs:
           Maintainer: KillSwitch Security <security@killswitch.local>
           Description: KillSwitch Autonomous EDR, Stateful Lineage & Multi-Source Conformal Guard
           EOF
-          dpkg-deb --build stage-deb dist/killswitch_0.1.0_amd64.deb
-          tar -czf dist/killswitch-0.1.0-linux-x86_64.tar.gz -C target/release killswitch start
-      - uses: actions/upload-artifact@v4
+          dpkg-deb --build stage-deb release-out/killswitch_0.1.0_amd64.deb
+          tar -czf release-out/killswitch-0.1.0-linux-x86_64.tar.gz -C target/release killswitch start
+      - uses: actions/upload-artifact@v7
         with:
           name: linux-artifacts
-          path: dist/*
+          path: release-out/*
 
   build-macos:
     name: macOS (.tar.gz & .pkg)
     runs-on: macos-latest
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - name: Build macOS Release Binaries
         run: cargo build --release --workspace
       - name: Package macOS Tarball & Pkg
         run: |
-          mkdir -p dist pkgroot/usr/local/bin
+          mkdir -p release-out pkgroot/usr/local/bin
           cp target/release/killswitch pkgroot/usr/local/bin/killswitch
           cp target/release/start pkgroot/usr/local/bin/killswitch-start
-          tar -czf dist/killswitch-0.1.0-macos-universal.tar.gz -C target/release killswitch start
-          pkgbuild --root pkgroot --identifier io.killswitch.agent --version 0.1.0 dist/KillSwitch-0.1.0-macos-universal.pkg
-      - uses: actions/upload-artifact@v4
+          tar -czf release-out/killswitch-0.1.0-macos-universal.tar.gz -C target/release killswitch start
+          pkgbuild --root pkgroot --identifier io.killswitch.agent --version 0.1.0 release-out/KillSwitch-0.1.0-macos-universal.pkg
+      - uses: actions/upload-artifact@v7
         with:
           name: macos-artifacts
-          path: dist/*
+          path: release-out/*
 
   publish-release:
     name: Publish GitHub Release Assets
     if: startsWith(github.ref, 'refs/tags/')
     needs: [build-windows, build-linux, build-macos]
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: release-assets
           merge-multiple: true
@@ -97,6 +106,6 @@ jobs:
         run: |
           cd release-assets
           sha256sum * > SHA256SUMS.txt
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: release-assets/*

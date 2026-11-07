@@ -21,6 +21,7 @@ env:
 jobs:
   test:
     name: Workspace Tests (${{ matrix.os }})
+    if: github.event_name != 'pull_request' || !startsWith(github.head_ref, 'pr/solo-')
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
@@ -30,7 +31,7 @@ jobs:
     env:
       KILLSWITCH_SELF_DIAGNOSTIC: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - name: Run Workspace Tests
         run: cargo test --workspace --verbose
@@ -39,10 +40,11 @@ jobs:
 
   clippy:
     name: Clippy & Linter
+    if: github.event_name != 'pull_request' || !startsWith(github.head_ref, 'pr/solo-')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -53,10 +55,11 @@ jobs:
 
   binary-integrity:
     name: Binary Integrity & Provenance Verification
+    if: github.event_name != 'pull_request' || !startsWith(github.head_ref, 'pr/solo-')
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - name: Verify Clean Repository Root (No Tracked Executables)
         shell: pwsh

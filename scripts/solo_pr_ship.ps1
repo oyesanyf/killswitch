@@ -12,6 +12,22 @@ if (Test-Path "C:\Program Files\Git\cmd") {
 # Guard against recursive hook invocation
 $env:OSOOSI_SKIP_POST_COMMIT_HOOK = "1"
 
+# Repository Boundary Protocol: Fail-closed verification
+$toplevel = (git rev-parse --show-toplevel).Trim()
+$expectedRoot = (Get-Item -Path "$PSScriptRoot\..").FullName.TrimEnd('\/')
+$normToplevel = [System.IO.Path]::GetFullPath($toplevel).TrimEnd('\/')
+$normExpected = [System.IO.Path]::GetFullPath($expectedRoot).TrimEnd('\/')
+if ($normToplevel.ToLowerInvariant() -ne $normExpected.ToLowerInvariant()) {
+    Write-Error "REPOSITORY BOUNDARY VIOLATION: git toplevel ($normToplevel) does not match expected root ($normExpected)"
+    exit 1
+}
+
+$originUrl = (git remote get-url origin).Trim()
+if ($originUrl -notmatch 'github\.com[/:](oyesanyf/killswitch)(?:\.git)?$') {
+    Write-Error "REPOSITORY BOUNDARY VIOLATION: git remote origin ($originUrl) is not oyesanyf/killswitch"
+    exit 1
+}
+
 $branchName = "pr/solo-" + (Get-Date -Format "yyyyMMdd-HHmmss")
 Write-Host "[1/5] Setting up feature branch $branchName..." -ForegroundColor Cyan
 
@@ -71,10 +87,15 @@ $pythonExe = if (Test-Path "C:\Users\oyesanyf\AppData\Local\Programs\Python\Pyth
 }
 
 $originUrl = (git remote get-url origin).Trim()
-$repoSlug = if ($originUrl -match 'github\.com[/:]([^/]+)/([^/\.]+?)(?:\.git)?$') {
-    "$($matches[1])/$($matches[2])"
+if ($originUrl -match 'github\.com[/:]([^/]+)/([^/\.]+?)(?:\.git)?$') {
+    $repoSlug = "$($matches[1])/$($matches[2])"
+    if ($repoSlug -ne "oyesanyf/killswitch") {
+        Write-Error "REPOSITORY BOUNDARY VIOLATION: target repo slug ($repoSlug) is not oyesanyf/killswitch"
+        exit 1
+    }
 } else {
-    "oyesanyf/killswitch"
+    Write-Error "REPOSITORY BOUNDARY VIOLATION: invalid origin remote ($originUrl)"
+    exit 1
 }
 Write-Host "Target repository: $repoSlug" -ForegroundColor Cyan
 

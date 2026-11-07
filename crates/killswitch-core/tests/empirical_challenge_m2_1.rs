@@ -72,15 +72,17 @@ fn helper_child_worker() {
         let count = Arc::new(AtomicU64::new(0));
 
         let mut handles = Vec::new();
-        for _ in 0..4 {
+        for tid in 0..4 {
             let r = running.clone();
             let c = count.clone();
             let cp = counter_path.clone();
             handles.push(std::thread::spawn(move || {
+                let tmp_cp = cp.with_extension("tmp");
                 while r.load(Ordering::Relaxed) {
                     let val = c.fetch_add(1, Ordering::Relaxed);
-                    if val % 200 == 0 && !cp.as_os_str().is_empty() {
-                        let _ = fs::write(&cp, val.to_string());
+                    if tid == 0 && val % 200 == 0 && !cp.as_os_str().is_empty() {
+                        let _ = fs::write(&tmp_cp, val.to_string());
+                        let _ = fs::rename(&tmp_cp, &cp);
                     }
                     std::thread::sleep(Duration::from_micros(100));
                 }
@@ -104,6 +106,22 @@ fn helper_child_worker() {
         std::thread::sleep(Duration::from_millis(20));
         std::process::exit(0);
     }
+}
+
+/// Helper to read counter file resiliently with up to 5 retries if empty or unparseable.
+fn read_counter_resilient(path: &Path) -> u64 {
+    for _ in 0..5 {
+        if let Ok(content) = fs::read_to_string(path) {
+            let trimmed = content.trim();
+            if !trimmed.is_empty() {
+                if let Ok(val) = trimmed.parse::<u64>() {
+                    return val;
+                }
+            }
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    0
 }
 
 /// Spawns a child process invoking `helper_child_worker` with the given mode.
@@ -185,20 +203,12 @@ async fn test_stress_multithreaded_process_freeze_and_resume_cycle() {
             freeze_res
         );
 
-        let initial_val = fs::read_to_string(&counter_file)
-            .unwrap_or_default()
-            .trim()
-            .parse::<u64>()
-            .unwrap_or(0);
+        let initial_val = read_counter_resilient(&counter_file);
 
         // Sleep while frozen and assert counter does not advance
         tokio::time::sleep(Duration::from_millis(150)).await;
 
-        let frozen_val = fs::read_to_string(&counter_file)
-            .unwrap_or_default()
-            .trim()
-            .parse::<u64>()
-            .unwrap_or(0);
+        let frozen_val = read_counter_resilient(&counter_file);
 
         // Small variance is possible if a thread was midway through writing, but should not exceed +200
         assert!(
@@ -222,11 +232,7 @@ async fn test_stress_multithreaded_process_freeze_and_resume_cycle() {
         let mut resumed_val = 0;
         for _ in 0..10 {
             tokio::time::sleep(Duration::from_millis(50)).await;
-            resumed_val = fs::read_to_string(&counter_file)
-                .unwrap_or_default()
-                .trim()
-                .parse::<u64>()
-                .unwrap_or(0);
+            resumed_val = read_counter_resilient(&counter_file);
             if resumed_val > frozen_val {
                 break;
             }
@@ -287,6 +293,9 @@ async fn test_stress_active_process_tarpit_duty_cycle_multithreaded() {
     // Allow duty cycling to execute for 300ms
     tokio::time::sleep(Duration::from_millis(300)).await;
 
+    // Capture counter value prior to release
+    let pre_release_val = read_counter_resilient(&counter_file);
+
     // Release PID
     tarpit.release_pid(child_pid);
     assert!(!tarpit.is_trapped(child_pid));
@@ -296,16 +305,20 @@ async fn test_stress_active_process_tarpit_duty_cycle_multithreaded() {
     assert!(!tarpit.is_trapped(child_pid));
 
     // Verify process still functions and advances counter after tarpit release
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    let post_release_val = fs::read_to_string(&counter_file)
-        .unwrap_or_default()
-        .trim()
-        .parse::<u64>()
-        .unwrap_or(0);
+    let mut post_release_val = 0;
+    for _ in 0..15 {
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        post_release_val = read_counter_resilient(&counter_file);
+        if post_release_val > pre_release_val {
+            break;
+        }
+    }
 
     assert!(
-        post_release_val > 0,
-        "Target process died or hung after tarpit release"
+        post_release_val > pre_release_val,
+        "Target process died or hung after tarpit release (pre={}, post={})",
+        pre_release_val,
+        post_release_val
     );
 }
 
