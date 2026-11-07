@@ -3,11 +3,11 @@
 //! Provides diskless named pipes (Windows), `memfd_create` in-memory descriptors (Linux),
 //! and environment-keyed decoy honeytokens to detect memory scraping and credential harvesting.
 
-use std::collections::HashMap;
-use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::Arc;
 use subtle::ConstantTimeEq;
 
 use killswitch_types::adjudication::EvidenceClass;
@@ -119,11 +119,18 @@ impl HoneytokenManager {
         actor_pid: u32,
         actor_proc_name: &str,
     ) -> Option<ThreatSignal> {
-        let suspect_hash = blake3::hash(suspect_token_string.as_bytes()).to_hex().to_string();
+        let suspect_hash = blake3::hash(suspect_token_string.as_bytes())
+            .to_hex()
+            .to_string();
         let mut tokens = self.tokens.write();
 
         for record in tokens.values_mut() {
-            let is_match = bool::from(record.token_value_hash.as_bytes().ct_eq(suspect_hash.as_bytes()));
+            let is_match = bool::from(
+                record
+                    .token_value_hash
+                    .as_bytes()
+                    .ct_eq(suspect_hash.as_bytes()),
+            );
             if is_match {
                 record.trip_count += 1;
 
@@ -157,7 +164,10 @@ impl HoneytokenManager {
     }
 
     /// Creates a platform-native ephemeral trap (Windows named pipe or Linux memfd).
-    pub fn create_native_ephemeral_trap(&self, trap_name: &str) -> Result<Arc<NativeEphemeralTrap>, String> {
+    pub fn create_native_ephemeral_trap(
+        &self,
+        trap_name: &str,
+    ) -> Result<Arc<NativeEphemeralTrap>, String> {
         #[cfg(windows)]
         {
             use windows::core::HSTRING;
@@ -169,7 +179,11 @@ impl HoneytokenManager {
             const PIPE_ACCESS_DUPLEX: u32 = 0x00000003;
             const FILE_FLAG_FIRST_PIPE_INSTANCE: u32 = 0x00080000;
 
-            let pipe_name = format!(r"\\.\pipe\osoosi_canary_{}_{}", trap_name, uuid::Uuid::new_v4());
+            let pipe_name = format!(
+                r"\\.\pipe\osoosi_canary_{}_{}",
+                trap_name,
+                uuid::Uuid::new_v4()
+            );
             let wide_name = HSTRING::from(pipe_name.as_str());
 
             let handle: HANDLE = unsafe {

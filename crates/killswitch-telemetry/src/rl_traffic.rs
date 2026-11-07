@@ -12,13 +12,13 @@
 //!    Compares `LearnedRl` against `Disabled`, `Random`, `Heuristic`, and `NoLearning` baselines over
 //!    matched episode seeds with 95% Confidence Intervals ($\bar{x} \pm t_{\alpha/2, n-1} \cdot \frac{s}{\sqrt{n}}$).
 
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::phaselock::compute_shannon_entropy;
 
@@ -260,7 +260,10 @@ impl RlTrafficLearner {
             .strip_prefix("https://")
             .or_else(|| trimmed.strip_prefix("http://"))
             .unwrap_or(trimmed);
-        let host_port = after_scheme.split(['/', '?', '#']).next().unwrap_or(after_scheme);
+        let host_port = after_scheme
+            .split(['/', '?', '#'])
+            .next()
+            .unwrap_or(after_scheme);
         let (host, port) = if host_port.starts_with('[') {
             if let Some(end_bracket) = host_port.find(']') {
                 let h = &host_port[..=end_bracket];
@@ -270,13 +273,21 @@ impl RlTrafficLearner {
                     .unwrap_or(if is_https { 443 } else { 80 });
                 (h.to_ascii_lowercase(), p)
             } else {
-                (host_port.to_ascii_lowercase(), if is_https { 443 } else { 80 })
+                (
+                    host_port.to_ascii_lowercase(),
+                    if is_https { 443 } else { 80 },
+                )
             }
         } else if let Some((h, p_str)) = host_port.rsplit_once(':') {
-            let p = p_str.parse::<u16>().unwrap_or(if is_https { 443 } else { 80 });
+            let p = p_str
+                .parse::<u16>()
+                .unwrap_or(if is_https { 443 } else { 80 });
             (h.to_ascii_lowercase(), p)
         } else {
-            (host_port.to_ascii_lowercase(), if is_https { 443 } else { 80 })
+            (
+                host_port.to_ascii_lowercase(),
+                if is_https { 443 } else { 80 },
+            )
         };
         (host, port, is_https)
     }
@@ -306,8 +317,14 @@ impl RlTrafficLearner {
         for row in &rows {
             let proc_lower = row.process_name.to_ascii_lowercase();
             // Update process lineage trust from live running processes
-            let is_signed_or_system_path = row.image_path.to_ascii_lowercase().starts_with("c:\\windows\\")
-                || row.image_path.to_ascii_lowercase().starts_with("c:\\program files")
+            let is_signed_or_system_path = row
+                .image_path
+                .to_ascii_lowercase()
+                .starts_with("c:\\windows\\")
+                || row
+                    .image_path
+                    .to_ascii_lowercase()
+                    .starts_with("c:\\program files")
                 || row.image_path.starts_with("/usr/bin/")
                 || row.image_path.starts_with("/sbin/");
             let base_proc_trust = if is_signed_or_system_path { 0.80 } else { 0.55 };
@@ -326,9 +343,12 @@ impl RlTrafficLearner {
                     let mut entry = self
                         .destinations
                         .entry(row.remote_address.to_ascii_lowercase())
-                        .or_insert_with(|| LearnedDestinationProfile::new(&row.remote_address, 0.72));
+                        .or_insert_with(|| {
+                            LearnedDestinationProfile::new(&row.remote_address, 0.72)
+                        });
                     entry.observed_connections = entry.observed_connections.saturating_add(1);
-                    entry.ema_trust_score = (0.92 * entry.ema_trust_score + 0.08 * 0.85).clamp(0.0, 1.0);
+                    entry.ema_trust_score =
+                        (0.92 * entry.ema_trust_score + 0.08 * 0.85).clamp(0.0, 1.0);
                     entry.last_seen = Utc::now();
                     if !entry.associated_processes.contains(&proc_lower)
                         && entry.associated_processes.len() < 16
@@ -359,7 +379,8 @@ impl RlTrafficLearner {
             .and_then(|p| self.process_trust.get(&p.to_ascii_lowercase()).map(|v| *v))
             .unwrap_or(0.60);
 
-        let port_protocol_anomaly = if host == "127.0.0.1" || host == "localhost" || host == "[::1]" {
+        let port_protocol_anomaly = if host == "127.0.0.1" || host == "localhost" || host == "[::1]"
+        {
             0.0
         } else if is_https && (port == 443 || port == 8443) {
             0.05
@@ -422,7 +443,10 @@ impl RlTrafficLearner {
             .strip_prefix("https://")
             .or_else(|| trimmed.strip_prefix("http://"))
             .unwrap_or(trimmed);
-        let host_port = after_scheme.split(['/', '?', '#']).next().unwrap_or(after_scheme);
+        let host_port = after_scheme
+            .split(['/', '?', '#'])
+            .next()
+            .unwrap_or(after_scheme);
         let host = if host_port.starts_with('[') {
             host_port
                 .find(']')
@@ -525,15 +549,22 @@ impl RlTrafficLearner {
 
         // 1. Update destination profile based on ground-truth feedback
         {
-            let mut entry = self
-                .destinations
-                .entry(host.clone())
-                .or_insert_with(|| LearnedDestinationProfile::new(&host, if is_legitimate_transaction { 0.85 } else { 0.05 }));
+            let mut entry = self.destinations.entry(host.clone()).or_insert_with(|| {
+                LearnedDestinationProfile::new(
+                    &host,
+                    if is_legitimate_transaction {
+                        0.85
+                    } else {
+                        0.05
+                    },
+                )
+            });
             entry.observed_connections = entry.observed_connections.saturating_add(1);
             entry.last_seen = Utc::now();
             if is_legitimate_transaction {
                 entry.positive_confirmations = entry.positive_confirmations.saturating_add(1);
-                entry.ema_trust_score = (0.70 * entry.ema_trust_score + 0.30 * 0.98).clamp(0.0, 1.0);
+                entry.ema_trust_score =
+                    (0.70 * entry.ema_trust_score + 0.30 * 0.98).clamp(0.0, 1.0);
             } else {
                 entry.blocked_incidents = entry.blocked_incidents.saturating_add(1);
                 entry.ema_trust_score = (0.60 * entry.ema_trust_score).clamp(0.0, 1.0);
@@ -581,8 +612,11 @@ impl RlTrafficLearner {
     }
 
     pub fn list_learned_destinations(&self) -> Vec<LearnedDestinationProfile> {
-        let mut list: Vec<LearnedDestinationProfile> =
-            self.destinations.iter().map(|r| r.value().clone()).collect();
+        let mut list: Vec<LearnedDestinationProfile> = self
+            .destinations
+            .iter()
+            .map(|r| r.value().clone())
+            .collect();
         list.sort_by(|a, b| {
             b.familiarity_score()
                 .partial_cmp(&a.familiarity_score())
@@ -602,8 +636,12 @@ impl RlTrafficLearner {
             learning_rate: self.learning_rate,
             discount_gamma: self.discount_gamma,
             epsilon: *self.epsilon.read(),
-            total_episodes: self.total_episodes.load(std::sync::atomic::Ordering::Relaxed),
-            total_os_polls: self.total_os_polls.load(std::sync::atomic::Ordering::Relaxed),
+            total_episodes: self
+                .total_episodes
+                .load(std::sync::atomic::Ordering::Relaxed),
+            total_os_polls: self
+                .total_os_polls
+                .load(std::sync::atomic::Ordering::Relaxed),
             weights: *self.weights.read(),
             destinations,
         }
@@ -863,7 +901,8 @@ fn query_kernel_tcp_table_by_pid() -> KernelTcpTableByPid {
             {
                 let udp_entries = std::ptr::read_unaligned(udp_buf.as_ptr() as *const u32) as usize;
                 let udp_rows_ptr = udp_buf.as_ptr().add(4) as *const MibUdpRowOwnerPid;
-                let max_udp = (udp_buf.len().saturating_sub(4)) / std::mem::size_of::<MibUdpRowOwnerPid>();
+                let max_udp =
+                    (udp_buf.len().saturating_sub(4)) / std::mem::size_of::<MibUdpRowOwnerPid>();
                 for i in 0..udp_entries.min(max_udp) {
                     let urow = std::ptr::read_unaligned(udp_rows_ptr.add(i));
                     let local_ip = Ipv4Addr::from(u32::from_be(urow.dw_local_addr));
@@ -1070,7 +1109,10 @@ pub struct RlEmpiricalBenchmarkReport {
 /// 2. `Random` (uniform random action selection),
 /// 3. `Heuristic` (static threshold rule without destination learning),
 /// 4. `NoLearning` (frozen uncalibrated linear model with $\alpha = 0$).
-pub fn run_empirical_rl_benchmark(num_seeds: usize, steps_per_episode: usize) -> RlEmpiricalBenchmarkReport {
+pub fn run_empirical_rl_benchmark(
+    num_seeds: usize,
+    steps_per_episode: usize,
+) -> RlEmpiricalBenchmarkReport {
     let policy_names = ["Disabled", "Random", "Heuristic", "NoLearning", "LearnedRl"];
     let mut results = Vec::new();
 
@@ -1087,7 +1129,9 @@ pub fn run_empirical_rl_benchmark(num_seeds: usize, steps_per_episode: usize) ->
                 *learner.weights.write() = [[0.0; TrafficFeatureVector::DIM]; 4];
             }
 
-            let mut state_rng = (seed as u64).wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let mut state_rng = (seed as u64)
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let mut ep_reward = 0.0;
             let mut attacks_total = 0u32;
             let mut attacks_contained = 0u32;
@@ -1110,7 +1154,12 @@ pub fn run_empirical_rl_benchmark(num_seeds: usize, steps_per_episode: usize) ->
                     let attack_idx = (step + seed) % 3;
                     match attack_idx {
                         // OpenAI Sept 2026 high-entropy DNS / covert channel exfil
-                        0 => ("https://x9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4.dlptest.com/post", 0.95, 0.78, false),
+                        0 => (
+                            "https://x9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4.dlptest.com/post",
+                            0.95,
+                            0.78,
+                            false,
+                        ),
                         // OpenAI July 2026 package proxy / credential pivot
                         1 => ("http://198.51.100.44:8888/exfil_creds", 0.90, 0.88, false),
                         // Anthropic eval harness escape to public drop
@@ -1118,7 +1167,8 @@ pub fn run_empirical_rl_benchmark(num_seeds: usize, steps_per_episode: usize) ->
                     }
                 };
 
-                let decision = learner.evaluate_traffic(url, Some("agent_worker.exe"), taint, breakout_sig);
+                let decision =
+                    learner.evaluate_traffic(url, Some("agent_worker.exe"), taint, breakout_sig);
                 let chosen_action = match policy {
                     "Disabled" => RlTrafficAction::Allow,
                     "Random" => {
@@ -1163,7 +1213,13 @@ pub fn run_empirical_rl_benchmark(num_seeds: usize, steps_per_episode: usize) ->
                 }
 
                 if policy == "LearnedRl" {
-                    learner.record_feedback_and_learn(url, Some("agent_worker.exe"), taint, breakout_sig, is_legit);
+                    learner.record_feedback_and_learn(
+                        url,
+                        Some("agent_worker.exe"),
+                        taint,
+                        breakout_sig,
+                        is_legit,
+                    );
                 }
             }
 
@@ -1216,7 +1272,8 @@ mod tests {
         let custom_hospital_url = "https://fhir.st-jude-custom-partner.org/api/v4/Patient";
 
         // Initially, a brand-new unknown domain with CrownJewel PHI taint (1.0) is unfamiliar
-        let initial = learner.evaluate_traffic(custom_hospital_url, Some("ehr_bridge.exe"), 1.0, 0.0);
+        let initial =
+            learner.evaluate_traffic(custom_hospital_url, Some("ehr_bridge.exe"), 1.0, 0.0);
         assert!(initial.learned_familiarity < 0.25);
 
         // After a few legitimate transaction feedback episodes, RL learns the partner is trusted
@@ -1230,7 +1287,8 @@ mod tests {
             );
         }
 
-        let after_learning = learner.evaluate_traffic(custom_hospital_url, Some("ehr_bridge.exe"), 1.0, 0.0);
+        let after_learning =
+            learner.evaluate_traffic(custom_hospital_url, Some("ehr_bridge.exe"), 1.0, 0.0);
         assert!(
             after_learning.action.is_allowed(),
             "RL policy must dynamically learn to Allow recurring legitimate PHI partner without hardcoding, got {:?}",
@@ -1258,11 +1316,31 @@ mod tests {
         assert_eq!(report.environment_backend, RL_ENVIRONMENT_BACKEND_LABEL);
         assert_eq!(report.policies.len(), 5);
 
-        let learned = report.policies.iter().find(|p| p.policy_name == "LearnedRl").unwrap();
-        let disabled = report.policies.iter().find(|p| p.policy_name == "Disabled").unwrap();
-        let random = report.policies.iter().find(|p| p.policy_name == "Random").unwrap();
-        let heuristic = report.policies.iter().find(|p| p.policy_name == "Heuristic").unwrap();
-        let no_learning = report.policies.iter().find(|p| p.policy_name == "NoLearning").unwrap();
+        let learned = report
+            .policies
+            .iter()
+            .find(|p| p.policy_name == "LearnedRl")
+            .unwrap();
+        let disabled = report
+            .policies
+            .iter()
+            .find(|p| p.policy_name == "Disabled")
+            .unwrap();
+        let random = report
+            .policies
+            .iter()
+            .find(|p| p.policy_name == "Random")
+            .unwrap();
+        let heuristic = report
+            .policies
+            .iter()
+            .find(|p| p.policy_name == "Heuristic")
+            .unwrap();
+        let no_learning = report
+            .policies
+            .iter()
+            .find(|p| p.policy_name == "NoLearning")
+            .unwrap();
 
         // LearnedRl must achieve higher mean cumulative reward than all 4 baselines
         assert!(learned.cumulative_reward_ci95.mean > disabled.cumulative_reward_ci95.mean);

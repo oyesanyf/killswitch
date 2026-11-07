@@ -105,7 +105,8 @@ impl ZeroFalsePositiveAdjudicator {
                         &explanation,
                     ))
                 });
-                let seal = AdjudicationResult::compute_seal("Vetoed", 0.0, &explanation, &timestamp);
+                let seal =
+                    AdjudicationResult::compute_seal("Vetoed", 0.0, &explanation, &timestamp);
                 return AdjudicationResult::Vetoed {
                     reason: veto_reason,
                     explanation,
@@ -156,7 +157,8 @@ impl ZeroFalsePositiveAdjudicator {
                         &explanation,
                     ))
                 });
-                let seal = AdjudicationResult::compute_seal("Vetoed", 0.0, &explanation, &timestamp);
+                let seal =
+                    AdjudicationResult::compute_seal("Vetoed", 0.0, &explanation, &timestamp);
                 return AdjudicationResult::Vetoed {
                     reason: VetoReason::ProtectedBinaryHash,
                     explanation,
@@ -208,7 +210,8 @@ impl ZeroFalsePositiveAdjudicator {
                             "TRUSTED_BINARY_VETO".to_string(),
                         ),
                     };
-                    let seal = AdjudicationResult::compute_seal("Vetoed", 0.0, &explanation, &timestamp);
+                    let seal =
+                        AdjudicationResult::compute_seal("Vetoed", 0.0, &explanation, &timestamp);
                     return AdjudicationResult::Vetoed {
                         reason,
                         explanation,
@@ -254,9 +257,7 @@ impl ZeroFalsePositiveAdjudicator {
         // ---------------------------------------------------------------------
         // Layer 5: Multi-Voter Consensus Engine & DLP Lineage Evaluation
         // ---------------------------------------------------------------------
-        self.consensus_engine
-            .adjudicate(candidate, context)
-            .await
+        self.consensus_engine.adjudicate(candidate, context).await
     }
 
     /// Evaluates a candidate YARA / containment rule through the SWE-Bench Two-Gate
@@ -301,7 +302,9 @@ mod tests {
             EvidenceClass::Behavior,
         );
 
-        let result = adjudicator.adjudicate_threat_candidate(&candidate, None).await;
+        let result = adjudicator
+            .adjudicate_threat_candidate(&candidate, None)
+            .await;
         assert!(result.is_vetoed());
         assert_eq!(result.confidence(), 0.0);
     }
@@ -322,7 +325,9 @@ mod tests {
         );
         candidate.blake3_hash = Some(test_hash.to_string());
 
-        let result = adjudicator.adjudicate_threat_candidate(&candidate, None).await;
+        let result = adjudicator
+            .adjudicate_threat_candidate(&candidate, None)
+            .await;
         assert!(result.is_vetoed());
         assert_eq!(result.confidence(), 0.0);
     }

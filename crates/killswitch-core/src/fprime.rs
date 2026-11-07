@@ -447,7 +447,10 @@ impl FPrimeSupervisor {
         let (severity, msg) = match opcode {
             FPrimeOpcode::NoOp => (
                 FPrimeEventSeverity::Command,
-                format!("CMD_NO_OP (seq #{}) completed: Svc::CommandDispatcher nominal.", seq),
+                format!(
+                    "CMD_NO_OP (seq #{}) completed: Svc::CommandDispatcher nominal.",
+                    seq
+                ),
             ),
             FPrimeOpcode::EngageSafeMode => {
                 st.safe_mode_active = true;

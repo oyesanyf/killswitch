@@ -1,7 +1,9 @@
 //! Integration tests for MeshGuard, Homological Boundary Audit, and Sticky Taint Veto (Feature 20)
 
 use killswitch_telemetry::octopus::mesh_guard::{HomologicalBoundaryAuditor, MeshGuard};
-use killswitch_types::{ArmMessage, ArmRole, KillSwitchError, MessageKind, ProvenanceHop, TrustTier};
+use killswitch_types::{
+    ArmMessage, ArmRole, KillSwitchError, MessageKind, ProvenanceHop, TrustTier,
+};
 
 #[tokio::test]
 async fn test_t1_f20_01_homological_boundary_exactness_2_simplex() {
@@ -37,10 +39,7 @@ async fn test_t1_f20_02_proxy_laundering_veto() {
 #[tokio::test]
 async fn test_t1_f20_03_direct_boundary_veto() {
     // Direct attempt: UntrustedDocIngest -> AccountingLedgerWrite
-    let direct_chain = [
-        ArmRole::UntrustedDocIngest,
-        ArmRole::AccountingLedgerWrite,
-    ];
+    let direct_chain = [ArmRole::UntrustedDocIngest, ArmRole::AccountingLedgerWrite];
 
     let report = HomologicalBoundaryAuditor::audit_role_chain(&direct_chain);
     assert!(!report.allowed);
@@ -52,7 +51,9 @@ async fn test_t1_f20_04_mesh_guard_constant_time_signature_and_route() {
     let guard = MeshGuard::new();
     let sender_key = [0xAAu8; 32];
 
-    guard.allow_route("arm-0", "arm-1", Some(MessageKind::Finding)).await;
+    guard
+        .allow_route("arm-0", "arm-1", Some(MessageKind::Finding))
+        .await;
 
     let mut msg = ArmMessage {
         sender_arm_id: "arm-0".to_string(),

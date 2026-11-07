@@ -26,7 +26,9 @@ pub enum KillSwitchError {
     #[error("WFP filter addition failed at layer '{layer}': Win32 status 0x{win32_code:08X}")]
     WfpFilterAddFailed { layer: String, win32_code: u32 },
 
-    #[error("WFP filter deletion failed for filter ID {filter_id}: Win32 status 0x{win32_code:08X}")]
+    #[error(
+        "WFP filter deletion failed for filter ID {filter_id}: Win32 status 0x{win32_code:08X}"
+    )]
     WfpFilterDeleteFailed { filter_id: u64, win32_code: u32 },
 
     #[error("Required WFP symbol '{symbol}' not found in fwpuclnt.dll")]
@@ -48,7 +50,10 @@ pub enum KillSwitchError {
     },
 
     #[error("Administrative elevation required: {details}. Remediation: {remediation}")]
-    InsufficientPrivileges { details: String, remediation: String },
+    InsufficientPrivileges {
+        details: String,
+        remediation: String,
+    },
 
     #[error("Windows network quarantine engagement failed: zero kernel WFP filters were installed ({0})")]
     ZeroFiltersInstalled(String),
@@ -125,7 +130,9 @@ pub enum KillSwitchError {
     #[error("ResumeThread failed for TID {tid}: Win32 status 0x{win32_code:08X}")]
     ResumeThreadFailed { tid: u32, win32_code: u32 },
 
-    #[error("Refusing process containment for protected system binary: PID {pid} ('{name}'): {reason}")]
+    #[error(
+        "Refusing process containment for protected system binary: PID {pid} ('{name}'): {reason}"
+    )]
     ProtectedProcessImmune {
         pid: u32,
         name: String,
@@ -149,7 +156,9 @@ pub enum KillSwitchError {
     #[error("Empty operator credentials provided")]
     EmptyCredentials,
 
-    #[error("Security lockout active: repeated authentication failures. Retry in {remaining_secs}s")]
+    #[error(
+        "Security lockout active: repeated authentication failures. Retry in {remaining_secs}s"
+    )]
     AccountLockedOut { remaining_secs: u64 },
 
     #[error("Anti-Hijacking Violation: Calling process (PID {pid}) is currently frozen under quarantine")]
@@ -208,10 +217,7 @@ pub enum KillSwitchError {
     },
 
     #[error("Unsafe sandbox path traversal detected: path '{path}' rejected: {reason}")]
-    PathTraversalBlocked {
-        path: String,
-        reason: &'static str,
-    },
+    PathTraversalBlocked { path: String, reason: &'static str },
 
     #[error("Octopus multi-ring violation: {0}")]
     OctopusViolation(String),

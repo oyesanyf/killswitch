@@ -287,16 +287,43 @@ pub fn build_router(state: Arc<ServerState>) -> Router {
         )
         // CAGE Interoperability Substrate & Cryptographic Quarantine Receipts
         .route("/.well-known/jwks.json", get(cage_substrate::handle_jwks))
-        .route("/v1/cage/quarantine", post(cage_substrate::handle_cage_quarantine))
-        .route("/api/v1/cage/quarantine", post(cage_substrate::handle_cage_quarantine))
-        .route("/v1/cage/release", post(cage_substrate::handle_cage_release))
-        .route("/api/v1/cage/release", post(cage_substrate::handle_cage_release))
+        .route(
+            "/v1/cage/quarantine",
+            post(cage_substrate::handle_cage_quarantine),
+        )
+        .route(
+            "/api/v1/cage/quarantine",
+            post(cage_substrate::handle_cage_quarantine),
+        )
+        .route(
+            "/v1/cage/release",
+            post(cage_substrate::handle_cage_release),
+        )
+        .route(
+            "/api/v1/cage/release",
+            post(cage_substrate::handle_cage_release),
+        )
         .route("/v1/cage/attest", get(cage_substrate::handle_cage_attest))
-        .route("/api/v1/cage/attest", get(cage_substrate::handle_cage_attest))
-        .route("/v1/cage/normative-baseline/:region", get(cage_substrate::handle_conformal_baseline))
-        .route("/api/v1/cage/normative-baseline/:region", get(cage_substrate::handle_conformal_baseline))
-        .route("/v1/cage/conformal/validate", post(cage_substrate::handle_conformal_validate))
-        .route("/api/v1/cage/conformal/validate", post(cage_substrate::handle_conformal_validate))
+        .route(
+            "/api/v1/cage/attest",
+            get(cage_substrate::handle_cage_attest),
+        )
+        .route(
+            "/v1/cage/normative-baseline/:region",
+            get(cage_substrate::handle_conformal_baseline),
+        )
+        .route(
+            "/api/v1/cage/normative-baseline/:region",
+            get(cage_substrate::handle_conformal_baseline),
+        )
+        .route(
+            "/v1/cage/conformal/validate",
+            post(cage_substrate::handle_conformal_validate),
+        )
+        .route(
+            "/api/v1/cage/conformal/validate",
+            post(cage_substrate::handle_conformal_validate),
+        )
         // 18. Signed Ring-0 Kernel Driver Loader (ELAM / Minifilter / eBPF) & Distributed Raft/Valkey Consensus
         .route("/ring0/status", get(handlers::get_ring0_status))
         .route("/api/ring0/status", get(handlers::get_ring0_status))
@@ -336,11 +363,26 @@ pub fn build_router(state: Arc<ServerState>) -> Router {
         .route("/siquery/tables", get(handlers::get_siquery_tables))
         .route("/api/siquery/tables", get(handlers::get_siquery_tables))
         .route("/siquery/edr-status", get(handlers::get_siquery_edr_status))
-        .route("/api/siquery/edr-status", get(handlers::get_siquery_edr_status))
-        .route("/siquery/protect-sweep", post(handlers::post_siquery_protect_sweep))
-        .route("/api/siquery/protect-sweep", post(handlers::post_siquery_protect_sweep))
-        .route("/siquery/protection-sweep", post(handlers::post_siquery_protect_sweep))
-        .route("/api/siquery/protection-sweep", post(handlers::post_siquery_protect_sweep))
+        .route(
+            "/api/siquery/edr-status",
+            get(handlers::get_siquery_edr_status),
+        )
+        .route(
+            "/siquery/protect-sweep",
+            post(handlers::post_siquery_protect_sweep),
+        )
+        .route(
+            "/api/siquery/protect-sweep",
+            post(handlers::post_siquery_protect_sweep),
+        )
+        .route(
+            "/siquery/protection-sweep",
+            post(handlers::post_siquery_protect_sweep),
+        )
+        .route(
+            "/api/siquery/protection-sweep",
+            post(handlers::post_siquery_protect_sweep),
+        )
         // Middleware Layers (applied bottom-up)
         .layer(axum::middleware::from_fn(middleware::rate_limit_middleware))
         .layer(middleware::cors_layer())

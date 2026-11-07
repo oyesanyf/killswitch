@@ -4,16 +4,18 @@
 //! applying continuous exponential time-decay ($w(\Delta t) = e^{-\Delta t / \tau_{\text{decay}}}$ with $\tau = 300$s)
 //! and multi-stage sequence amplification to synthesize high-confidence threat signals.
 
-use std::collections::{HashSet, VecDeque};
-use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
+use std::collections::{HashSet, VecDeque};
+use std::sync::Arc;
 
 use killswitch_types::adjudication::EvidenceClass;
 use killswitch_types::telemetry::{SecurityEvent, ThreatSeverity, ThreatSignal};
 
 use crate::attack::{AttackGraphMatcher, AttackStage, ProcessTimelineEvent};
-use crate::circumvention::{CircumventionAlert, DynamicDenialSignal, TemporalCircumventionCorrelator};
+use crate::circumvention::{
+    CircumventionAlert, DynamicDenialSignal, TemporalCircumventionCorrelator,
+};
 
 /// Per-process correlation context tracking temporal events, ATT&CK stages, and decayed score.
 #[derive(Debug, Clone)]
@@ -155,7 +157,10 @@ impl EventCorrelator {
             ProcessCorrelationContext::new(
                 pid,
                 &event.image_path,
-                event.process_identity.as_ref().map(|i| i.instance_id.clone()),
+                event
+                    .process_identity
+                    .as_ref()
+                    .map(|i| i.instance_id.clone()),
             )
         });
 
@@ -185,7 +190,8 @@ impl EventCorrelator {
         let eval = self.matcher.evaluate_sequence(&timeline_slice);
 
         // Combine decayed score with multi-stage multiplier
-        let composite_confidence = (ctx.current_score * eval.multi_stage_multiplier).clamp(0.0, 1.0);
+        let composite_confidence =
+            (ctx.current_score * eval.multi_stage_multiplier).clamp(0.0, 1.0);
 
         // Check if confidence exceeds threshold
         if composite_confidence >= self.alert_threshold {

@@ -189,7 +189,8 @@ fn test_arm_message_corrupt_hex_and_constant_time() {
     assert!(!msg.verify_signature(&key));
 
     // 2. Non-hex characters
-    msg.signature_hex = "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ".to_string();
+    msg.signature_hex =
+        "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ".to_string();
     assert!(!msg.verify_signature(&key));
 
     // 3. Single bit flip in signature
@@ -291,7 +292,9 @@ fn test_sticky_taint_permitted_paths() {
         signature_hex: String::new(),
     };
     assert!(
-        msg_untrusted.validate_lateral_movement(&ArmRole::AnomalyDetection).is_ok(),
+        msg_untrusted
+            .validate_lateral_movement(&ArmRole::AnomalyDetection)
+            .is_ok(),
         "Untrusted messaging Worker must be permitted"
     );
 
@@ -310,7 +313,9 @@ fn test_sticky_taint_permitted_paths() {
         signature_hex: String::new(),
     };
     assert!(
-        msg_worker.validate_lateral_movement(&ArmRole::AccountingLedgerWrite).is_ok(),
+        msg_worker
+            .validate_lateral_movement(&ArmRole::AccountingLedgerWrite)
+            .is_ok(),
         "Worker messaging PrivilegedSink must be permitted"
     );
 }
@@ -386,7 +391,10 @@ fn test_lockout_state_exact_3_strikes_and_4th_attempt_rejected() {
     // Strike 3 - MUST trigger lockout
     let r3 = lockout.record_failure(Some(9001));
     match r3 {
-        AuthResult::LockedOut { remaining_seconds, locked_until } => {
+        AuthResult::LockedOut {
+            remaining_seconds,
+            locked_until,
+        } => {
             assert_eq!(remaining_seconds, LOCKOUT_DURATION_SECS);
             assert!(locked_until > Utc::now());
         }
@@ -606,7 +614,10 @@ fn test_consecutive_healthy_probes_progression_and_anomaly_reset() {
         probe_hash_blake3: String::new(),
         summary: "Anomaly detected; reset counter".to_string(),
     };
-    assert_eq!(rep3.consecutive_healthy_probes, 0, "Anomaly MUST reset count to 0");
+    assert_eq!(
+        rep3.consecutive_healthy_probes, 0,
+        "Anomaly MUST reset count to 0"
+    );
     assert!(!rep3.eligible_for_early_rollback);
 
     // Probe 4 & 5: Healthy again
@@ -713,7 +724,10 @@ fn test_execution_step_merkle_chain_tamper_resistance() {
     );
 
     assert_eq!(state.execution_trace.len(), 5);
-    assert!(state.verify_trace_chain(), "Initial trace chain must be 100% valid");
+    assert!(
+        state.verify_trace_chain(),
+        "Initial trace chain must be 100% valid"
+    );
 
     // Attack 1: Mutate prev_chain_hash on step 3
     let mut tampered_state1 = state.clone();
@@ -778,6 +792,7 @@ fn test_execution_step_verify_link_direct() {
 
     // Tampered chain_hash returns false
     let mut tampered_step = step.clone();
-    tampered_step.chain_hash = "3333333333333333333333333333333333333333333333333333333333333333".to_string();
+    tampered_step.chain_hash =
+        "3333333333333333333333333333333333333333333333333333333333333333".to_string();
     assert!(!tampered_step.verify_link(prev_hash));
 }

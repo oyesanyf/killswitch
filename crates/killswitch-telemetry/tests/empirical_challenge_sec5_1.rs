@@ -48,11 +48,24 @@ fn test_challenge_sql_injection_semicolon_stacking() {
     let drop_stacked = "SELECT 1; DROP TABLE processes;";
     let res1 = engine.execute_query(drop_stacked);
     // Even if first statement executes, processes table MUST NOT be dropped
-    assert!(res1.is_ok(), "First SELECT statement in stacked query prepared");
+    assert!(
+        res1.is_ok(),
+        "First SELECT statement in stacked query prepared"
+    );
     let check1 = engine.execute_query("SELECT count(*) as total FROM processes;");
-    assert!(check1.is_ok(), "processes table MUST exist and not be dropped");
-    let check1_count = check1.unwrap()[0].get("total").and_then(|v| v.as_i64()).unwrap_or(0);
-    assert!(check1_count >= 10, "Processes table must remain populated (found {})", check1_count);
+    assert!(
+        check1.is_ok(),
+        "processes table MUST exist and not be dropped"
+    );
+    let check1_count = check1.unwrap()[0]
+        .get("total")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    assert!(
+        check1_count >= 10,
+        "Processes table must remain populated (found {})",
+        check1_count
+    );
 
     // Stacking Attack 2: INSERT via semicolon
     let insert_stacked = "SELECT 1; INSERT INTO processes(pid, name) VALUES (999999, 'evil');";
@@ -304,7 +317,10 @@ fn test_challenge_parameterized_injection_sanitization() {
     let verify_tbl = engine.execute_query("SELECT count(*) FROM file_events;");
     assert!(verify_tbl.is_ok(), "file_events table must remain intact");
     let verify_view = engine.execute_query("SELECT count(*) FROM live_file_events;");
-    assert!(verify_view.is_ok(), "live_file_events view must remain intact");
+    assert!(
+        verify_view.is_ok(),
+        "live_file_events view must remain intact"
+    );
 }
 
 // ============================================================================
@@ -369,10 +385,16 @@ fn test_challenge_multithreaded_ring_buffer_flood_and_contention() {
         reader_handles.push(thread::spawn(move || {
             while !stop.load(Ordering::Relaxed) {
                 let res1 = eng.execute_query("SELECT count(*) as c FROM live_file_events;");
-                assert!(res1.is_ok(), "Query to live_file_events must succeed under contention");
+                assert!(
+                    res1.is_ok(),
+                    "Query to live_file_events must succeed under contention"
+                );
 
                 let res2 = eng.execute_query("SELECT count(*) as c FROM exec_events;");
-                assert!(res2.is_ok(), "Query to exec_events must succeed under contention");
+                assert!(
+                    res2.is_ok(),
+                    "Query to exec_events must succeed under contention"
+                );
 
                 rc.fetch_add(1, Ordering::SeqCst);
                 thread::yield_now();
@@ -393,12 +415,22 @@ fn test_challenge_multithreaded_ring_buffer_flood_and_contention() {
 
     // Assert total writes exceeded 10,000
     let total_file_writes = write_counter.load(Ordering::SeqCst);
-    assert_eq!(total_file_writes, 11200, "Must have written 11,200 file events");
-    assert!(read_counter.load(Ordering::SeqCst) > 0, "Readers must have completed queries");
+    assert_eq!(
+        total_file_writes, 11200,
+        "Must have written 11,200 file events"
+    );
+    assert!(
+        read_counter.load(Ordering::SeqCst) > 0,
+        "Readers must have completed queries"
+    );
 
     // Assert ring buffer exact capacity cap (1024)
     let q = LIVE_FILE_EVENTS.read();
-    assert_eq!(q.len(), 1024, "LIVE_FILE_EVENTS must be capped at 1024 entries");
+    assert_eq!(
+        q.len(),
+        1024,
+        "LIVE_FILE_EVENTS must be capped at 1024 entries"
+    );
 
     // Verify FIFO eviction: front timestamp must be strictly less than back timestamp
     let front_time = q.front().unwrap().time;
@@ -457,32 +489,45 @@ fn test_challenge_complex_sql_operations() {
                     FROM processes p \
                     LEFT JOIN process_open_sockets s ON p.pid = s.pid \
                     LIMIT 10;";
-    let join_res = engine.execute_query(join_sql).expect("LEFT JOIN must succeed");
+    let join_res = engine
+        .execute_query(join_sql)
+        .expect("LEFT JOIN must succeed");
     assert!(!join_res.is_empty(), "JOIN must return rows");
 
     // 2. GROUP BY and HAVING
     let group_sql = "SELECT name, count(*) as cnt FROM processes GROUP BY name HAVING cnt >= 1 ORDER BY cnt DESC LIMIT 5;";
-    let group_res = engine.execute_query(group_sql).expect("GROUP BY must succeed");
+    let group_res = engine
+        .execute_query(group_sql)
+        .expect("GROUP BY must succeed");
     assert!(!group_res.is_empty(), "GROUP BY must return rows");
 
     // 3. Window functions
-    let win_sql = "SELECT pid, name, DENSE_RANK() OVER (ORDER BY pid) as rnk FROM processes LIMIT 10;";
-    let win_res = engine.execute_query(win_sql).expect("Window function must succeed");
+    let win_sql =
+        "SELECT pid, name, DENSE_RANK() OVER (ORDER BY pid) as rnk FROM processes LIMIT 10;";
+    let win_res = engine
+        .execute_query(win_sql)
+        .expect("Window function must succeed");
     assert!(!win_res.is_empty(), "Window function must return rows");
 
     // 4. Subqueries
     let subquery_sql = "SELECT * FROM (SELECT pid, name, memory_rss_mb FROM processes WHERE pid > 0) sub WHERE sub.pid < 1000000 LIMIT 5;";
-    let sub_res = engine.execute_query(subquery_sql).expect("Subquery must succeed");
+    let sub_res = engine
+        .execute_query(subquery_sql)
+        .expect("Subquery must succeed");
     assert!(!sub_res.is_empty(), "Subquery must return rows");
 
     // 5. Output formatters
-    let csv = engine.execute_csv(join_sql).expect("execute_csv must succeed");
+    let csv = engine
+        .execute_csv(join_sql)
+        .expect("execute_csv must succeed");
     assert!(csv.contains("pid"));
     assert!(csv.contains("name"));
     assert!(csv.contains("local_port"));
     assert!(csv.contains("state"));
 
-    let pretty = engine.execute_pretty(join_sql).expect("execute_pretty must succeed");
+    let pretty = engine
+        .execute_pretty(join_sql)
+        .expect("execute_pretty must succeed");
     assert!(pretty.contains("+---"));
     assert!(pretty.contains("| pid"));
 }
@@ -562,7 +607,10 @@ fn test_challenge_12_sweep_edr_audit_and_kernel_anchor_immunity() {
     );
 
     // Verify Sweep 12 flagged the circumvention anomaly
-    let anomalies = sweep.get("anomalies").and_then(|v| v.as_array()).expect("Anomalies array");
+    let anomalies = sweep
+        .get("anomalies")
+        .and_then(|v| v.as_array())
+        .expect("Anomalies array");
     let has_circumvention = anomalies.iter().any(|a| {
         a.get("sweep").and_then(|v| v.as_str()) == Some("circumvention_events")
             && a.get("command_line").and_then(|v| v.as_str()) == Some("sudo -n apt-get update")

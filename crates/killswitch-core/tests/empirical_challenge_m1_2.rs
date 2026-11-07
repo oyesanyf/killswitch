@@ -22,9 +22,7 @@ use killswitch_core::{
 };
 use killswitch_types::{
     errors::KillSwitchError,
-    status::{
-        ContainmentLevel, NetworkIsolationEngine, NetworkIsolator, DEFAULT_CONTROL_PORT,
-    },
+    status::{ContainmentLevel, NetworkIsolationEngine, NetworkIsolator, DEFAULT_CONTROL_PORT},
 };
 use parking_lot::RwLock;
 use std::fs;
@@ -336,7 +334,10 @@ fn query_win32_token_elevation_independently() -> (bool, u32) {
             &mut return_length,
         );
         CloseHandle(token);
-        (success != 0 && elevation.TokenIsElevated != 0, elevation.TokenIsElevated)
+        (
+            success != 0 && elevation.TokenIsElevated != 0,
+            elevation.TokenIsElevated,
+        )
     }
 }
 
@@ -399,7 +400,10 @@ fn test_challenge_task3_engage_windows_quarantine_fails_closed_without_elevation
         );
 
         match res {
-            Err(KillSwitchError::InsufficientPrivileges { details, remediation }) => {
+            Err(KillSwitchError::InsufficientPrivileges {
+                details,
+                remediation,
+            }) => {
                 println!(
                     "Verified fail-closed: returned InsufficientPrivileges: {}\nRemediation: {}",
                     details, remediation
@@ -418,10 +422,16 @@ fn test_challenge_task3_engage_windows_quarantine_fails_closed_without_elevation
                 );
             }
             Err(KillSwitchError::ZeroFiltersInstalled(msg)) => {
-                println!("Verified fail-closed: returned ZeroFiltersInstalled: {}", msg);
+                println!(
+                    "Verified fail-closed: returned ZeroFiltersInstalled: {}",
+                    msg
+                );
             }
             Err(other_err) => {
-                println!("Returned other error (acceptable fail-closed): {:?}", other_err);
+                println!(
+                    "Returned other error (acceptable fail-closed): {:?}",
+                    other_err
+                );
             }
             Ok(receipt) => {
                 panic!(

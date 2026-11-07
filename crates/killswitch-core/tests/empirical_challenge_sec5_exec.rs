@@ -7,18 +7,19 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use killswitch_core::exec_sensor::{
-    clear_exec_events, get_recent_exec_events, record_exec_event, ExecEvent,
-    ExecSensorBuffer, EXEC_SENSOR_DEFAULT_CAPACITY,
+    clear_exec_events, get_recent_exec_events, record_exec_event, ExecEvent, ExecSensorBuffer,
+    EXEC_SENSOR_DEFAULT_CAPACITY,
 };
 
 /// Global test synchronization lock to serialize access to the global singleton
 /// `EXEC_SENSOR_BUFFER` across concurrent test runner threads in this integration test binary.
 static EXEC_SENSOR_TEST_LOCK: Mutex<()> = Mutex::new(());
 
-
 #[test]
 fn test_exec_sensor_32_thread_concurrent_flood() {
-    let _guard = EXEC_SENSOR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = EXEC_SENSOR_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     clear_exec_events();
     let thread_count = 32;
     let events_per_thread = 100; // Total 3,200 events, exceeding default 2048 capacity
@@ -149,7 +150,10 @@ fn test_exec_sensor_slow_subscriber_lock_drop_non_blocking() {
     let push_elapsed = push_start.elapsed();
     // Fast subscriber must have received all 20 events
     assert_eq!(fast_counter.load(Ordering::SeqCst), num_events as usize);
-    assert_eq!(slow_subscriber_received.load(Ordering::SeqCst), num_events as usize);
+    assert_eq!(
+        slow_subscriber_received.load(Ordering::SeqCst),
+        num_events as usize
+    );
 
     // Even with 1ms delay in slow subscriber, lock-drop allows concurrent buffer snapshots
     let snapshot = buffer.snapshot();
@@ -196,7 +200,9 @@ fn test_exec_sensor_panicking_subscriber_isolation() {
 
 #[test]
 fn test_micro_process_lifecycle_start_and_exit_correlation() {
-    let _guard = EXEC_SENSOR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = EXEC_SENSOR_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     clear_exec_events();
 
     // Simulate 50 ephemeral micro-processes that spawn and terminate in <5ms

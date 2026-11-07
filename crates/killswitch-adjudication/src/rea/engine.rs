@@ -9,9 +9,7 @@
 //! - Cryptographic BLAKE3 Seal Generation & Verification
 
 use chrono::Utc;
-use killswitch_types::adjudication::{
-    ReaConsensusVote, ReaDetectorEvaluation, REA_SEAL_CONTEXT,
-};
+use killswitch_types::adjudication::{ReaConsensusVote, ReaDetectorEvaluation, REA_SEAL_CONTEXT};
 use parking_lot::RwLock;
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
@@ -101,7 +99,8 @@ impl AutonomousReaEngine {
         raw_score: f64,
         payload_bytes: Option<&[u8]>,
     ) -> ReaDetectorEvaluation {
-        self.detector_alerts_evaluated.fetch_add(1, Ordering::Relaxed);
+        self.detector_alerts_evaluated
+            .fetch_add(1, Ordering::Relaxed);
         {
             let mut map = self.per_detector_counts.write();
             *map.entry(detector_name.to_string()).or_insert(0) += 1;
@@ -117,13 +116,15 @@ impl AutonomousReaEngine {
         // 1. Layer 4 Counter-AI Prompt Injection Detection
         let combined_input = format!("{}\n{}", target_proc_or_path, candidate_reason);
         let mut dummy_recon = String::new();
-        let (prompt_injections, _) = crate::rea::prompt_injection::scan_and_sanitize_counter_ai_strings(
-            combined_input.as_bytes(),
-            &mut dummy_recon,
-            false,
-        );
+        let (prompt_injections, _) =
+            crate::rea::prompt_injection::scan_and_sanitize_counter_ai_strings(
+                combined_input.as_bytes(),
+                &mut dummy_recon,
+                false,
+            );
         if !prompt_injections.is_empty() {
-            self.prompt_injections_blocked.fetch_add(1, Ordering::Relaxed);
+            self.prompt_injections_blocked
+                .fetch_add(1, Ordering::Relaxed);
             self.malicious_confirmations.fetch_add(1, Ordering::Relaxed);
             let adjusted_score = (raw_score + 0.45).clamp(0.95, 1.0);
             return ReaDetectorEvaluation {
@@ -150,7 +151,8 @@ impl AutonomousReaEngine {
             Some(Path::new(target_proc_or_path)),
             payload_bytes,
         ) {
-            self.masquerade_attempts_blocked.fetch_add(1, Ordering::Relaxed);
+            self.masquerade_attempts_blocked
+                .fetch_add(1, Ordering::Relaxed);
             self.malicious_confirmations.fetch_add(1, Ordering::Relaxed);
             let adjusted_score = (raw_score + 0.40).clamp(0.92, 1.0);
             return ReaDetectorEvaluation {
@@ -265,15 +267,20 @@ impl AutonomousReaEngine {
             current_confidence,
         );
 
-        let (decision, weight, confidence) = if eval.masquerade_escalated || eval.prompt_injection_escalated {
-            ("ESCALATE_MALICIOUS".to_string(), 1.85, 0.98)
-        } else if eval.verdict == "CONFIRMED_ACTIVE_THREAT" {
-            ("ESCALATE_MALICIOUS".to_string(), 1.65, 0.95)
-        } else if eval.benign_veto {
-            ("VETO_BENIGN".to_string(), -1.50, 0.96)
-        } else {
-            ("ATTEST_NEUTRAL".to_string(), 0.25, eval.adjusted_score.clamp(0.10, 0.95))
-        };
+        let (decision, weight, confidence) =
+            if eval.masquerade_escalated || eval.prompt_injection_escalated {
+                ("ESCALATE_MALICIOUS".to_string(), 1.85, 0.98)
+            } else if eval.verdict == "CONFIRMED_ACTIVE_THREAT" {
+                ("ESCALATE_MALICIOUS".to_string(), 1.65, 0.95)
+            } else if eval.benign_veto {
+                ("VETO_BENIGN".to_string(), -1.50, 0.96)
+            } else {
+                (
+                    "ATTEST_NEUTRAL".to_string(),
+                    0.25,
+                    eval.adjusted_score.clamp(0.10, 0.95),
+                )
+            };
 
         let timestamp = Utc::now().to_rfc3339();
         let seal = ReaConsensusVote::compute_seal(
@@ -366,7 +373,9 @@ pub fn is_rea_benign_system_or_dev_process(proc_or_path: &str, reason: Option<&s
     }
 
     // Masquerade check
-    if crate::rea::path_security::detect_binary_masquerade_spoof(raw, Some(Path::new(raw)), None).is_some() {
+    if crate::rea::path_security::detect_binary_masquerade_spoof(raw, Some(Path::new(raw)), None)
+        .is_some()
+    {
         return false;
     }
 

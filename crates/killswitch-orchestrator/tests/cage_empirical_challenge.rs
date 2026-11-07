@@ -6,7 +6,6 @@
 //! 3. Formal state-machine model checking via `CageTraceVerifier` on orchestrator-generated traces.
 //! 4. Adversarial trace perturbation and illegal post-refusal actuation detection.
 
-use std::sync::Arc;
 use killswitch_adjudication::ZeroFalsePositiveAdjudicator;
 use killswitch_core::killchain::HostContainmentManager;
 use killswitch_orchestrator::checkpointer::DurableFileCheckpointer;
@@ -19,6 +18,7 @@ use killswitch_telemetry::{
 use killswitch_types::adjudication::{EvidenceClass, ThreatCandidate};
 use killswitch_types::errors::KillSwitchError;
 use killswitch_types::graph::{KillSwitchGraphState, OrchestratorMode, StateCheckpointer};
+use std::sync::Arc;
 
 /// Test 1: Verify canonical receipt sealing against `global_cage_kernel()`
 /// Asserts that all metadata fields in state match the canonical receipt bit-for-bit,
@@ -48,13 +48,23 @@ async fn test_empirical_canonical_receipt_sealing_in_orchestrator_state() {
 
     // 1. Inherent receipt cryptographic verification
     assert_eq!(receipt.verdict, CageVerdict::Clear);
-    assert!(receipt.verify_digest(), "Canonical receipt digest verification must succeed");
-    assert!(!receipt.receipt_signature.is_empty(), "Signature must be populated");
+    assert!(
+        receipt.verify_digest(),
+        "Canonical receipt digest verification must succeed"
+    );
+    assert!(
+        !receipt.receipt_signature.is_empty(),
+        "Signature must be populated"
+    );
 
     // Kernel evidence writer must accept the authentic receipt
     let writer = global_cage_kernel().evidence_writer();
     let append_res = writer.append_receipt(receipt.clone());
-    assert!(append_res.is_ok(), "Kernel evidence writer must accept authentic receipt: {:?}", append_res.err());
+    assert!(
+        append_res.is_ok(),
+        "Kernel evidence writer must accept authentic receipt: {:?}",
+        append_res.err()
+    );
 
     // 2. Strict state metadata synchronization
     let stored_digest = state
@@ -141,7 +151,10 @@ async fn test_empirical_checkpoint_tamper_detection_fail_closed() {
     assert!(state.containment_status.isolated, "Host must be isolated");
     let original_digest = state.metadata.get("cage_receipt_digest").unwrap().clone();
     assert_eq!(original_digest.len(), 64);
-    assert!(!state.execution_trace.is_empty(), "Execution trace must contain steps");
+    assert!(
+        !state.execution_trace.is_empty(),
+        "Execution trace must contain steps"
+    );
     let target_step_input_digest = state.execution_trace[0].input_digest.clone();
 
     // Save baseline checkpoint
@@ -153,15 +166,26 @@ async fn test_empirical_checkpoint_tamper_detection_fail_closed() {
         .await
         .unwrap()
         .expect("Checkpoint must exist");
-    assert_eq!(loaded.metadata.get("cage_receipt_digest"), Some(&original_digest));
+    assert_eq!(
+        loaded.metadata.get("cage_receipt_digest"),
+        Some(&original_digest)
+    );
     assert!(loaded.verify_trace_chain());
 
-    let chk_path = temp_dir.path().join(format!("checkpoint_{}.json", state.incident_id));
+    let chk_path = temp_dir
+        .path()
+        .join(format!("checkpoint_{}.json", state.incident_id));
     let raw_json = std::fs::read_to_string(&chk_path).unwrap();
 
     // Tamper Vector A: Alter receipt digest in metadata
-    let tampered_digest_json = raw_json.replace(&original_digest, "0000000000000000000000000000000000000000000000000000000000000000");
-    assert_ne!(tampered_digest_json, raw_json, "Must have replaced original digest");
+    let tampered_digest_json = raw_json.replace(
+        &original_digest,
+        "0000000000000000000000000000000000000000000000000000000000000000",
+    );
+    assert_ne!(
+        tampered_digest_json, raw_json,
+        "Must have replaced original digest"
+    );
     let tampered_state: KillSwitchGraphState = serde_json::from_str(&tampered_digest_json).unwrap();
     assert_ne!(
         tampered_state.metadata.get("cage_receipt_digest").unwrap(),
@@ -174,7 +198,10 @@ async fn test_empirical_checkpoint_tamper_detection_fail_closed() {
         &target_step_input_digest,
         "tampered_adversarial_input_digest_hex",
     );
-    assert_ne!(tampered_trace_json, raw_json, "Must have replaced target step input digest");
+    assert_ne!(
+        tampered_trace_json, raw_json,
+        "Must have replaced target step input digest"
+    );
     std::fs::write(&chk_path, tampered_trace_json).unwrap();
     let load_res = checkpointer.load_checkpoint(&state.incident_id).await;
     assert!(
@@ -253,7 +280,8 @@ async fn test_empirical_trace_verifier_on_orchestrator_runs() {
     let resp_contain = kernel.evaluate(&req_contain);
     assert_eq!(resp_contain.verdict, CageVerdict::Clear);
 
-    let report_contain = CageTraceVerifier::verify_trace_conformance(&resp_contain.governance_trace);
+    let report_contain =
+        CageTraceVerifier::verify_trace_conformance(&resp_contain.governance_trace);
     assert!(
         report_contain.is_conformant,
         "Containment trace must be formally conformant: {:?}",
@@ -280,7 +308,8 @@ async fn test_empirical_trace_verifier_on_orchestrator_runs() {
     let resp_rollback = kernel.evaluate(&req_rollback);
     assert_eq!(resp_rollback.verdict, CageVerdict::Clear);
 
-    let report_rollback = CageTraceVerifier::verify_trace_conformance(&resp_rollback.governance_trace);
+    let report_rollback =
+        CageTraceVerifier::verify_trace_conformance(&resp_rollback.governance_trace);
     assert!(
         report_rollback.is_conformant,
         "Rollback trace must be formally conformant: {:?}",

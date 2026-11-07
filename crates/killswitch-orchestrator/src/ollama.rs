@@ -3,8 +3,8 @@
 //! Evaluates local LLM forensic reasoning with dynamic memory sizing (Anti-OOM)
 //! and a strict 400ms probe deadline with deterministic zero-crash offline fallback.
 
-use std::time::Duration;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use sysinfo::System;
 
 /// Result emitted by Ollama reasoning engine.
@@ -89,11 +89,7 @@ impl OllamaReasoningEngine {
         match tokio::time::timeout(Duration::from_millis(400), probe_future).await {
             Ok(Ok(resp)) if resp.status().is_success() => {
                 if let Ok(json) = resp.json::<serde_json::Value>().await {
-                    let response_text = json["response"]
-                        .as_str()
-                        .unwrap_or("")
-                        .trim()
-                        .to_string();
+                    let response_text = json["response"].as_str().unwrap_or("").trim().to_string();
                     if !response_text.is_empty() {
                         return OllamaReasoningResult {
                             model_used: model.to_string(),

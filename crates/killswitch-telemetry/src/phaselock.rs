@@ -5,14 +5,16 @@
 //! running attractor centroid & variance tracking via exponential moving average ($\alpha = 0.05$),
 //! Mahalanobis distance drift detection, and chaotic breakout alerts.
 
-use std::collections::VecDeque;
-use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
+use std::sync::Arc;
 
 use killswitch_types::adjudication::EvidenceClass;
-use killswitch_types::telemetry::{SecurityEvent, TelemetryEventKind, ThreatSeverity, ThreatSignal};
+use killswitch_types::telemetry::{
+    SecurityEvent, TelemetryEventKind, ThreatSeverity, ThreatSignal,
+};
 
 /// Configuration parameters for Takens 4D delay embedding and Lyapunov divergence.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -406,7 +408,8 @@ mod tests {
         assert_eq!(compute_shannon_entropy(""), 0.0);
         let low_entropy = compute_shannon_entropy("aaaaaaaaaaaaaaaa");
         assert_eq!(low_entropy, 0.0);
-        let high_entropy = compute_shannon_entropy("abcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()");
+        let high_entropy =
+            compute_shannon_entropy("abcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()");
         assert!(high_entropy > 4.5);
     }
 

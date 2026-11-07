@@ -73,21 +73,39 @@ impl ProtocolDomain {
     /// User-facing descriptive name for the domain.
     pub const fn name(&self) -> &'static str {
         match self {
-            Self::ClassicalNetworkTransportSecurity => "Classical Network, Transport & Security Plane",
+            Self::ClassicalNetworkTransportSecurity => {
+                "Classical Network, Transport & Security Plane"
+            }
             Self::ClassicalVoiceMediaCollaboration => "Voice, Media & Real-Time Collaboration",
-            Self::ClassicalToQuantumApiIrSerialization => "Classical-to-Quantum API, IR & Serialization",
-            Self::HardwareSyncCryoInstrumentation => "Hardware Sync, Cryo-Control & Instrumentation",
+            Self::ClassicalToQuantumApiIrSerialization => {
+                "Classical-to-Quantum API, IR & Serialization"
+            }
+            Self::HardwareSyncCryoInstrumentation => {
+                "Hardware Sync, Cryo-Control & Instrumentation"
+            }
             Self::PrepareAndMeasureQkd => "Prepare-and-Measure QKD",
             Self::EntanglementBasedDiQkd => "Entanglement-Based & Device-Independent QKD",
             Self::DistributedPhaseReferenceCvQkd => "Distributed-Phase-Reference & CV-QKD",
-            Self::ClassicalPostProcessingKeyManagement => "Classical Post-Processing & QKD Key Management",
-            Self::PhysicalLinkLayerEntanglementGeneration => "Physical & Link-Layer Entanglement Generation",
-            Self::QuantumRepeaterSwappingPurification => "Quantum Repeater, Swapping & Purification",
+            Self::ClassicalPostProcessingKeyManagement => {
+                "Classical Post-Processing & QKD Key Management"
+            }
+            Self::PhysicalLinkLayerEntanglementGeneration => {
+                "Physical & Link-Layer Entanglement Generation"
+            }
+            Self::QuantumRepeaterSwappingPurification => {
+                "Quantum Repeater, Swapping & Purification"
+            }
             Self::QuantumNetworkRoutingTransport => "Quantum Network, Routing & Transport",
-            Self::DistributedQuantumComputingInterconnect => "Distributed QC & Inter-Core Interconnect",
+            Self::DistributedQuantumComputingInterconnect => {
+                "Distributed QC & Inter-Core Interconnect"
+            }
             Self::QecFaultTolerantDecoding => "QEC & Fault-Tolerant Decoding",
-            Self::BlindVerifiableSmpcQuantumComputing => "Blind, Verifiable & SMPC Quantum Computing",
-            Self::QuantumDirectCommConsensusPrimitives => "Quantum Direct Comm, Consensus & Cryptography",
+            Self::BlindVerifiableSmpcQuantumComputing => {
+                "Blind, Verifiable & SMPC Quantum Computing"
+            }
+            Self::QuantumDirectCommConsensusPrimitives => {
+                "Quantum Direct Comm, Consensus & Cryptography"
+            }
             Self::QuantumSensingMetrologyClockSync => "Quantum Sensing, Metrology & Clock Sync",
         }
     }

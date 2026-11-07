@@ -117,9 +117,7 @@ pub fn is_local_tcp_port_listening(port: u16) -> bool {
 pub fn discover_active_control_ports() -> Vec<u16> {
     let mut ports: Vec<u16> = (3030..=3045).collect();
     ports.push(4040);
-    let mut candidates = vec![
-        std::path::PathBuf::from("active_port.txt"),
-    ];
+    let mut candidates = vec![std::path::PathBuf::from("active_port.txt")];
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             candidates.push(dir.join("active_port.txt"));
@@ -127,10 +125,16 @@ pub fn discover_active_control_ports() -> Vec<u16> {
     }
     #[cfg(windows)]
     if let Ok(program_data) = std::env::var("ProgramData") {
-        candidates.push(std::path::PathBuf::from(program_data).join("KillSwitch").join("active_port.txt"));
+        candidates.push(
+            std::path::PathBuf::from(program_data)
+                .join("KillSwitch")
+                .join("active_port.txt"),
+        );
     }
     #[cfg(target_os = "linux")]
-    candidates.push(std::path::PathBuf::from("/var/run/killswitch/active_port.txt"));
+    candidates.push(std::path::PathBuf::from(
+        "/var/run/killswitch/active_port.txt",
+    ));
     for path in candidates {
         // Reject symlinks to prevent TOCTOU redirection
         if path.is_symlink() {

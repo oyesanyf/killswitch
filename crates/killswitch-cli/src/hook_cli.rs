@@ -20,8 +20,10 @@ use killswitch_telemetry::agent_hooks::{
 
 /// Installs hook configurations across specified agent configuration files in a workspace.
 pub fn handle_hook_install(workspace: Option<PathBuf>, agents: Option<String>) -> Result<()> {
-    let ws = workspace.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    let bin_path = std::env::current_exe().context("Failed to resolve current killswitch binary path")?;
+    let ws =
+        workspace.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let bin_path =
+        std::env::current_exe().context("Failed to resolve current killswitch binary path")?;
 
     let agent_kinds = if let Some(agent_str) = agents {
         let mut list = Vec::new();
@@ -65,7 +67,10 @@ pub fn handle_hook_install(workspace: Option<PathBuf>, agents: Option<String>) -
     for p in &installed {
         println!("  ✅ Created hook config: {}", p.display());
     }
-    println!("\n✨ Successfully installed {} agent hook configs.", installed.len());
+    println!(
+        "\n✨ Successfully installed {} agent hook configs.",
+        installed.len()
+    );
     Ok(())
 }
 

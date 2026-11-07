@@ -45,7 +45,8 @@ async fn test_multi_hop_dlp_exfiltration_fan_in_scenario() {
             namespace: "file://endpoint-local".to_string(),
             name: "C:\\Users\\Alice\\Documents\\secret_roadmap.docx".to_string(),
             facets: OpenLineageDatasetFacets {
-                content_sha256: "aaa1111111111111111111111111111111111111111111111111111111111111".to_string(),
+                content_sha256: "aaa1111111111111111111111111111111111111111111111111111111111111"
+                    .to_string(),
                 dlp_classification: DlpClassification::CrownJewel,
             },
         },
@@ -53,7 +54,8 @@ async fn test_multi_hop_dlp_exfiltration_fan_in_scenario() {
             namespace: "file://endpoint-local".to_string(),
             name: "C:\\Users\\Alice\\Documents\\q4_financials.xlsx".to_string(),
             facets: OpenLineageDatasetFacets {
-                content_sha256: "bbb2222222222222222222222222222222222222222222222222222222222222".to_string(),
+                content_sha256: "bbb2222222222222222222222222222222222222222222222222222222222222"
+                    .to_string(),
                 dlp_classification: DlpClassification::Confidential,
             },
         },
@@ -207,7 +209,9 @@ async fn test_compromised_admin_powershell_exfiltration_preserves_shell() {
     let v = vote.unwrap();
     assert_eq!(v.action, VoteAction::Isolate);
     assert_eq!(v.confidence, 0.96);
-    assert!(v.explanation.contains("Preserving PID from freeze termination; network isolation recommended"));
+    assert!(v
+        .explanation
+        .contains("Preserving PID from freeze termination; network isolation recommended"));
 }
 
 #[tokio::test]

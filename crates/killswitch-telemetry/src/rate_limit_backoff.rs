@@ -808,13 +808,19 @@ impl DeterministicPhysicsVoter {
                 };
             }
             if flow.backoff_compliant && flow.honors_retry_after {
-                let jitter_adj = if flow.observed_jitter_present { 0.03 } else { 0.08 };
+                let jitter_adj = if flow.observed_jitter_present {
+                    0.03
+                } else {
+                    0.08
+                };
                 return VoterVerdict {
                     voter_name: "DeterministicPhysicsVoter".to_string(),
                     weight: Self::WEIGHT,
                     malicious_prob: jitter_adj,
                     confidence: 0.98,
-                    reason: "Compliant physical truncated exponential backoff and Retry-After satisfied".to_string(),
+                    reason:
+                        "Compliant physical truncated exponential backoff and Retry-After satisfied"
+                            .to_string(),
                 };
             }
             if flow.backoff_compliant {
@@ -823,7 +829,8 @@ impl DeterministicPhysicsVoter {
                     weight: Self::WEIGHT,
                     malicious_prob: 0.15,
                     confidence: 0.90,
-                    reason: "Exponential backoff compliant without explicit Retry-After".to_string(),
+                    reason: "Exponential backoff compliant without explicit Retry-After"
+                        .to_string(),
                 };
             }
             return VoterVerdict {
@@ -1088,7 +1095,9 @@ impl RateLimitVoterEnsemble {
         // Hard Invariant 2: Benign Developer Script Protection
         if is_interactive_unpacked {
             let action = EdrAction::LogBenignThrottlingWarning {
-                reason: "Interactive developer process unthrottled: warning logged without containment".to_string(),
+                reason:
+                    "Interactive developer process unthrottled: warning logged without containment"
+                        .to_string(),
                 final_malicious_prob,
             };
             return VoterConsensus {
@@ -1130,7 +1139,10 @@ impl RateLimitVoterEnsemble {
 
         let action = if final_malicious_prob >= 0.60 {
             EdrAction::LogBenignThrottlingWarning {
-                reason: format!("Elevated throttling risk detected (prob={:.2})", final_malicious_prob),
+                reason: format!(
+                    "Elevated throttling risk detected (prob={:.2})",
+                    final_malicious_prob
+                ),
                 final_malicious_prob,
             }
         } else {
@@ -1221,7 +1233,8 @@ impl RateLimitAllowlist {
         let p = Self::file_path();
         let mut lock = ALLOWLIST_CACHE.write().unwrap();
         lock.retain(|e| {
-            !(e.destination_host.eq_ignore_ascii_case(&entry.destination_host)
+            !(e.destination_host
+                .eq_ignore_ascii_case(&entry.destination_host)
                 && e.protocol.eq_ignore_ascii_case(&entry.protocol)
                 && e.pid == entry.pid)
         });
@@ -1359,7 +1372,11 @@ impl AgentVelocityRateLimiter {
         window.records.retain(|r| r.timestamp >= window_60s);
 
         let window_1s = now - chrono::Duration::milliseconds(1000);
-        let calls_in_last_1s = window.records.iter().filter(|r| r.timestamp >= window_1s).count();
+        let calls_in_last_1s = window
+            .records
+            .iter()
+            .filter(|r| r.timestamp >= window_1s)
+            .count();
         let calls_in_60s = window.records.len();
         let cumulative_items_60s = window
             .records
@@ -1410,7 +1427,9 @@ impl AgentVelocityRateLimiter {
             return AgentVelocityVerdict {
                 session_id: session_id.to_string(),
                 is_anomalous: true,
-                owasp_risk: Some("OWASP ASI09: Cumulative Batch Scraping / Exfiltration Burst".to_string()),
+                owasp_risk: Some(
+                    "OWASP ASI09: Cumulative Batch Scraping / Exfiltration Burst".to_string(),
+                ),
                 calls_in_60s,
                 calls_in_last_1s,
                 cumulative_items_60s,
@@ -1645,7 +1664,11 @@ mod tests {
         let limiter = AgentVelocityRateLimiter::new(20, 5, 200, 50_000, 5);
         for i in 0..5 {
             let v = limiter.record_and_check("agent-session-1", "bash_exec", 1, 100, false);
-            assert!(!v.is_anomalous, "Call {} should be within burst limit", i + 1);
+            assert!(
+                !v.is_anomalous,
+                "Call {} should be within burst limit",
+                i + 1
+            );
         }
         // 6th call within < 1 second exceeds subsecond_burst_limit (5)
         let burst = limiter.record_and_check("agent-session-1", "bash_exec", 1, 100, false);

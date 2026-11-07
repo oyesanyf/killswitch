@@ -48,9 +48,7 @@ impl KillSwitchClient {
     }
 
     fn discover_active_port() -> Option<u16> {
-        let mut candidates = vec![
-            std::path::PathBuf::from("active_port.txt"),
-        ];
+        let mut candidates = vec![std::path::PathBuf::from("active_port.txt")];
         if let Ok(exe) = std::env::current_exe() {
             if let Some(dir) = exe.parent() {
                 candidates.insert(0, dir.join("active_port.txt"));
@@ -58,10 +56,16 @@ impl KillSwitchClient {
         }
         #[cfg(windows)]
         if let Ok(program_data) = std::env::var("ProgramData") {
-            candidates.push(std::path::PathBuf::from(program_data).join("KillSwitch").join("active_port.txt"));
+            candidates.push(
+                std::path::PathBuf::from(program_data)
+                    .join("KillSwitch")
+                    .join("active_port.txt"),
+            );
         }
         #[cfg(target_os = "linux")]
-        candidates.push(std::path::PathBuf::from("/var/run/killswitch/active_port.txt"));
+        candidates.push(std::path::PathBuf::from(
+            "/var/run/killswitch/active_port.txt",
+        ));
         for path in candidates {
             if path.is_symlink() {
                 continue;

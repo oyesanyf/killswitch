@@ -194,11 +194,11 @@ impl AuthenticodeChainStatus {
     pub fn code(&self) -> i32 {
         match self {
             Self::ValidTrusted => 0,
-            Self::UntrustedRoot => -2146762487, // 0x800B0109
+            Self::UntrustedRoot => -2146762487,     // 0x800B0109
             Self::TamperedBadDigest => -2146869232, // 0x80096010
-            Self::NotSigned => -2146762496, // 0x800B0100
-            Self::ExplicitDistrust => -2146762479, // 0x800B0111
-            Self::Revoked => -2146762484, // 0x800B010C
+            Self::NotSigned => -2146762496,         // 0x800B0100
+            Self::ExplicitDistrust => -2146762479,  // 0x800B0111
+            Self::Revoked => -2146762484,           // 0x800B010C
             Self::OtherError(code) => *code,
         }
     }
@@ -259,13 +259,9 @@ pub enum BinaryTrustVerdict {
         thumbprint: Option<String>,
     },
     /// Cryptographically verified via Windows Security Catalog (CatRoot hash lookup).
-    TrustedCatalog {
-        catalog_name: Option<String>,
-    },
+    TrustedCatalog { catalog_name: Option<String> },
     /// Cryptographically verified via matching a known BLAKE3 digest in the protected local inventory.
-    TrustedProtectedHash {
-        blake3_hash: String,
-    },
+    TrustedProtectedHash { blake3_hash: String },
     /// Cryptographically verified via Linux/Unix package manager or system integrity manifest.
     TrustedSystemPackage {
         package_name: Option<String>,
@@ -277,18 +273,11 @@ pub enum BinaryTrustVerdict {
         reason: String,
     },
     /// Untrusted: binary in user-writable/temp directory without valid signature or inventory match.
-    UntrustedWritableLocation {
-        path: String,
-        reason: String,
-    },
+    UntrustedWritableLocation { path: String, reason: String },
     /// Untrusted: binary has no digital signature, catalog registration, or inventory digest.
-    UntrustedUnsigned {
-        blake3_hash: String,
-    },
+    UntrustedUnsigned { blake3_hash: String },
     /// Untrusted: binary path does not exist, cannot be read, or is not a regular file.
-    UntrustedIoError {
-        error: String,
-    },
+    UntrustedIoError { error: String },
 }
 
 impl BinaryTrustVerdict {
@@ -728,7 +717,12 @@ impl AdjudicationResult {
     }
 
     /// Computes a canonical BLAKE3 adjudication seal over the result.
-    pub fn compute_seal(verdict_name: &str, confidence: f32, explanation: &str, timestamp: &str) -> String {
+    pub fn compute_seal(
+        verdict_name: &str,
+        confidence: f32,
+        explanation: &str,
+        timestamp: &str,
+    ) -> String {
         let mut hasher = blake3::Hasher::new();
         hasher.update(REA_SEAL_CONTEXT);
         hasher.update(verdict_name.as_bytes());
@@ -822,11 +816,13 @@ mod tests {
         assert!(proof.verify_seal());
 
         // Tamper with target_binary_hash
-        proof.target_binary_hash = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".to_string();
+        proof.target_binary_hash =
+            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".to_string();
         assert!(!proof.verify_seal());
 
         // Restore hash and tamper with proc_name
-        proof.target_binary_hash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_string();
+        proof.target_binary_hash =
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_string();
         assert!(proof.verify_seal());
         proof.proc_name = "explorer.exe".to_string();
         assert!(!proof.verify_seal());
@@ -901,7 +897,8 @@ mod tests {
         let reason = "Dev process white-listed";
         let timestamp = "2026-10-26T12:00:00Z";
 
-        let seal = ReaConsensusVote::compute_seal(target, decision, weight, confidence, reason, timestamp);
+        let seal =
+            ReaConsensusVote::compute_seal(target, decision, weight, confidence, reason, timestamp);
 
         let vote = ReaConsensusVote {
             voter_name: "AutonomousReaEngine".to_string(),

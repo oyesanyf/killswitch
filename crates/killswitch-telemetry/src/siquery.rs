@@ -197,7 +197,9 @@ impl SiqueryEngine {
             || lower.starts_with("attach ")
             || lower.starts_with("detach ")
         {
-            return Err("Mutating SQL statements are forbidden (read-only query engine)".to_string());
+            return Err(
+                "Mutating SQL statements are forbidden (read-only query engine)".to_string(),
+            );
         }
 
         // Open in-memory SQLite database
@@ -251,7 +253,9 @@ impl SiqueryEngine {
 
         // Guard 4: VDBE Readonly Verification
         if !stmt.readonly() {
-            return Err("Mutating SQL statements are forbidden (read-only query engine)".to_string());
+            return Err(
+                "Mutating SQL statements are forbidden (read-only query engine)".to_string(),
+            );
         }
 
         let col_count = stmt.column_count();
@@ -652,15 +656,19 @@ impl SiqueryEngine {
             || lower.contains("interface_details")
             || lower.contains("interface_address");
         let need_users = is_metadata || lower.contains("user_accounts") || lower.contains("users");
-        let need_logged = is_metadata || lower.contains("logged_in_users") || lower.contains("logon_sessions");
-        let need_files = is_metadata || lower.contains("open_files") || lower.contains("process_open_files");
-        let need_file_events = is_metadata || lower.contains("file_events") || lower.contains("live_file_events");
+        let need_logged =
+            is_metadata || lower.contains("logged_in_users") || lower.contains("logon_sessions");
+        let need_files =
+            is_metadata || lower.contains("open_files") || lower.contains("process_open_files");
+        let need_file_events =
+            is_metadata || lower.contains("file_events") || lower.contains("live_file_events");
         let need_pipes = is_metadata || lower.contains("pipes");
         let need_envs = is_metadata || lower.contains("process_envs");
         let need_mmap = is_metadata || lower.contains("process_memory_map");
         let need_routes = is_metadata || lower.contains("routes");
         let need_arp = is_metadata || lower.contains("arp_cache");
-        let need_services = is_metadata || lower.contains("services") || lower.contains("wmi_services");
+        let need_services =
+            is_metadata || lower.contains("services") || lower.contains("wmi_services");
         let need_tasks = is_metadata || lower.contains("scheduled_tasks");
         let need_autoruns = is_metadata || lower.contains("autoruns");
         let need_drivers = is_metadata || lower.contains("drivers");
@@ -829,7 +837,10 @@ impl SiqueryEngine {
             let mem_rss_mb = (mem_bytes as f64) / (1024.0 * 1024.0);
             let cpu = proc_info.cpu_usage() as f64;
             let start = proc_info.start_time() as i64;
-            let user_id = proc_info.user_id().map(|u| u.to_string()).unwrap_or_default();
+            let user_id = proc_info
+                .user_id()
+                .map(|u| u.to_string())
+                .unwrap_or_default();
             let uid_num = user_id.parse::<i64>().unwrap_or(0);
 
             stmt.execute(rusqlite::params![
@@ -952,8 +963,16 @@ impl SiqueryEngine {
         ];
 
         for (cat, name, ver, shell, net, radius) in tools {
-            stmt.execute(rusqlite::params![cat, name, ver, format!("/bin/{}", name), shell, net, radius])
-                .map_err(|e| e.to_string())?;
+            stmt.execute(rusqlite::params![
+                cat,
+                name,
+                ver,
+                format!("/bin/{}", name),
+                shell,
+                net,
+                radius
+            ])
+            .map_err(|e| e.to_string())?;
         }
         Ok(())
     }
@@ -972,9 +991,18 @@ impl SiqueryEngine {
             .unwrap_or_else(|_| ".".to_string());
 
         let search_dirs = [
-            ("vscode", Path::new(&home).join(".vscode").join("extensions")),
-            ("cursor", Path::new(&home).join(".cursor").join("extensions")),
-            ("windsurf", Path::new(&home).join(".windsurf").join("extensions")),
+            (
+                "vscode",
+                Path::new(&home).join(".vscode").join("extensions"),
+            ),
+            (
+                "cursor",
+                Path::new(&home).join(".cursor").join("extensions"),
+            ),
+            (
+                "windsurf",
+                Path::new(&home).join(".windsurf").join("extensions"),
+            ),
         ];
 
         let mut count = 0;
@@ -1005,7 +1033,8 @@ impl SiqueryEngine {
                                 {
                                     ai_capable = 1;
                                 }
-                                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content)
+                                {
                                     if let Some(v) = val.get("version").and_then(|v| v.as_str()) {
                                         version = v.to_string();
                                     }
@@ -1175,8 +1204,10 @@ impl SiqueryEngine {
         let ver = System::os_version().unwrap_or_else(|| "10.0".to_string());
         let arch = System::cpu_arch().unwrap_or_else(|| "x86_64".to_string());
 
-        stmt.execute(rusqlite::params![name, ver, 10i64, 0i64, "22631", "windows", "release", arch])
-            .map_err(|e| e.to_string())?;
+        stmt.execute(rusqlite::params![
+            name, ver, 10i64, 0i64, "22631", "windows", "release", arch
+        ])
+        .map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -1200,7 +1231,11 @@ impl SiqueryEngine {
         }
         if disks.is_empty() {
             stmt.execute(rusqlite::params![
-                "C:", "Fixed", 100_000_000_000i64, 500_000_000_000i64, "NTFS"
+                "C:",
+                "Fixed",
+                100_000_000_000i64,
+                500_000_000_000i64,
+                "NTFS"
             ])
             .map_err(|e| e.to_string())?;
         }
@@ -1239,10 +1274,22 @@ impl SiqueryEngine {
             let opackets = net.total_packets_transmitted() as i64;
 
             stmt_if
-                .execute(rusqlite::params![name, "127.0.0.1", "255.0.0.0", "Ethernet", name])
+                .execute(rusqlite::params![
+                    name,
+                    "127.0.0.1",
+                    "255.0.0.0",
+                    "Ethernet",
+                    name
+                ])
                 .map_err(|e| e.to_string())?;
             stmt_addr
-                .execute(rusqlite::params![name, "127.0.0.1", "255.0.0.0", "Ethernet", name])
+                .execute(rusqlite::params![
+                    name,
+                    "127.0.0.1",
+                    "255.0.0.0",
+                    "Ethernet",
+                    name
+                ])
                 .map_err(|e| e.to_string())?;
             stmt_det
                 .execute(rusqlite::params![
@@ -1252,7 +1299,13 @@ impl SiqueryEngine {
         }
         if nets.is_empty() {
             stmt_if
-                .execute(rusqlite::params!["lo", "127.0.0.1", "255.0.0.0", "Loopback", "Loopback"])
+                .execute(rusqlite::params![
+                    "lo",
+                    "127.0.0.1",
+                    "255.0.0.0",
+                    "Loopback",
+                    "Loopback"
+                ])
                 .map_err(|e| e.to_string())?;
         }
         Ok(())
@@ -1267,10 +1320,17 @@ impl SiqueryEngine {
             .map_err(|e| e.to_string())?;
 
         let user = std::env::var("USERNAME").unwrap_or_else(|_| "Administrator".to_string());
-        let home = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\Default".to_string());
+        let home =
+            std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\Default".to_string());
 
         stmt.execute(rusqlite::params![
-            1000i64, 1000i64, user, "Active user account", home, "powershell.exe", 1i64
+            1000i64,
+            1000i64,
+            user,
+            "Active user account",
+            home,
+            "powershell.exe",
+            1i64
         ])
         .map_err(|e| e.to_string())?;
         Ok(())
@@ -1294,13 +1354,29 @@ impl SiqueryEngine {
 
         let user = std::env::var("USERNAME").unwrap_or_else(|_| "Administrator".to_string());
         stmt_log
-            .execute(rusqlite::params!["console", user, "console", "localhost", 0i64, 1000i64])
+            .execute(rusqlite::params![
+                "console",
+                user,
+                "console",
+                "localhost",
+                0i64,
+                1000i64
+            ])
             .map_err(|e| e.to_string())?;
 
         stmt_sess
             .execute(rusqlite::params![
-                "0x3e7", user, "WORKGROUP", "Negotiate", "Interactive", 1i64,
-                "S-1-5-21-0-0-0-1000", 0i64, "LOCAL", "", ""
+                "0x3e7",
+                user,
+                "WORKGROUP",
+                "Negotiate",
+                "Interactive",
+                1i64,
+                "S-1-5-21-0-0-0-1000",
+                0i64,
+                "LOCAL",
+                "",
+                ""
             ])
             .map_err(|e| e.to_string())?;
         Ok(())
@@ -1449,11 +1525,23 @@ impl SiqueryEngine {
             .map_err(|e| e.to_string())?;
 
         stmt.execute(rusqlite::params![
-            "0.0.0.0", "0.0.0.0", "192.168.1.1", "192.168.1.50", "Ethernet", 25i64, "remote"
+            "0.0.0.0",
+            "0.0.0.0",
+            "192.168.1.1",
+            "192.168.1.50",
+            "Ethernet",
+            25i64,
+            "remote"
         ])
         .map_err(|e| e.to_string())?;
         stmt.execute(rusqlite::params![
-            "127.0.0.0", "255.0.0.0", "127.0.0.1", "127.0.0.1", "Loopback", 1i64, "local"
+            "127.0.0.0",
+            "255.0.0.0",
+            "127.0.0.1",
+            "127.0.0.1",
+            "Loopback",
+            1i64,
+            "local"
         ])
         .map_err(|e| e.to_string())?;
         Ok(())
@@ -1467,11 +1555,17 @@ impl SiqueryEngine {
             .map_err(|e| e.to_string())?;
 
         stmt.execute(rusqlite::params![
-            "192.168.1.1", "00:11:22:33:44:55", "Ethernet", "false"
+            "192.168.1.1",
+            "00:11:22:33:44:55",
+            "Ethernet",
+            "false"
         ])
         .map_err(|e| e.to_string())?;
         stmt.execute(rusqlite::params![
-            "192.168.1.255", "ff:ff:ff:ff:ff:ff", "Ethernet", "true"
+            "192.168.1.255",
+            "ff:ff:ff:ff:ff:ff",
+            "Ethernet",
+            "true"
         ])
         .map_err(|e| e.to_string())?;
         Ok(())
@@ -1488,9 +1582,22 @@ impl SiqueryEngine {
             .map_err(|e| e.to_string())?;
 
         stmt.execute(rusqlite::params![
-            "false", "true", "KillSwitch Telemetry Service", "Autonomous Agent Defense & EDR Service",
-            "KillSwitch EDR", "Normal", 0i64, "KillSwitch", "C:\\Program Files\\KillSwitch\\killswitch.exe",
-            std::process::id() as i64, "Own Process", "true", "Auto", "LocalSystem", "Running", "OK"
+            "false",
+            "true",
+            "KillSwitch Telemetry Service",
+            "Autonomous Agent Defense & EDR Service",
+            "KillSwitch EDR",
+            "Normal",
+            0i64,
+            "KillSwitch",
+            "C:\\Program Files\\KillSwitch\\killswitch.exe",
+            std::process::id() as i64,
+            "Own Process",
+            "true",
+            "Auto",
+            "LocalSystem",
+            "Running",
+            "OK"
         ])
         .map_err(|e| e.to_string())?;
         Ok(())
@@ -1505,7 +1612,13 @@ impl SiqueryEngine {
             .map_err(|e| e.to_string())?;
 
         stmt.execute(rusqlite::params![
-            "KillSwitchWatchdog", "\\KillSwitch\\Watchdog", "killswitch.exe --daemon", "Ready", "true", "2026-11-06 12:00:00", "2026-11-07 12:00:00"
+            "KillSwitchWatchdog",
+            "\\KillSwitch\\Watchdog",
+            "killswitch.exe --daemon",
+            "Ready",
+            "true",
+            "2026-11-06 12:00:00",
+            "2026-11-07 12:00:00"
         ])
         .map_err(|e| e.to_string())?;
         Ok(())
@@ -1520,7 +1633,12 @@ impl SiqueryEngine {
             .map_err(|e| e.to_string())?;
 
         stmt.execute(rusqlite::params![
-            "KillSwitchTray", "C:\\Program Files\\KillSwitch\\killswitch-tray.exe", "", "Registry", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", "Enabled"
+            "KillSwitchTray",
+            "C:\\Program Files\\KillSwitch\\killswitch-tray.exe",
+            "",
+            "Registry",
+            "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+            "Enabled"
         ])
         .map_err(|e| e.to_string())?;
         Ok(())
@@ -1535,7 +1653,12 @@ impl SiqueryEngine {
             .map_err(|e| e.to_string())?;
 
         stmt.execute(rusqlite::params![
-            "killswitch_minifilter", "KillSwitch Filesystem Minifilter", "C:\\Windows\\System32\\drivers\\killswitch_flt.sys", "Running", "System", "true"
+            "killswitch_minifilter",
+            "KillSwitch Filesystem Minifilter",
+            "C:\\Windows\\System32\\drivers\\killswitch_flt.sys",
+            "Running",
+            "System",
+            "true"
         ])
         .map_err(|e| e.to_string())?;
         Ok(())
@@ -1550,7 +1673,12 @@ impl SiqueryEngine {
             .map_err(|e| e.to_string())?;
 
         stmt.execute(rusqlite::params![
-            "C:\\Windows\\System32\\kernel32.dll", "kernel32.dll", "33000002824b2767098", "Microsoft Windows Production PCA 2011", "Microsoft Windows", "trusted"
+            "C:\\Windows\\System32\\kernel32.dll",
+            "kernel32.dll",
+            "33000002824b2767098",
+            "Microsoft Windows Production PCA 2011",
+            "Microsoft Windows",
+            "trusted"
         ])
         .map_err(|e| e.to_string())?;
         Ok(())
@@ -1564,7 +1692,10 @@ impl SiqueryEngine {
             .map_err(|e| e.to_string())?;
 
         stmt.execute(rusqlite::params![
-            "", "DIRECT", "localhost;127.0.0.1;<local>", "false"
+            "",
+            "DIRECT",
+            "localhost;127.0.0.1;<local>",
+            "false"
         ])
         .map_err(|e| e.to_string())?;
         Ok(())
@@ -1577,10 +1708,22 @@ impl SiqueryEngine {
             )
             .map_err(|e| e.to_string())?;
 
-        stmt.execute(rusqlite::params!["localhost", "A", "127.0.0.1", 3600i64, 0i64])
-            .map_err(|e| e.to_string())?;
-        stmt.execute(rusqlite::params!["api.github.com", "A", "140.82.114.6", 300i64, 0i64])
-            .map_err(|e| e.to_string())?;
+        stmt.execute(rusqlite::params![
+            "localhost",
+            "A",
+            "127.0.0.1",
+            3600i64,
+            0i64
+        ])
+        .map_err(|e| e.to_string())?;
+        stmt.execute(rusqlite::params![
+            "api.github.com",
+            "A",
+            "140.82.114.6",
+            300i64,
+            0i64
+        ])
+        .map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -1594,7 +1737,16 @@ impl SiqueryEngine {
             .map_err(|e| e.to_string())?;
 
         stmt.execute(rusqlite::params![
-            "KillSwitch-Inbound-Guard", "C:\\Program Files\\KillSwitch\\killswitch.exe", "Allow", "Inbound", "TCP", "3030", "*", "*", "true", "Domain,Private"
+            "KillSwitch-Inbound-Guard",
+            "C:\\Program Files\\KillSwitch\\killswitch.exe",
+            "Allow",
+            "Inbound",
+            "TCP",
+            "3030",
+            "*",
+            "*",
+            "true",
+            "Domain,Private"
         ])
         .map_err(|e| e.to_string())?;
         Ok(())
@@ -1624,7 +1776,10 @@ impl SiqueryEngine {
             .map_err(|e| e.to_string())?;
 
         stmt.execute(rusqlite::params![
-            "C:\\Windows\\System32\\cmd.exe", 300000i64, 1i64, "2026-11-06 10:00:00"
+            "C:\\Windows\\System32\\cmd.exe",
+            300000i64,
+            1i64,
+            "2026-11-06 10:00:00"
         ])
         .map_err(|e| e.to_string())?;
         Ok(())
@@ -1642,8 +1797,11 @@ impl SiqueryEngine {
             "Microsoft Root Certificate Authority 2011",
             "CN=Microsoft Root Certificate Authority 2011, O=Microsoft Corporation, C=US",
             "CN=Microsoft Root Certificate Authority 2011, O=Microsoft Corporation, C=US",
-            "2011-03-22", "2036-03-22", "8f43288ad272f3103b6fb1428485ea3014c0bcfe",
-            "LocalMachine", "ROOT"
+            "2011-03-22",
+            "2036-03-22",
+            "8f43288ad272f3103b6fb1428485ea3014c0bcfe",
+            "LocalMachine",
+            "ROOT"
         ])
         .map_err(|e| e.to_string())?;
         Ok(())
@@ -1659,7 +1817,16 @@ impl SiqueryEngine {
             .map_err(|e| e.to_string())?;
 
         stmt.execute(rusqlite::params![
-            "2.0", "INTC", "Intel", "400.1.0.0", "true", "true", "true", 1i64, 1i64, "TPM\\INTC\\0"
+            "2.0",
+            "INTC",
+            "Intel",
+            "400.1.0.0",
+            "true",
+            "true",
+            "true",
+            1i64,
+            1i64,
+            "TPM\\INTC\\0"
         ])
         .map_err(|e| e.to_string())?;
         Ok(())
@@ -1694,11 +1861,7 @@ impl SiqueryEngine {
 
         let interceptions = snapshot_interceptions();
         for item in interceptions {
-            let verdict_str = if item.allowed {
-                "ALLOW"
-            } else {
-                "DENY"
-            };
+            let verdict_str = if item.allowed { "ALLOW" } else { "DENY" };
 
             stmt.execute(rusqlite::params![
                 item.event_id,
@@ -1839,7 +2002,10 @@ impl SiqueryEngine {
         ) {
             for row in rows {
                 let pid = row.get("pid").and_then(|v| v.as_i64()).unwrap_or(0);
-                let name = row.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
+                let name = row
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
                 let cmd = row.get("cmdline").and_then(|v| v.as_str()).unwrap_or("");
                 anomalies.push(serde_json::json!({
                     "sweep": "processes_breakout",
@@ -1891,7 +2057,10 @@ impl SiqueryEngine {
         ) {
             for row in rows {
                 let pid = row.get("pid").and_then(|v| v.as_i64()).unwrap_or(0);
-                let name = row.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
+                let name = row
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
                 let port = row.get("remote_port").and_then(|v| v.as_i64()).unwrap_or(0);
                 anomalies.push(serde_json::json!({
                     "sweep": "ai_inference_sockets",
@@ -1923,7 +2092,10 @@ impl SiqueryEngine {
              LIMIT 10;",
         ) {
             for row in rows {
-                let name = row.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
+                let name = row
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
                 let path = row.get("path_name").and_then(|v| v.as_str()).unwrap_or("");
                 anomalies.push(serde_json::json!({
                     "sweep": "service_persistence",

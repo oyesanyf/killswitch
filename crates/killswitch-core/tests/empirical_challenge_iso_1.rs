@@ -234,9 +234,13 @@ fn test_task1_substruct_abi_conformances() {
 #[test]
 fn test_task1_differential_against_windows_sdk_fwpmtypes_header() {
     println!("[Task 1] Differential check against actual Windows SDK fwpmtypes.h on host...");
-    let sdk_path = Path::new(r"C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared\fwpmtypes.h");
+    let sdk_path = Path::new(
+        r"C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared\fwpmtypes.h",
+    );
     if !sdk_path.exists() {
-        println!("Note: Windows SDK header not at default path, skipping header string inspection.");
+        println!(
+            "Note: Windows SDK header not at default path, skipping header string inspection."
+        );
         return;
     }
 
@@ -266,7 +270,10 @@ fn test_task1_differential_against_windows_sdk_fwpmtypes_header() {
         if let Some(pos) = content[last_pos..].find(field) {
             last_pos += pos;
         } else {
-            panic!("Expected field '{}' not found in order in fwpmtypes.h", field);
+            panic!(
+                "Expected field '{}' not found in order in fwpmtypes.h",
+                field
+            );
         }
     }
     println!("Confirmed: FwpmFilter0 fields in fwpmtypes.h appear in exact identical sequence.");
@@ -431,8 +438,14 @@ fn test_task2_all_12_layer_guids_pairwise_distinct() {
     let layers = [
         ("ALE_AUTH_CONNECT_V4", FWPM_LAYER_ALE_AUTH_CONNECT_V4),
         ("ALE_AUTH_CONNECT_V6", FWPM_LAYER_ALE_AUTH_CONNECT_V6),
-        ("ALE_AUTH_RECV_ACCEPT_V4", FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4),
-        ("ALE_AUTH_RECV_ACCEPT_V6", FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6),
+        (
+            "ALE_AUTH_RECV_ACCEPT_V4",
+            FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4,
+        ),
+        (
+            "ALE_AUTH_RECV_ACCEPT_V6",
+            FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6,
+        ),
         ("OUTBOUND_TRANSPORT_V4", FWPM_LAYER_OUTBOUND_TRANSPORT_V4),
         ("OUTBOUND_TRANSPORT_V6", FWPM_LAYER_OUTBOUND_TRANSPORT_V6),
         ("INBOUND_TRANSPORT_V4", FWPM_LAYER_INBOUND_TRANSPORT_V4),
@@ -467,7 +480,8 @@ fn test_task2_all_12_layer_guids_pairwise_distinct() {
 #[test]
 fn test_task2_differential_against_windows_sdk_fwpmu_header() {
     println!("[Task 2] Differential verification against official Windows SDK fwpmu.h...");
-    let sdk_path = Path::new(r"C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\fwpmu.h");
+    let sdk_path =
+        Path::new(r"C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\fwpmu.h");
     if !sdk_path.exists() {
         println!("Note: Windows SDK fwpmu.h not at default path, skipping.");
         return;
@@ -504,7 +518,9 @@ fn test_task2_differential_against_windows_sdk_fwpmu_header() {
             slice
         );
     }
-    println!("Confirmed: All 12 layer GUIDs match official Windows SDK fwpmu.h hexadecimal constants.");
+    println!(
+        "Confirmed: All 12 layer GUIDs match official Windows SDK fwpmu.h hexadecimal constants."
+    );
 }
 
 // =============================================================================
@@ -642,7 +658,8 @@ fn test_adversarial_typed_error_fail_closed_invariants() {
 
     let err_priv = KillSwitchError::InsufficientPrivileges {
         details: "WfpDynamicSession::open returned ERROR_ACCESS_DENIED (0x5)".to_string(),
-        remediation: "Restart the application from an elevated Administrator command prompt.".to_string(),
+        remediation: "Restart the application from an elevated Administrator command prompt."
+            .to_string(),
     };
     let err_msg = format!("{}", err_priv);
     assert!(
@@ -652,7 +669,8 @@ fn test_adversarial_typed_error_fail_closed_invariants() {
     assert!(err_msg.contains("ERROR_ACCESS_DENIED"));
     assert!(err_msg.contains("Administrator command prompt"));
 
-    let err_zero = KillSwitchError::ZeroFiltersInstalled("BFE rejected all 12 layer filters".to_string());
+    let err_zero =
+        KillSwitchError::ZeroFiltersInstalled("BFE rejected all 12 layer filters".to_string());
     let zero_msg = format!("{}", err_zero);
     assert!(zero_msg.contains("zero kernel WFP filters were installed"));
     assert!(zero_msg.contains("BFE rejected all 12 layer filters"));
@@ -727,7 +745,9 @@ fn test_adversarial_fwpm_filter0_byte_isolation_no_clobber() {
 
 #[test]
 fn test_adversarial_weight_priority_and_wfp_source_coverage() {
-    println!("[Adversarial] Verifying WFP rule arbitration weights and layer coverage in source...");
+    println!(
+        "[Adversarial] Verifying WFP rule arbitration weights and layer coverage in source..."
+    );
 
     let permit_weight: u64 = 15;
     let block_weight: u64 = 1;

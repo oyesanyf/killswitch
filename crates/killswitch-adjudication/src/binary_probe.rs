@@ -112,7 +112,10 @@ pub fn inspect_binary_metadata(path: &Path) -> std::io::Result<DynamicBinaryMeta
     // 2. Read executable header / manifest buffer (up to 4MB)
     let mut file = File::open(path)?;
     let mut buffer = Vec::new();
-    let _ = file.by_ref().take(4 * 1024 * 1024).read_to_end(&mut buffer)?;
+    let _ = file
+        .by_ref()
+        .take(4 * 1024 * 1024)
+        .read_to_end(&mut buffer)?;
 
     let parsed_meta = inspect_binary_metadata_from_bytes(&buffer);
     if parsed_meta.elevation_requirement != ElevationRequirement::None {
@@ -146,7 +149,8 @@ pub fn inspect_binary_metadata_from_bytes(bytes: &[u8]) -> DynamicBinaryMetadata
     // 1. PE (Portable Executable) Parsing
     // -------------------------------------------------------------------------
     if bytes.len() >= 64 && bytes[0] == b'M' && bytes[1] == b'Z' {
-        let pe_offset = u32::from_le_bytes([bytes[0x3C], bytes[0x3D], bytes[0x3E], bytes[0x3F]]) as usize;
+        let pe_offset =
+            u32::from_le_bytes([bytes[0x3C], bytes[0x3D], bytes[0x3E], bytes[0x3F]]) as usize;
         if pe_offset + 4 <= bytes.len() && &bytes[pe_offset..pe_offset + 4] == b"PE\0\0" {
             // Valid PE header confirmed
             parse_pe_manifest_and_imports(bytes, pe_offset, &mut meta);
@@ -182,11 +186,7 @@ pub fn inspect_binary_metadata_from_bytes(bytes: &[u8]) -> DynamicBinaryMetadata
     meta
 }
 
-fn parse_pe_manifest_and_imports(
-    bytes: &[u8],
-    pe_offset: usize,
-    meta: &mut DynamicBinaryMetadata,
-) {
+fn parse_pe_manifest_and_imports(bytes: &[u8], pe_offset: usize, meta: &mut DynamicBinaryMetadata) {
     if pe_offset + 24 > bytes.len() {
         return;
     }
@@ -355,7 +355,8 @@ mod tests {
 
     #[test]
     fn test_utf16le_manifest_parsing() {
-        let manifest_utf8 = "<requestedExecutionLevel level=\"requireAdministrator\" uiAccess=\"false\"/>";
+        let manifest_utf8 =
+            "<requestedExecutionLevel level=\"requireAdministrator\" uiAccess=\"false\"/>";
         let mut utf16_bytes = Vec::new();
         for ch in manifest_utf8.encode_utf16() {
             utf16_bytes.extend_from_slice(&ch.to_le_bytes());

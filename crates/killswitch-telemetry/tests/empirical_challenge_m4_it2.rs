@@ -49,17 +49,36 @@ fn test_empirical_phaselock_periodic_orbits_p1_to_p8_non_chaotic() {
             }
 
             if verdict.is_chaotic_breakout {
-                period_failures.push((step, val, verdict.lyapunov_exponent, verdict.mahalanobis_drift));
+                period_failures.push((
+                    step,
+                    val,
+                    verdict.lyapunov_exponent,
+                    verdict.mahalanobis_drift,
+                ));
             }
         }
 
         if !period_failures.is_empty() {
-            println!("Period P={} FAILED with {} breakouts:", period, period_failures.len());
+            println!(
+                "Period P={} FAILED with {} breakouts:",
+                period,
+                period_failures.len()
+            );
             for (s, v, l, d) in &period_failures[..period_failures.len().min(10)] {
-                println!("  step {} (sample {}): val={}, lyapunov={:.3}, drift={:.3}", s, s + 1, v, l, d);
+                println!(
+                    "  step {} (sample {}): val={}, lyapunov={:.3}, drift={:.3}",
+                    s,
+                    s + 1,
+                    v,
+                    l,
+                    d
+                );
             }
         } else {
-            println!("Period P={} PASSED (0 breakouts across {} samples)", period, total_samples);
+            println!(
+                "Period P={} PASSED (0 breakouts across {} samples)",
+                period, total_samples
+            );
         }
 
         assert!(
@@ -81,9 +100,7 @@ fn test_empirical_phaselock_chaotic_burst_after_warmup_p1_to_p8() {
     ];
 
     // High-entropy chaotic burst with extreme amplitude and rapid oscillations
-    let chaotic_burst = [
-        350.0, 0.02, 750.0, 1.8, 1500.0, 0.05, 3200.0, 0.01, 6000.0,
-    ];
+    let chaotic_burst = [350.0, 0.02, 750.0, 1.8, 1500.0, 0.05, 3200.0, 0.01, 6000.0];
 
     for (period, pattern) in test_cases {
         let mut monitor = PerPidPhaseLockMonitor::default_edr();
@@ -132,12 +149,14 @@ fn test_empirical_phaselock_chaotic_burst_after_warmup_p1_to_p8() {
         assert!(
             max_lyapunov > 0.85,
             "Period P={} max lyapunov {} <= 0.85",
-            period, max_lyapunov
+            period,
+            max_lyapunov
         );
         assert!(
             max_drift > 2.5,
             "Period P={} max drift {} <= 2.5",
-            period, max_drift
+            period,
+            max_drift
         );
         assert!(
             monitor.consecutive_chaotic_epochs() > 0,
@@ -284,7 +303,8 @@ fn test_empirical_dlp_fan_in_32_threads_parallel_independent_engines() {
     }
 
     for h in handles {
-        h.join().expect("Thread panicked in multi-hop DLP fan-in test");
+        h.join()
+            .expect("Thread panicked in multi-hop DLP fan-in test");
     }
 }
 
@@ -358,7 +378,9 @@ fn test_empirical_dlp_fan_in_32_threads_parallel_shared_engine() {
                     assert!(source_hashes.contains(&hash1));
                     assert!(source_hashes.contains(&hash2));
                 }
-                EgressVerdict::Allow => panic!("Thread {} shared engine expected Block", thread_idx),
+                EgressVerdict::Allow => {
+                    panic!("Thread {} shared engine expected Block", thread_idx)
+                }
             }
 
             // Benchmark latency under heavy shared DashMap write/read contention

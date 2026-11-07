@@ -110,7 +110,8 @@ pub fn normalize_path_for_inspection(raw: &str) -> String {
     }
 
     // 4. Strip Windows drive letters (e.g. C:, D:)
-    if lower.len() >= 2 && lower.as_bytes()[0].is_ascii_alphabetic() && lower.as_bytes()[1] == b':' {
+    if lower.len() >= 2 && lower.as_bytes()[0].is_ascii_alphabetic() && lower.as_bytes()[1] == b':'
+    {
         lower = lower[2..].to_string();
     }
 
@@ -119,7 +120,11 @@ pub fn normalize_path_for_inspection(raw: &str) -> String {
         lower = lower[6..].to_string();
     } else if lower.starts_with("/cygdrive/") && lower.len() >= 12 && lower.as_bytes()[11] == b'/' {
         lower = lower[11..].to_string();
-    } else if lower.len() >= 3 && lower.starts_with('/') && lower.as_bytes()[1].is_ascii_alphabetic() && lower.as_bytes()[2] == b'/' {
+    } else if lower.len() >= 3
+        && lower.starts_with('/')
+        && lower.as_bytes()[1].is_ascii_alphabetic()
+        && lower.as_bytes()[2] == b'/'
+    {
         lower = lower[2..].to_string();
     }
 
@@ -343,7 +348,9 @@ fn is_registry_key_match(raw: &str, hive_name: &str) -> bool {
 }
 
 /// Scans arbitrary text (such as command strings) for sensitive system paths.
-pub fn scan_for_sensitive_system_path(text: &str) -> Option<(SensitiveCredentialStoreKind, String)> {
+pub fn scan_for_sensitive_system_path(
+    text: &str,
+) -> Option<(SensitiveCredentialStoreKind, String)> {
     let tokens = crate::semantic_command::tokenize_command(text);
     for tok in tokens {
         let clean = tok.trim_matches(['"', '\'', '(', ')', '[', ']', '{', '}', ';', ',']);
@@ -358,23 +365,50 @@ pub fn scan_for_sensitive_system_path(text: &str) -> Option<(SensitiveCredential
         ("etc/shadow", SensitiveCredentialStoreKind::UnixShadow),
         ("etc/gshadow", SensitiveCredentialStoreKind::UnixGshadow),
         ("etc/sudoers", SensitiveCredentialStoreKind::UnixSudoers),
-        ("etc/master.passwd", SensitiveCredentialStoreKind::BsdMasterPasswd),
-        ("system32/config/sam", SensitiveCredentialStoreKind::WindowsSamHive),
-        ("system32/config/system", SensitiveCredentialStoreKind::WindowsSystemHive),
-        ("system32/config/security", SensitiveCredentialStoreKind::WindowsSecurityHive),
+        (
+            "etc/master.passwd",
+            SensitiveCredentialStoreKind::BsdMasterPasswd,
+        ),
+        (
+            "system32/config/sam",
+            SensitiveCredentialStoreKind::WindowsSamHive,
+        ),
+        (
+            "system32/config/system",
+            SensitiveCredentialStoreKind::WindowsSystemHive,
+        ),
+        (
+            "system32/config/security",
+            SensitiveCredentialStoreKind::WindowsSecurityHive,
+        ),
         ("hklm\\sam", SensitiveCredentialStoreKind::WindowsSamHive),
-        ("hklm\\system", SensitiveCredentialStoreKind::WindowsSystemHive),
-        ("hklm\\security", SensitiveCredentialStoreKind::WindowsSecurityHive),
+        (
+            "hklm\\system",
+            SensitiveCredentialStoreKind::WindowsSystemHive,
+        ),
+        (
+            "hklm\\security",
+            SensitiveCredentialStoreKind::WindowsSecurityHive,
+        ),
         ("root/.ssh", SensitiveCredentialStoreKind::RootSshKey),
         ("~/.ssh", SensitiveCredentialStoreKind::RootSshKey),
         (".ssh/id_rsa", SensitiveCredentialStoreKind::RootSshKey),
         (".ssh/id_ed25519", SensitiveCredentialStoreKind::RootSshKey),
         (".ssh/id_ecdsa", SensitiveCredentialStoreKind::RootSshKey),
         (".ssh/id_dsa", SensitiveCredentialStoreKind::RootSshKey),
-        (".ssh/authorized_keys", SensitiveCredentialStoreKind::RootSshKey),
-        ("etc/ssh/ssh_host_", SensitiveCredentialStoreKind::RootSshKey),
+        (
+            ".ssh/authorized_keys",
+            SensitiveCredentialStoreKind::RootSshKey,
+        ),
+        (
+            "etc/ssh/ssh_host_",
+            SensitiveCredentialStoreKind::RootSshKey,
+        ),
         ("docker.sock", SensitiveCredentialStoreKind::DockerSocket),
-        ("pipe/docker_engine", SensitiveCredentialStoreKind::DockerSocket),
+        (
+            "pipe/docker_engine",
+            SensitiveCredentialStoreKind::DockerSocket,
+        ),
     ];
 
     for (needle, kind) in targets {
@@ -387,7 +421,9 @@ pub fn scan_for_sensitive_system_path(text: &str) -> Option<(SensitiveCredential
 }
 
 /// Recursively scans a serde_json::Value for sensitive system paths.
-pub fn scan_json_for_sensitive_path(val: &serde_json::Value) -> Option<(SensitiveCredentialStoreKind, String)> {
+pub fn scan_json_for_sensitive_path(
+    val: &serde_json::Value,
+) -> Option<(SensitiveCredentialStoreKind, String)> {
     match val {
         serde_json::Value::String(s) => {
             if let Some(kind) = classify_sensitive_system_path(s) {
@@ -422,14 +458,23 @@ mod tests {
     #[test]
     fn test_normalize_path_basic() {
         assert_eq!(normalize_path_for_inspection("/etc/shadow"), "/etc/shadow");
-        assert_eq!(normalize_path_for_inspection("\\etc\\shadow"), "/etc/shadow");
+        assert_eq!(
+            normalize_path_for_inspection("\\etc\\shadow"),
+            "/etc/shadow"
+        );
         assert_eq!(normalize_path_for_inspection("/etc//shadow"), "/etc/shadow");
-        assert_eq!(normalize_path_for_inspection("C:\\Windows\\System32\\config\\SAM"), "/windows/system32/config/sam");
+        assert_eq!(
+            normalize_path_for_inspection("C:\\Windows\\System32\\config\\SAM"),
+            "/windows/system32/config/sam"
+        );
     }
 
     #[test]
     fn test_normalize_path_traversal() {
-        assert_eq!(normalize_path_for_inspection("/var/tmp/../../etc/shadow"), "/etc/shadow");
+        assert_eq!(
+            normalize_path_for_inspection("/var/tmp/../../etc/shadow"),
+            "/etc/shadow"
+        );
         assert_eq!(
             normalize_path_for_inspection("C:\\Windows\\System32\\drivers\\..\\config\\SAM"),
             "/windows/system32/config/sam"
@@ -438,8 +483,14 @@ mod tests {
 
     #[test]
     fn test_normalize_percent_encoding() {
-        assert_eq!(normalize_path_for_inspection("%2fetc%2fshadow"), "/etc/shadow");
-        assert_eq!(normalize_path_for_inspection("..%2f..%2fetc%2fshadow"), "etc/shadow");
+        assert_eq!(
+            normalize_path_for_inspection("%2fetc%2fshadow"),
+            "/etc/shadow"
+        );
+        assert_eq!(
+            normalize_path_for_inspection("..%2f..%2fetc%2fshadow"),
+            "etc/shadow"
+        );
     }
 
     #[test]
@@ -480,10 +531,7 @@ mod tests {
             classify_sensitive_system_path("HKLM\\SAM"),
             Some(SensitiveCredentialStoreKind::WindowsSamHive)
         );
-        assert_eq!(
-            classify_sensitive_system_path("/var/log/normal.txt"),
-            None
-        );
+        assert_eq!(classify_sensitive_system_path("/var/log/normal.txt"), None);
         assert_eq!(
             classify_sensitive_system_path("/root/.ssh/id_rsa"),
             Some(SensitiveCredentialStoreKind::RootSshKey)
@@ -533,7 +581,9 @@ mod tests {
     #[test]
     fn test_scan_for_sensitive_paths_in_commands() {
         assert!(scan_for_sensitive_system_path("cat /etc/shadow").is_some());
-        assert!(scan_for_sensitive_system_path("type C:\\Windows\\System32\\config\\SAM").is_some());
+        assert!(
+            scan_for_sensitive_system_path("type C:\\Windows\\System32\\config\\SAM").is_some()
+        );
         assert!(scan_for_sensitive_system_path("python -c \"open('/etc/sudoers')\"").is_some());
         assert!(scan_for_sensitive_system_path("git status").is_none());
         assert!(scan_for_sensitive_system_path("cat /root/.ssh/id_rsa").is_some());

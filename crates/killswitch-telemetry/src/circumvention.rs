@@ -5,16 +5,13 @@
 //! - 60-second sliding-window state memory linking initial blocked actions to equivalent retries.
 //! - Cross-boundary detection across WSL2 VM and Hyper-V isolation perimeters.
 
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use serde::{Deserialize, Serialize};
 
-use crate::semantic_command::{
-    parse_semantic_command, PrivilegeEquivalenceClass, SemanticCommand,
-};
-
+use crate::semantic_command::{parse_semantic_command, PrivilegeEquivalenceClass, SemanticCommand};
 
 /// Structured classification of dynamic denial signals observed at runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -93,9 +90,10 @@ impl DynamicDenialSignal {
             .unwrap_or("")
             .trim_matches(['"', '\''])
             .to_string();
-        let pattern_kind = classify_denial_pattern(exit_code, stderr_signature.as_deref().unwrap_or(""))
-            .map(|(k, _)| k)
-            .unwrap_or(DenialPatternKind::GenericNonZeroExit);
+        let pattern_kind =
+            classify_denial_pattern(exit_code, stderr_signature.as_deref().unwrap_or(""))
+                .map(|(k, _)| k)
+                .unwrap_or(DenialPatternKind::GenericNonZeroExit);
 
         Self {
             signal_id: signal_id.into(),
@@ -149,11 +147,7 @@ pub struct CircumventionAlert {
 ///
 /// Returns true if execution failed due to lack of elevation, credential requirement,
 /// permission denial, or UAC dismissal.
-pub fn evaluate_denial_outcome(
-    _command_line: &str,
-    exit_code: Option<i32>,
-    stderr: &str,
-) -> bool {
+pub fn evaluate_denial_outcome(_command_line: &str, exit_code: Option<i32>, stderr: &str) -> bool {
     let Some(code) = exit_code else {
         return false;
     };
@@ -216,24 +210,61 @@ pub fn classify_denial_pattern(
     let stderr_lc = stderr.to_ascii_lowercase();
 
     if stderr_lc.contains("a password is required") || stderr_lc.contains("password is required") {
-        Some((DenialPatternKind::SudoPasswordRequired, "sudo password required".to_string()))
-    } else if stderr_lc.contains("authentication failure") || stderr_lc.contains("pam_authenticate failed") {
-        Some((DenialPatternKind::LinuxPamAuthFailure, "PAM authentication failure".to_string()))
+        Some((
+            DenialPatternKind::SudoPasswordRequired,
+            "sudo password required".to_string(),
+        ))
+    } else if stderr_lc.contains("authentication failure")
+        || stderr_lc.contains("pam_authenticate failed")
+    {
+        Some((
+            DenialPatternKind::LinuxPamAuthFailure,
+            "PAM authentication failure".to_string(),
+        ))
     } else if stderr_lc.contains("not in the sudoers file") {
-        Some((DenialPatternKind::SudoersUnauthorized, "unauthorized in sudoers".to_string()))
-    } else if stderr_lc.contains("permission denied") || stderr_lc.contains("operation not permitted") {
-        Some((DenialPatternKind::PosixEpermEacces, "POSIX permission denied (EPERM/EACCES)".to_string()))
+        Some((
+            DenialPatternKind::SudoersUnauthorized,
+            "unauthorized in sudoers".to_string(),
+        ))
+    } else if stderr_lc.contains("permission denied")
+        || stderr_lc.contains("operation not permitted")
+    {
+        Some((
+            DenialPatternKind::PosixEpermEacces,
+            "POSIX permission denied (EPERM/EACCES)".to_string(),
+        ))
     } else if stderr_lc.contains("the operation was canceled by the user") {
-        Some((DenialPatternKind::WindowsUacCancelled, "UAC prompt cancelled".to_string()))
+        Some((
+            DenialPatternKind::WindowsUacCancelled,
+            "UAC prompt cancelled".to_string(),
+        ))
     } else if stderr_lc.contains("access is denied") || exit_code == Some(5) {
-        Some((DenialPatternKind::WindowsAccessDenied, "Windows Access Denied (5)".to_string()))
-    } else if stderr_lc.contains("requires elevation") || exit_code == Some(740) || exit_code == Some(1314) {
-        Some((DenialPatternKind::WindowsElevationRequired, "Windows Elevation Required".to_string()))
-    } else if stderr_lc.contains("must be root") || stderr_lc.contains("only root can do that") || stderr_lc.contains("you must be root") {
-        Some((DenialPatternKind::ExplicitRootAdminRequired, "Root/Administrator privileges required".to_string()))
+        Some((
+            DenialPatternKind::WindowsAccessDenied,
+            "Windows Access Denied (5)".to_string(),
+        ))
+    } else if stderr_lc.contains("requires elevation")
+        || exit_code == Some(740)
+        || exit_code == Some(1314)
+    {
+        Some((
+            DenialPatternKind::WindowsElevationRequired,
+            "Windows Elevation Required".to_string(),
+        ))
+    } else if stderr_lc.contains("must be root")
+        || stderr_lc.contains("only root can do that")
+        || stderr_lc.contains("you must be root")
+    {
+        Some((
+            DenialPatternKind::ExplicitRootAdminRequired,
+            "Root/Administrator privileges required".to_string(),
+        ))
     } else if let Some(code) = exit_code {
         if code != 0 {
-            Some((DenialPatternKind::GenericNonZeroExit, format!("Exit code {}", code)))
+            Some((
+                DenialPatternKind::GenericNonZeroExit,
+                format!("Exit code {}", code),
+            ))
         } else {
             None
         }
@@ -259,8 +290,10 @@ pub fn observe_denial(
 
     let sem = parse_semantic_command(&cmd);
     let sig_id = format!("sig-{}", uuid::Uuid::new_v4());
-    let (pattern_kind, sig_text) = classify_denial_pattern(exit_code, stderr)
-        .unwrap_or((DenialPatternKind::GenericNonZeroExit, stderr.trim().to_string()));
+    let (pattern_kind, sig_text) = classify_denial_pattern(exit_code, stderr).unwrap_or((
+        DenialPatternKind::GenericNonZeroExit,
+        stderr.trim().to_string(),
+    ));
 
     Some(DynamicDenialSignal {
         signal_id: sig_id,
@@ -419,7 +452,15 @@ impl TemporalCircumventionCorrelator {
         stderr: &str,
         timestamp: Instant,
     ) -> Option<DynamicDenialSignal> {
-        if let Some(signal) = observe_denial(session_id, parent_pid, pid, command_line, exit_code, stderr, timestamp) {
+        if let Some(signal) = observe_denial(
+            session_id,
+            parent_pid,
+            pid,
+            command_line,
+            exit_code,
+            stderr,
+            timestamp,
+        ) {
             self.record_denial(signal.clone());
             Some(signal)
         } else {
@@ -457,12 +498,36 @@ mod tests {
 
     #[test]
     fn test_dynamic_denial_classification_patterns() {
-        assert!(evaluate_denial_outcome("touch /root/test", Some(1), "Permission denied"));
-        assert!(evaluate_denial_outcome("reboot", Some(1), "Operation not permitted"));
-        assert!(evaluate_denial_outcome("su root", Some(1), "Authentication failure"));
-        assert!(evaluate_denial_outcome("sudo -n id", Some(1), "a password is required"));
-        assert!(evaluate_denial_outcome("runas /user:Administrator cmd", Some(1223), ""));
-        assert!(evaluate_denial_outcome("net stop bfe", Some(5), "Access is denied"));
+        assert!(evaluate_denial_outcome(
+            "touch /root/test",
+            Some(1),
+            "Permission denied"
+        ));
+        assert!(evaluate_denial_outcome(
+            "reboot",
+            Some(1),
+            "Operation not permitted"
+        ));
+        assert!(evaluate_denial_outcome(
+            "su root",
+            Some(1),
+            "Authentication failure"
+        ));
+        assert!(evaluate_denial_outcome(
+            "sudo -n id",
+            Some(1),
+            "a password is required"
+        ));
+        assert!(evaluate_denial_outcome(
+            "runas /user:Administrator cmd",
+            Some(1223),
+            ""
+        ));
+        assert!(evaluate_denial_outcome(
+            "net stop bfe",
+            Some(5),
+            "Access is denied"
+        ));
         assert!(!evaluate_denial_outcome("cargo build", Some(0), ""));
     }
 
@@ -480,7 +545,8 @@ mod tests {
             Some(1),
             "sudo: a password is required",
             t0,
-        ).expect("Denial should be observed");
+        )
+        .expect("Denial should be observed");
 
         correlator.record_denial(sig);
 
@@ -515,7 +581,10 @@ mod tests {
 
         let t1 = t0 + Duration::from_millis(200);
         let alert = correlator.check_candidate(session, Some(100), "wsl -l -v", t1);
-        assert!(alert.is_none(), "Benign query wsl -l -v must not trigger alert");
+        assert!(
+            alert.is_none(),
+            "Benign query wsl -l -v must not trigger alert"
+        );
     }
 
     #[test]

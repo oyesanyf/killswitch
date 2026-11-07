@@ -141,15 +141,8 @@ mod win_tpm {
     type FnTbsiGetDeviceInfo = unsafe extern "system" fn(u32, *mut TpmDeviceInfo) -> u32;
     type FnTbsiContextCreate =
         unsafe extern "system" fn(*const TbsContextParams2, *mut *mut c_void) -> u32;
-    type FnTbsipSubmitCommand = unsafe extern "system" fn(
-        *mut c_void,
-        u32,
-        u32,
-        *const u8,
-        u32,
-        *mut u8,
-        *mut u32,
-    ) -> u32;
+    type FnTbsipSubmitCommand =
+        unsafe extern "system" fn(*mut c_void, u32, u32, *const u8, u32, *mut u8, *mut u32) -> u32;
     type FnTbsipContextClose = unsafe extern "system" fn(*mut c_void) -> u32;
 
     type FnCryptProtectData = unsafe extern "system" fn(
@@ -236,7 +229,7 @@ mod win_tpm {
                 let ctx_close: FnTbsipContextClose = std::mem::transmute(p_ctx_close);
 
                 let params = TbsContextParams2 {
-                    version: 2, // TBS_CONTEXT_VERSION_TWO
+                    version: 2,       // TBS_CONTEXT_VERSION_TWO
                     flags: 0x1 | 0x4, // requestRaw | includeTpm20
                 };
                 let mut h_context: *mut c_void = std::ptr::null_mut();
@@ -464,7 +457,11 @@ fn probe_hardware_tpm_uncached() -> HardwareTpmProbe {
 
         // Try submitting TPM2_PCR_Read to /dev/tpmrm0 if accessible
         if dev_rm.exists() {
-            if let Ok(mut f) = std::fs::OpenOptions::new().read(true).write(true).open(dev_rm) {
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(dev_rm)
+            {
                 if f.write_all(&TPM2_PCR_READ_SHA256_0_7_CMD).is_ok() {
                     let mut resp = [0u8; 512];
                     if let Ok(n) = f.read(&mut resp) {
@@ -679,11 +676,12 @@ pub fn verify_tpm_and_ledger_anchor(
 
     // 1. Verify BLAKE3 envelope MAC bound to hardware PCR digest
     let expected_mac = compute_envelope_mac(
-        & probe.pcr_0_7_sha256,
+        &probe.pcr_0_7_sha256,
         envelope.sequence_number,
         &envelope.sealed_blob_hex,
     );
-    let mac_matches = killswitch_types::constant_time_eq(&envelope.envelope_mac_blake3, &expected_mac);
+    let mac_matches =
+        killswitch_types::constant_time_eq(&envelope.envelope_mac_blake3, &expected_mac);
 
     // 2. Unseal the ciphertext using Windows DPAPI + TPM PCR entropy (or BLAKE3 XOF)
     let entropy = derive_tpm_binding_entropy(&probe.pcr_0_7_sha256);
@@ -747,7 +745,9 @@ pub fn verify_tpm_and_ledger_anchor(
             anchored_ledger_hash: "UNSEAL_FAILED_PCR_DRIFT".to_string(),
             anchored_sequence_number: envelope.sequence_number,
             last_sealed_at: Some(envelope.sealed_at.to_rfc3339()),
-            status_detail: "TPM DPAPI unseal rejected: hardware PCR state or machine identity changed".to_string(),
+            status_detail:
+                "TPM DPAPI unseal rejected: hardware PCR state or machine identity changed"
+                    .to_string(),
         }
     }
 }
@@ -774,7 +774,11 @@ mod tests {
         // Verify valid anchor
         let report = verify_tpm_and_ledger_anchor(&ledger_path, fake_hash, 42);
         assert!(report.tpm_sealed);
-        assert!(report.tpm_integrity_verified, "Report detail: {}", report.status_detail);
+        assert!(
+            report.tpm_integrity_verified,
+            "Report detail: {}",
+            report.status_detail
+        );
         assert_eq!(report.anchored_ledger_hash, fake_hash);
         assert_eq!(report.anchored_sequence_number, 42);
 

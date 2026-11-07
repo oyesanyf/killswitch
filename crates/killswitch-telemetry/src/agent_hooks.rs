@@ -351,7 +351,10 @@ pub fn extract_wire_cwd(val: &serde_json::Value) -> Option<String> {
 }
 
 /// Parses Claude Code `.claude/settings.json` hook payload from JSON on stdin.
-pub fn parse_claude_request(raw_json: &str, is_post: bool) -> Result<NormalizedHookRequest, String> {
+pub fn parse_claude_request(
+    raw_json: &str,
+    is_post: bool,
+) -> Result<NormalizedHookRequest, String> {
     let val: serde_json::Value = serde_json::from_str(raw_json)
         .map_err(|e| format!("Invalid Claude Code hook JSON: {e}"))?;
 
@@ -374,8 +377,7 @@ pub fn parse_claude_request(raw_json: &str, is_post: bool) -> Result<NormalizedH
         .and_then(extract_wire_stderr)
         .or_else(|| extract_wire_stderr(&val));
 
-    let cwd = extract_wire_cwd(&val)
-        .or_else(|| arguments.as_ref().and_then(extract_wire_cwd));
+    let cwd = extract_wire_cwd(&val).or_else(|| arguments.as_ref().and_then(extract_wire_cwd));
     let session_id = extract_wire_session_id(&val);
 
     Ok(NormalizedHookRequest {
@@ -398,15 +400,18 @@ pub fn parse_claude_request(raw_json: &str, is_post: bool) -> Result<NormalizedH
 }
 
 /// Parses Cursor `.cursor/hooks.json` payload.
-pub fn parse_cursor_request(raw_json: &str, event_name: &str) -> Result<NormalizedHookRequest, String> {
-    let val: serde_json::Value = serde_json::from_str(raw_json)
-        .map_err(|e| format!("Invalid Cursor hook JSON: {e}"))?;
+pub fn parse_cursor_request(
+    raw_json: &str,
+    event_name: &str,
+) -> Result<NormalizedHookRequest, String> {
+    let val: serde_json::Value =
+        serde_json::from_str(raw_json).map_err(|e| format!("Invalid Cursor hook JSON: {e}"))?;
 
     let event_type = HookEventType::from_name(event_name);
     let tool_name = extract_wire_tool_name(&val);
     let arguments = extract_wire_arguments(&val);
-    let command = extract_wire_command(&val)
-        .or_else(|| arguments.as_ref().and_then(extract_wire_command));
+    let command =
+        extract_wire_command(&val).or_else(|| arguments.as_ref().and_then(extract_wire_command));
     let file_path = extract_wire_file_path(&val)
         .or_else(|| arguments.as_ref().and_then(extract_wire_file_path));
 
@@ -418,8 +423,7 @@ pub fn parse_cursor_request(raw_json: &str, event_name: &str) -> Result<Normaliz
         .and_then(extract_wire_stderr)
         .or_else(|| extract_wire_stderr(&val));
 
-    let cwd = extract_wire_cwd(&val)
-        .or_else(|| arguments.as_ref().and_then(extract_wire_cwd));
+    let cwd = extract_wire_cwd(&val).or_else(|| arguments.as_ref().and_then(extract_wire_cwd));
     let session_id = extract_wire_session_id(&val);
 
     Ok(NormalizedHookRequest {
@@ -438,7 +442,10 @@ pub fn parse_cursor_request(raw_json: &str, event_name: &str) -> Result<Normaliz
 }
 
 /// Parses GitHub Copilot `.github/hooks/killswitch.json` payload.
-pub fn parse_copilot_request(raw_json: &str, event_name: &str) -> Result<NormalizedHookRequest, String> {
+pub fn parse_copilot_request(
+    raw_json: &str,
+    event_name: &str,
+) -> Result<NormalizedHookRequest, String> {
     let val: serde_json::Value = serde_json::from_str(raw_json)
         .map_err(|e| format!("Invalid GitHub Copilot hook JSON: {e}"))?;
 
@@ -462,8 +469,7 @@ pub fn parse_copilot_request(raw_json: &str, event_name: &str) -> Result<Normali
         .and_then(extract_wire_stderr)
         .or_else(|| extract_wire_stderr(&val));
 
-    let cwd = extract_wire_cwd(&val)
-        .or_else(|| arguments.as_ref().and_then(extract_wire_cwd));
+    let cwd = extract_wire_cwd(&val).or_else(|| arguments.as_ref().and_then(extract_wire_cwd));
     let session_id = extract_wire_session_id(&val);
 
     Ok(NormalizedHookRequest {
@@ -483,8 +489,8 @@ pub fn parse_copilot_request(raw_json: &str, event_name: &str) -> Result<Normali
 
 /// Parses OpenCode plugin payload.
 pub fn parse_opencode_request(raw_json: &str) -> Result<NormalizedHookRequest, String> {
-    let val: serde_json::Value = serde_json::from_str(raw_json)
-        .map_err(|e| format!("Invalid OpenCode hook JSON: {e}"))?;
+    let val: serde_json::Value =
+        serde_json::from_str(raw_json).map_err(|e| format!("Invalid OpenCode hook JSON: {e}"))?;
 
     let typ = val.get("type").and_then(|v| v.as_str()).unwrap_or("before");
     let event_type = if typ.eq_ignore_ascii_case("after") || typ.eq_ignore_ascii_case("post") {
@@ -512,8 +518,7 @@ pub fn parse_opencode_request(raw_json: &str) -> Result<NormalizedHookRequest, S
         .and_then(extract_wire_stderr)
         .or_else(|| extract_wire_stderr(&val));
 
-    let cwd = extract_wire_cwd(&val)
-        .or_else(|| arguments.as_ref().and_then(extract_wire_cwd));
+    let cwd = extract_wire_cwd(&val).or_else(|| arguments.as_ref().and_then(extract_wire_cwd));
     let session_id = extract_wire_session_id(&val);
 
     Ok(NormalizedHookRequest {
@@ -533,8 +538,8 @@ pub fn parse_opencode_request(raw_json: &str) -> Result<NormalizedHookRequest, S
 
 /// Parses MCP `tools/call` JSON-RPC line.
 pub fn parse_mcp_call_request(raw_json: &str) -> Result<NormalizedHookRequest, String> {
-    let val: serde_json::Value = serde_json::from_str(raw_json)
-        .map_err(|e| format!("Invalid MCP JSON-RPC: {e}"))?;
+    let val: serde_json::Value =
+        serde_json::from_str(raw_json).map_err(|e| format!("Invalid MCP JSON-RPC: {e}"))?;
 
     let method = val.get("method").and_then(|v| v.as_str()).unwrap_or("");
     if method != "tools/call" {
@@ -542,12 +547,13 @@ pub fn parse_mcp_call_request(raw_json: &str) -> Result<NormalizedHookRequest, S
     }
 
     let rpc_id = val.get("id").cloned();
-    let params = val.get("params").cloned().unwrap_or(serde_json::Value::Null);
+    let params = val
+        .get("params")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
 
-    let tool_name = extract_wire_tool_name(&params)
-        .or_else(|| extract_wire_tool_name(&val));
-    let arguments = extract_wire_arguments(&params)
-        .or_else(|| extract_wire_arguments(&val));
+    let tool_name = extract_wire_tool_name(&params).or_else(|| extract_wire_tool_name(&val));
+    let arguments = extract_wire_arguments(&params).or_else(|| extract_wire_arguments(&val));
 
     let command = arguments
         .as_ref()
@@ -563,8 +569,7 @@ pub fn parse_mcp_call_request(raw_json: &str) -> Result<NormalizedHookRequest, S
     let cwd = extract_wire_cwd(&params)
         .or_else(|| extract_wire_cwd(&val))
         .or_else(|| arguments.as_ref().and_then(extract_wire_cwd));
-    let session_id = extract_wire_session_id(&params)
-        .or_else(|| extract_wire_session_id(&val));
+    let session_id = extract_wire_session_id(&params).or_else(|| extract_wire_session_id(&val));
 
     Ok(NormalizedHookRequest {
         agent: SupportedAgentKind::Mcp,
@@ -590,7 +595,10 @@ pub fn format_claude_response(decision: &HookEvaluationDecision) -> (i32, String
     if decision.allowed {
         (0, String::new())
     } else {
-        (2, format!("KillSwitch Hook Policy Denied: {}\n", decision.rationale))
+        (
+            2,
+            format!("KillSwitch Hook Policy Denied: {}\n", decision.rationale),
+        )
     }
 }
 
@@ -645,7 +653,10 @@ pub fn format_opencode_response(decision: &HookEvaluationDecision) -> (i32, Stri
 }
 
 /// Formats MCP JSON-RPC response for `tools/call` compliant with JSON-RPC 2.0 §5.1 and MCP CallToolResult.
-pub fn format_mcp_error_response(id: &serde_json::Value, decision: &HookEvaluationDecision) -> String {
+pub fn format_mcp_error_response(
+    id: &serde_json::Value,
+    decision: &HookEvaluationDecision,
+) -> String {
     let mut error_obj = serde_json::json!({
         "code": -32000,
         "message": format!("KillSwitch Policy Violation: {}", decision.rationale)
@@ -722,7 +733,8 @@ pub fn evaluate_hook_synchronously(req: &NormalizedHookRequest) -> HookEvaluatio
         }
 
         let duration_us = start_instant.elapsed().as_micros() as u64;
-        let decision = HookEvaluationDecision::allow("PostToolUse completed and recorded", duration_us);
+        let decision =
+            HookEvaluationDecision::allow("PostToolUse completed and recorded", duration_us);
         record_decision(req, &decision);
         return decision;
     }
@@ -730,7 +742,10 @@ pub fn evaluate_hook_synchronously(req: &NormalizedHookRequest) -> HookEvaluatio
     // ------------------------------------------------------------------------
     // PreToolUse Guard: Sensitive System Path & Credential Store Interception
     // ------------------------------------------------------------------------
-    let mut detected_sensitive_store: Option<(crate::sensitive_paths::SensitiveCredentialStoreKind, String)> = None;
+    let mut detected_sensitive_store: Option<(
+        crate::sensitive_paths::SensitiveCredentialStoreKind,
+        String,
+    )> = None;
 
     if let Some(path) = &req.file_path {
         if let Some(kind) = crate::sensitive_paths::classify_sensitive_system_path(path) {
@@ -804,7 +819,10 @@ pub fn evaluate_hook_synchronously(req: &NormalizedHookRequest) -> HookEvaluatio
                     if probe.is_privileged_target() {
                         let duration_us = start_instant.elapsed().as_micros() as u64;
                         let decision = HookEvaluationDecision::deny(
-                            format!("Target binary on disk requires administrator privileges: '{}'", target_path.display()),
+                            format!(
+                                "Target binary on disk requires administrator privileges: '{}'",
+                                target_path.display()
+                            ),
                             Some("Layer 2: DynamicBinaryMetadataProbe"),
                             Some("Target unprivileged binaries"),
                             duration_us,
@@ -833,7 +851,14 @@ pub fn evaluate_hook_synchronously(req: &NormalizedHookRequest) -> HookEvaluatio
         // Expand compact JSON with space boundaries around structural delimiters to prevent tokenization evasion
         let s = args.to_string();
         for ch in s.chars() {
-            if ch == '{' || ch == '}' || ch == '[' || ch == ']' || ch == ':' || ch == ',' || ch == '"' {
+            if ch == '{'
+                || ch == '}'
+                || ch == '['
+                || ch == ']'
+                || ch == ':'
+                || ch == ','
+                || ch == '"'
+            {
                 payload_to_inspect.push(' ');
                 payload_to_inspect.push(ch);
                 payload_to_inspect.push(' ');
@@ -849,7 +874,10 @@ pub fn evaluate_hook_synchronously(req: &NormalizedHookRequest) -> HookEvaluatio
         if !verdict.is_allow() {
             let duration_us = start_instant.elapsed().as_micros() as u64;
             let decision = HookEvaluationDecision::deny(
-                format!("Sensitive data or PHI/PII entity detected: {:?}", verdict.entities()),
+                format!(
+                    "Sensitive data or PHI/PII entity detected: {:?}",
+                    verdict.entities()
+                ),
                 Some("Layer 3: SemanticDlpEngine"),
                 Some("Scrub sensitive records before tool execution"),
                 duration_us,
@@ -916,19 +944,42 @@ pub fn evaluate_hook_synchronously(req: &NormalizedHookRequest) -> HookEvaluatio
     // Layer 6: CageGovernanceKernel (CAGE 8-tier safety rules)
     // ------------------------------------------------------------------------
     let cage = global_cage_kernel();
-    let has_fiscal = req.arguments.as_ref().and_then(|a| a.get("amount_usd")).is_some();
-    let has_dose = req.arguments.as_ref().and_then(|a| a.get("dose_mg")).is_some();
-    let is_governed_tool = req.tool_name.as_ref().map(|t| cage.is_tool_governed(t)).unwrap_or(false);
+    let has_fiscal = req
+        .arguments
+        .as_ref()
+        .and_then(|a| a.get("amount_usd"))
+        .is_some();
+    let has_dose = req
+        .arguments
+        .as_ref()
+        .and_then(|a| a.get("dose_mg"))
+        .is_some();
+    let is_governed_tool = req
+        .tool_name
+        .as_ref()
+        .map(|t| cage.is_tool_governed(t))
+        .unwrap_or(false);
 
     if has_fiscal || has_dose || is_governed_tool {
         let cage_req = CageEvaluationRequest {
             agent_id: req.agent.as_str().to_string(),
             role: "developer_agent".to_string(),
-            tool_name: req.tool_name.clone().unwrap_or_else(|| "default_tool".to_string()),
+            tool_name: req
+                .tool_name
+                .clone()
+                .unwrap_or_else(|| "default_tool".to_string()),
             arguments: req.arguments.clone().unwrap_or(serde_json::Value::Null),
             confidence_score: Some(0.95),
-            amount_usd: req.arguments.as_ref().and_then(|a| a.get("amount_usd")).and_then(|v| v.as_f64()),
-            dose_mg: req.arguments.as_ref().and_then(|a| a.get("dose_mg")).and_then(|v| v.as_f64()),
+            amount_usd: req
+                .arguments
+                .as_ref()
+                .and_then(|a| a.get("amount_usd"))
+                .and_then(|v| v.as_f64()),
+            dose_mg: req
+                .arguments
+                .as_ref()
+                .and_then(|a| a.get("dose_mg"))
+                .and_then(|v| v.as_f64()),
             warrant_token: None,
             human_approval: None,
             context: None,
@@ -938,7 +989,10 @@ pub fn evaluate_hook_synchronously(req: &NormalizedHookRequest) -> HookEvaluatio
         if cage_resp.verdict == CageVerdict::Refuse {
             let duration_us = start_instant.elapsed().as_micros() as u64;
             let decision = HookEvaluationDecision::deny(
-                format!("CAGE 8-tier governance kernel refused tool call: rule '{}'", cage_resp.rule_id),
+                format!(
+                    "CAGE 8-tier governance kernel refused tool call: rule '{}'",
+                    cage_resp.rule_id
+                ),
                 Some("Layer 6: CageGovernanceKernel"),
                 Some("Verify CAGE contract invariants"),
                 duration_us,

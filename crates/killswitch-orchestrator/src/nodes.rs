@@ -2,18 +2,22 @@
 //!
 //! Provides the concrete node behaviors for each discrete stage of the StateGraph.
 
-use std::sync::Arc;
 use async_trait::async_trait;
 use chrono::Utc;
+use std::sync::Arc;
 use tracing::info;
 
 use killswitch_adjudication::ZeroFalsePositiveAdjudicator;
 use killswitch_core::killchain::HostContainmentManager;
 use killswitch_telemetry::correlator::EventCorrelator;
 use killswitch_telemetry::otel_lineage::EndpointLineageEngine;
-use killswitch_types::adjudication::{AdjudicationResult, ByzantineKillSwitchFraudProof, VoteAction};
+use killswitch_types::adjudication::{
+    AdjudicationResult, ByzantineKillSwitchFraudProof, VoteAction,
+};
 use killswitch_types::errors::{KillSwitchError, Result};
-use killswitch_types::graph::{GraphNodeId, GraphNodeOutput, KillSwitchGraphState, OrchestratorMode, StateCheckpointer};
+use killswitch_types::graph::{
+    GraphNodeId, GraphNodeOutput, KillSwitchGraphState, OrchestratorMode, StateCheckpointer,
+};
 use killswitch_types::status::{ContainmentLevel, HealthProbeRunner};
 
 use crate::engine::evaluate_cage_guard;
@@ -192,7 +196,10 @@ impl LifecycleNode for AdjudicateNode {
         let mut confirmed_count = 0;
 
         for candidate in &state.active_threats {
-            let verdict = self.adjudicator.adjudicate_threat_candidate(candidate, None).await;
+            let verdict = self
+                .adjudicator
+                .adjudicate_threat_candidate(candidate, None)
+                .await;
             match verdict {
                 AdjudicationResult::ConfirmedThreat { confidence, .. } => {
                     confirmed_count += 1;
@@ -200,7 +207,12 @@ impl LifecycleNode for AdjudicateNode {
                         state.aggregate_threat_score = confidence;
                     }
                 }
-                AdjudicationResult::Vetoed { reason, explanation, fraud_proof, .. } => {
+                AdjudicationResult::Vetoed {
+                    reason,
+                    explanation,
+                    fraud_proof,
+                    ..
+                } => {
                     let proof = if let Some(p) = fraud_proof {
                         *p
                     } else {
@@ -393,8 +405,8 @@ impl LifecycleNode for DecideNode {
                 }
             }
             OrchestratorMode::Autonomous => {
-                let should_isolate = state.aggregate_threat_score >= 0.85
-                    || !state.active_threats.is_empty();
+                let should_isolate =
+                    state.aggregate_threat_score >= 0.85 || !state.active_threats.is_empty();
 
                 let action = if should_isolate {
                     Some(VoteAction::Isolate)

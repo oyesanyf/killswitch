@@ -17,18 +17,18 @@ pub mod tarpit;
 pub mod tpm;
 pub mod wfp;
 
+#[cfg(target_os = "linux")]
+pub use exec_sensor::LinuxProcessSensor;
+#[cfg(target_os = "macos")]
+pub use exec_sensor::MacOsProcessSensor;
+#[cfg(target_os = "windows")]
+pub use exec_sensor::WindowsProcessSensor;
 pub use exec_sensor::{
     clear_exec_events, default_process_sensor, get_recent_exec_events, record_exec_event,
     register_exec_event_subscriber, simulate_exec_event, ExecEvent, ExecEventSubscriber,
     ExecSensorBuffer, NativeProcessSensor, SimulatedProcessSensor, EXEC_SENSOR_BUFFER,
     EXEC_SENSOR_DEFAULT_CAPACITY,
 };
-#[cfg(target_os = "windows")]
-pub use exec_sensor::WindowsProcessSensor;
-#[cfg(target_os = "linux")]
-pub use exec_sensor::LinuxProcessSensor;
-#[cfg(target_os = "macos")]
-pub use exec_sensor::MacOsProcessSensor;
 
 pub use peer_pid::resolve_loopback_peer_pid;
 
@@ -50,12 +50,12 @@ pub use pf::{
     generate_quarantine_rules, get_active_darwin_sockets, DarwinSocketEntry, MacOsPfIsolator,
     PfRuleSpec, DEFAULT_PF_ANCHOR, PF_DEVICE_PATH,
 };
-pub use service::{
-    default_service_manager, generate_launchd_plist, generate_systemd_unit,
-    LinuxServiceManager, MacOsServiceManager, NativeServiceManager,
-};
 #[cfg(target_os = "windows")]
 pub use service::WindowsServiceManager;
+pub use service::{
+    default_service_manager, generate_launchd_plist, generate_systemd_unit, LinuxServiceManager,
+    MacOsServiceManager, NativeServiceManager,
+};
 pub use state_ledger::{StateLedger, StateLedgerSnapshot, GENESIS_HASH};
 pub use tarpit::ActiveProcessTarpit;
 pub use tpm::{
@@ -71,6 +71,6 @@ pub use wfp::{
 };
 
 pub use killswitch_types::protocol::{
-    OsiLayer, ProtocolDefinition, ProtocolDomain, ProtocolVectorType,
-    UniversalProtocolCatalog, ALL_DOMAINS,
+    OsiLayer, ProtocolDefinition, ProtocolDomain, ProtocolVectorType, UniversalProtocolCatalog,
+    ALL_DOMAINS,
 };

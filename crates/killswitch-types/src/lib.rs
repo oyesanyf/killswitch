@@ -22,14 +22,13 @@ pub use identity::ProcessInstanceIdentity;
 // Re-export containment status & auth types
 #[allow(deprecated)]
 pub use status::{
-    constant_time_eq, validate_arm_generation_epoch, validate_caller_pid,
-    ActiveNetworkRule, AdminHashAlgorithm, AuthMethod, AuthResult,
-    ContainmentLevel, HealthProbeAnomaly, HealthProbeRunner, IsolationReceipt,
-    KillChainHealthProbeReport, KillChainHistoryEntry, KillChainStatus, LockoutState,
-    NetworkIsolationEngine, NetworkIsolator, OperatorAuthenticator, OperatorCredentials,
-    ProbeAnomalyKind, ProcessFreezeStatus, ProcessFreezer, ProcessIsolationMethod,
-    ProcessIsolationState, QuarantinedArmEpoch, StoredAdminHash, ThreadTarpitMetrics,
-    DEFAULT_CONTROL_PORT, DEFAULT_INTERMEDIATE_HEALTH_PROBE_INTERVAL_SECS,
+    constant_time_eq, validate_arm_generation_epoch, validate_caller_pid, ActiveNetworkRule,
+    AdminHashAlgorithm, AuthMethod, AuthResult, ContainmentLevel, HealthProbeAnomaly,
+    HealthProbeRunner, IsolationReceipt, KillChainHealthProbeReport, KillChainHistoryEntry,
+    KillChainStatus, LockoutState, NetworkIsolationEngine, NetworkIsolator, OperatorAuthenticator,
+    OperatorCredentials, ProbeAnomalyKind, ProcessFreezeStatus, ProcessFreezer,
+    ProcessIsolationMethod, ProcessIsolationState, QuarantinedArmEpoch, StoredAdminHash,
+    ThreadTarpitMetrics, DEFAULT_CONTROL_PORT, DEFAULT_INTERMEDIATE_HEALTH_PROBE_INTERVAL_SECS,
     DEFAULT_REQUIRED_CONSECUTIVE_HEALTHY_PROBES, DEFAULT_ROLLBACK_WATCHDOG_MAX_SECS,
     KILLCHAIN_ISOLATE_CONFIRMATION_PHRASE, KILLCHAIN_ISOLATE_TOKEN,
     KILLCHAIN_RESTORE_CONFIRMATION_PHRASE, KILLCHAIN_RESTORE_TOKEN, LOCKOUT_DURATION_SECS,
@@ -40,14 +39,14 @@ pub use status::{
 pub use adjudication::{
     calculate_consensus, corroboration_multiplier, AdjudicationResult, AuthenticodeChainStatus,
     AuthenticodeStatus, BinaryTrustVerdict, ByzantineKillSwitchFraudProof, EvidenceClass,
-    ReaConsensusVote, ReaDetectorEvaluation, ThreatCandidate, VetoReason, VoteAction,
-    VoteResult, FRAUD_PROOF_SEAL_CONTEXT, REA_SEAL_CONTEXT,
+    ReaConsensusVote, ReaDetectorEvaluation, ThreatCandidate, VetoReason, VoteAction, VoteResult,
+    FRAUD_PROOF_SEAL_CONTEXT, REA_SEAL_CONTEXT,
 };
 
 // Re-export octopus multi-ring types
 pub use octopus::{
-    role_trust_tier, ArmEpoch, ArmMessage, ArmRole, MessageKind, ProvenanceHop,
-    TrustTier, MAX_RELAY_HOPS,
+    role_trust_tier, ArmEpoch, ArmMessage, ArmRole, MessageKind, ProvenanceHop, TrustTier,
+    MAX_RELAY_HOPS,
 };
 
 // Re-export telemetry types
@@ -55,8 +54,8 @@ pub use telemetry::{SecurityEvent, TelemetryEventKind, ThreatSeverity, ThreatSig
 
 // Re-export LangGraph state types
 pub use graph::{
-    ApprovalDecision, ExecutionStep, GraphNode, GraphNodeId, GraphNodeOutput,
-    KillSwitchGraphState, OperatorApprovalState, OrchestratorMode, StateCheckpointer,
+    ApprovalDecision, ExecutionStep, GraphNode, GraphNodeId, GraphNodeOutput, KillSwitchGraphState,
+    OperatorApprovalState, OrchestratorMode, StateCheckpointer,
 };
 
 // Re-export service types
@@ -65,8 +64,8 @@ pub use service::{ServiceConfig, ServiceError, ServiceState, ServiceStatus};
 
 // Re-export universal protocol catalog & taxonomy
 pub use protocol::{
-    OsiLayer, ProtocolDefinition, ProtocolDomain, ProtocolVectorType,
-    UniversalProtocolCatalog, ALL_DOMAINS,
+    OsiLayer, ProtocolDefinition, ProtocolDomain, ProtocolVectorType, UniversalProtocolCatalog,
+    ALL_DOMAINS,
 };
 
 #[cfg(test)]
@@ -117,7 +116,10 @@ mod integration_tests {
             vec!["OsoosiBlockAllOutbound".to_string()],
             vec![],
             vec![3030, 53, 67, 68],
-            vec!["127.0.0.1".parse::<IpAddr>().unwrap(), "::1".parse::<IpAddr>().unwrap()],
+            vec![
+                "127.0.0.1".parse::<IpAddr>().unwrap(),
+                "::1".parse::<IpAddr>().unwrap(),
+            ],
             15,
             "operator-admin".to_string(),
             "High-confidence ransomware detected".to_string(),
@@ -173,7 +175,10 @@ mod integration_tests {
         };
 
         assert!(report.eligible_for_early_rollback);
-        assert_eq!(report.consecutive_healthy_probes, report.required_healthy_probes);
+        assert_eq!(
+            report.consecutive_healthy_probes,
+            report.required_healthy_probes
+        );
     }
 
     #[test]
@@ -182,14 +187,23 @@ mod integration_tests {
         let res_stale = validate_arm_generation_epoch(1, 2, 3, false, None);
         assert!(matches!(
             res_stale,
-            Err(KillSwitchError::StaleGenerationEpoch { arm_id: 1, expected: 3, presented: 2 })
+            Err(KillSwitchError::StaleGenerationEpoch {
+                arm_id: 1,
+                expected: 3,
+                presented: 2
+            })
         ));
 
         // Quarantined arm -> ArmQuarantined error
-        let res_quarantine = validate_arm_generation_epoch(2, 3, 3, true, Some("Anomalous lateral traffic"));
+        let res_quarantine =
+            validate_arm_generation_epoch(2, 3, 3, true, Some("Anomalous lateral traffic"));
         assert!(matches!(
             res_quarantine,
-            Err(KillSwitchError::ArmQuarantined { arm_id: 2, epoch: 3, .. })
+            Err(KillSwitchError::ArmQuarantined {
+                arm_id: 2,
+                epoch: 3,
+                ..
+            })
         ));
 
         // Valid arm

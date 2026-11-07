@@ -15,7 +15,6 @@ use std::time::{Duration, Instant};
 
 static ALERT_COUNTER: AtomicU64 = AtomicU64::new(1);
 
-
 /// Privilege equivalence class taxonomy per PROJECT.md interface contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PrivilegeEquivalenceClass {
@@ -31,7 +30,10 @@ impl PrivilegeEquivalenceClass {
     }
 
     pub fn is_privileged(&self) -> bool {
-        matches!(self, Self::RootOrAdminElevation | Self::TargetUserDelegation)
+        matches!(
+            self,
+            Self::RootOrAdminElevation | Self::TargetUserDelegation
+        )
     }
 }
 
@@ -95,7 +97,10 @@ pub fn parse_semantic_command(raw: &str) -> SemanticCommand {
 
     // Skip environment variables e.g. FOO=bar
     let mut cmd_idx = 0;
-    while cmd_idx < tokens.len() && tokens[cmd_idx].contains('=') && !tokens[cmd_idx].starts_with('-') {
+    while cmd_idx < tokens.len()
+        && tokens[cmd_idx].contains('=')
+        && !tokens[cmd_idx].starts_with('-')
+    {
         cmd_idx += 1;
     }
 
@@ -120,7 +125,10 @@ pub fn parse_semantic_command(raw: &str) -> SemanticCommand {
     match exe_base {
         "sudo" => {
             // Check for benign query flags
-            if args.iter().any(|a| matches!(a.as_str(), "-l" | "-V" | "-h" | "--help" | "--version")) {
+            if args
+                .iter()
+                .any(|a| matches!(a.as_str(), "-l" | "-V" | "-h" | "--help" | "--version"))
+            {
                 return SemanticCommand {
                     raw_command: raw.to_string(),
                     executable: exe_token,
@@ -162,7 +170,10 @@ pub fn parse_semantic_command(raw: &str) -> SemanticCommand {
             }
         }
         "su" => {
-            if args.iter().any(|a| matches!(a.as_str(), "-h" | "--help" | "-V" | "--version")) {
+            if args
+                .iter()
+                .any(|a| matches!(a.as_str(), "-h" | "--help" | "-V" | "--version"))
+            {
                 return SemanticCommand {
                     raw_command: raw.to_string(),
                     executable: exe_token,
@@ -193,16 +204,14 @@ pub fn parse_semantic_command(raw: &str) -> SemanticCommand {
                 is_cross_boundary: false,
             }
         }
-        "doas" | "pkexec" => {
-            SemanticCommand {
-                raw_command: raw.to_string(),
-                executable: exe_token,
-                args,
-                target_user: Some("root".to_string()),
-                privilege_class: PrivilegeEquivalenceClass::RootOrAdminElevation,
-                is_cross_boundary: false,
-            }
-        }
+        "doas" | "pkexec" => SemanticCommand {
+            raw_command: raw.to_string(),
+            executable: exe_token,
+            args,
+            target_user: Some("root".to_string()),
+            privilege_class: PrivilegeEquivalenceClass::RootOrAdminElevation,
+            is_cross_boundary: false,
+        },
         "runas" => {
             let mut is_admin = false;
             for a in &args {
@@ -215,7 +224,11 @@ pub fn parse_semantic_command(raw: &str) -> SemanticCommand {
                 raw_command: raw.to_string(),
                 executable: exe_token,
                 args,
-                target_user: if is_admin { Some("Administrator".to_string()) } else { None },
+                target_user: if is_admin {
+                    Some("Administrator".to_string())
+                } else {
+                    None
+                },
                 privilege_class: if is_admin {
                     PrivilegeEquivalenceClass::RootOrAdminElevation
                 } else {
@@ -225,7 +238,12 @@ pub fn parse_semantic_command(raw: &str) -> SemanticCommand {
             }
         }
         "wsl" => {
-            if args.iter().any(|a| matches!(a.as_str(), "-l" | "--list" | "--status" | "-h" | "--help" | "--version")) {
+            if args.iter().any(|a| {
+                matches!(
+                    a.as_str(),
+                    "-l" | "--list" | "--status" | "-h" | "--help" | "--version"
+                )
+            }) {
                 return SemanticCommand {
                     raw_command: raw.to_string(),
                     executable: exe_token,
@@ -278,11 +296,7 @@ pub fn parse_semantic_command(raw: &str) -> SemanticCommand {
 }
 
 /// Dynamic evaluator of denial signals.
-pub fn evaluate_denial_outcome(
-    _command_line: &str,
-    exit_code: Option<i32>,
-    stderr: &str,
-) -> bool {
+pub fn evaluate_denial_outcome(_command_line: &str, exit_code: Option<i32>, stderr: &str) -> bool {
     if let Some(code) = exit_code {
         if code != 0 {
             let stderr_lc = stderr.to_ascii_lowercase();
@@ -292,7 +306,8 @@ pub fn evaluate_denial_outcome(
                 || stderr_lc.contains("operation not permitted")
                 || stderr_lc.contains("requires elevation")
                 || stderr_lc.contains("access is denied")
-                || code == 1223 // Windows ERROR_CANCELLED (UAC)
+                || code == 1223
+            // Windows ERROR_CANCELLED (UAC)
             {
                 return true;
             }
@@ -381,7 +396,10 @@ fn test_incident_a_sudo_to_wsl_circumvention_reproduction() {
     // Step 1: Agent attempts sudo -n id in PID 5001. It fails with exit code 1.
     let cmd1 = "sudo -n id";
     let sem1 = parse_semantic_command(cmd1);
-    assert_eq!(sem1.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+    assert_eq!(
+        sem1.privilege_class,
+        PrivilegeEquivalenceClass::RootOrAdminElevation
+    );
 
     let is_denied = evaluate_denial_outcome(cmd1, Some(1), "sudo: a password is required");
     assert!(is_denied);
@@ -405,7 +423,10 @@ fn test_incident_a_sudo_to_wsl_circumvention_reproduction() {
     let cmd2 = "wsl -u root id";
     let alert = engine.check_candidate(session_id, Some(4000), cmd2, t1);
 
-    assert!(alert.is_some(), "Expected Incident A circumvention alert to be generated");
+    assert!(
+        alert.is_some(),
+        "Expected Incident A circumvention alert to be generated"
+    );
     let alert = alert.unwrap();
     assert_eq!(alert.session_id, session_id);
     assert_eq!(alert.initial_blocked_command, "sudo -n id");
@@ -444,7 +465,10 @@ fn test_sliding_window_expiration_clean_state() {
     let cmd2 = "wsl -u root apt-get update";
     let alert = engine.check_candidate(session_id, Some(4000), cmd2, t1);
 
-    assert!(alert.is_none(), "Circumvention alert must NOT fire after sliding window expiration");
+    assert!(
+        alert.is_none(),
+        "Circumvention alert must NOT fire after sliding window expiration"
+    );
 }
 
 #[test]
@@ -474,23 +498,46 @@ fn test_cross_session_isolation_no_false_positive() {
     let cmd2 = "wsl -u root id";
     let alert = engine.check_candidate("session-beta", Some(3001), cmd2, t1);
 
-    assert!(alert.is_none(), "Unrelated sessions must NOT trigger cross-session false positives");
+    assert!(
+        alert.is_none(),
+        "Unrelated sessions must NOT trigger cross-session false positives"
+    );
 }
 
 #[test]
 fn test_dynamic_denial_rejection_patterns_across_os() {
     // POSIX EACCES / EPERM
-    assert!(evaluate_denial_outcome("touch /root/file", Some(1), "touch: cannot touch '/root/file': Permission denied"));
-    assert!(evaluate_denial_outcome("reboot", Some(1), "Failed to reboot: Operation not permitted"));
+    assert!(evaluate_denial_outcome(
+        "touch /root/file",
+        Some(1),
+        "touch: cannot touch '/root/file': Permission denied"
+    ));
+    assert!(evaluate_denial_outcome(
+        "reboot",
+        Some(1),
+        "Failed to reboot: Operation not permitted"
+    ));
 
     // Linux PAM
-    assert!(evaluate_denial_outcome("su root", Some(1), "su: Authentication failure"));
+    assert!(evaluate_denial_outcome(
+        "su root",
+        Some(1),
+        "su: Authentication failure"
+    ));
 
     // Windows UAC Cancelled (1223)
-    assert!(evaluate_denial_outcome("runas /user:Administrator cmd", Some(1223), "The operation was canceled by the user."));
+    assert!(evaluate_denial_outcome(
+        "runas /user:Administrator cmd",
+        Some(1223),
+        "The operation was canceled by the user."
+    ));
 
     // Windows Access Denied
-    assert!(evaluate_denial_outcome("net stop winmgmt", Some(5), "System error 5 has occurred. Access is denied."));
+    assert!(evaluate_denial_outcome(
+        "net stop winmgmt",
+        Some(5),
+        "System error 5 has occurred. Access is denied."
+    ));
 
     // Clean exit 0 is NOT denied
     assert!(!evaluate_denial_outcome("cargo test", Some(0), ""));
@@ -523,12 +570,18 @@ fn test_benign_query_not_flagged_as_circumvention() {
     let t1 = t0 + Duration::from_millis(500);
     let cmd2 = "wsl -l -v";
     let alert = engine.check_candidate(session_id, Some(4000), cmd2, t1);
-    assert!(alert.is_none(), "Benign query command 'wsl -l -v' must NOT trigger circumvention alert");
+    assert!(
+        alert.is_none(),
+        "Benign query command 'wsl -l -v' must NOT trigger circumvention alert"
+    );
 
     // Subsequent command is sudo -V (version query)
     let cmd3 = "sudo -V";
     let alert2 = engine.check_candidate(session_id, Some(4000), cmd3, t1);
-    assert!(alert2.is_none(), "Benign query command 'sudo -V' must NOT trigger circumvention alert");
+    assert!(
+        alert2.is_none(),
+        "Benign query command 'sudo -V' must NOT trigger circumvention alert"
+    );
 }
 
 #[test]
@@ -559,7 +612,11 @@ fn test_multi_trial_reproducibility() {
         let cmd2 = "wsl -u root id";
         let alert = engine.check_candidate(&session_id, Some(4000 + trial as u32), cmd2, t1);
 
-        assert!(alert.is_some(), "Trial {} failed to reproduce circumvention detection", trial);
+        assert!(
+            alert.is_some(),
+            "Trial {} failed to reproduce circumvention detection",
+            trial
+        );
         let alert = alert.unwrap();
         assert_eq!(alert.severity, "CRITICAL");
         assert!(alert.confidence >= 0.95);
@@ -590,9 +647,17 @@ fn test_parent_child_agent_ancestry_link() {
     // Next, node agent runtime PID 8080 spawns child PID 9002 running wsl -u root id
     // Even if session ID is empty/different, the shared parent PID binds them
     let t1 = t0 + Duration::from_millis(1200);
-    let alert = engine.check_candidate("different-session-tag", Some(parent_agent_pid), "wsl -u root id", t1);
+    let alert = engine.check_candidate(
+        "different-session-tag",
+        Some(parent_agent_pid),
+        "wsl -u root id",
+        t1,
+    );
 
-    assert!(alert.is_some(), "Shared parent agent PID must bind sequential circumvention attempts");
+    assert!(
+        alert.is_some(),
+        "Shared parent agent PID must bind sequential circumvention attempts"
+    );
     let alert = alert.unwrap();
     assert_eq!(alert.initial_blocked_command, "sudo -n id");
     assert_eq!(alert.retry_command, "wsl -u root id");
@@ -615,14 +680,18 @@ fn test_production_telemetry_circumvention_correlator_incident_a() {
         Some(1),
         "sudo: a password is required",
         t0,
-    ).expect("Denial signal must be generated");
+    )
+    .expect("Denial signal must be generated");
     correlator.record_denial(signal);
 
     // Step 2: Immediate retry with wsl -u root id
     let t1 = t0 + Duration::from_millis(1500);
     let alert = correlator.check_candidate(session, Some(4000), "wsl -u root id", t1);
 
-    assert!(alert.is_some(), "Production correlator must detect Incident A circumvention");
+    assert!(
+        alert.is_some(),
+        "Production correlator must detect Incident A circumvention"
+    );
     let a = alert.unwrap();
     assert_eq!(a.session_id, session);
     assert_eq!(a.initial_blocked_command, "sudo -n id");
@@ -650,21 +719,28 @@ fn test_production_circumvention_with_env_and_compound_shell() {
         Some(1),
         "sudo: a password is required",
         t0,
-    ).expect("Denial signal must be generated");
+    )
+    .expect("Denial signal must be generated");
     correlator.record_denial(signal);
 
     // Step 2: Retry with compound shell: bash -lc "wsl -u root id"
     let t1 = t0 + Duration::from_millis(1000);
     let alert = correlator.check_candidate(session, Some(4000), "bash -lc 'wsl -u root id'", t1);
 
-    assert!(alert.is_some(), "Compound shell wrapped retry must be detected as circumvention");
+    assert!(
+        alert.is_some(),
+        "Compound shell wrapped retry must be detected as circumvention"
+    );
     let a = alert.unwrap();
     assert!(a.crossed_wsl_boundary);
     assert_eq!(a.severity, "CRITICAL");
 
     // Step 3: Retry with env: env wsl -u root id
     let alert2 = correlator.check_candidate(session, Some(4000), "env wsl -u root id", t1);
-    assert!(alert2.is_some(), "Env prefixed retry must be detected as circumvention");
+    assert!(
+        alert2.is_some(),
+        "Env prefixed retry must be detected as circumvention"
+    );
 }
 
 #[test]
@@ -705,10 +781,14 @@ fn test_production_correlator_process_create_ingestion() {
         "wsl -u root id",
     );
     ev.parent_pid = Some(parent_agent_pid);
-    ev.attributes.insert("session_id".to_string(), session.to_string());
+    ev.attributes
+        .insert("session_id".to_string(), session.to_string());
 
     let signal = event_correlator.ingest_event(&ev, AttackStage::DefenseEvasion, 0.50);
-    assert!(signal.is_some(), "ProcessCreate of circumvention command must emit ThreatSignal");
+    assert!(
+        signal.is_some(),
+        "ProcessCreate of circumvention command must emit ThreatSignal"
+    );
 
     let sig = signal.unwrap();
     assert_eq!(sig.target_pid, 8889);
@@ -717,4 +797,3 @@ fn test_production_correlator_process_create_ingestion() {
     assert_eq!(sig.source_detector, "circumvention_correlator");
     assert!(sig.confidence >= 0.95);
 }
-

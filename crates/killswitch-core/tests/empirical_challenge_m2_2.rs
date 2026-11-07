@@ -140,8 +140,12 @@ fn test_loopback_ipv4_and_ipv6_traffic_preservation_under_isolation() {
         .expect("Quarantine engagement must succeed");
 
     assert!(receipt.preserved_ports.contains(&port_v4));
-    assert!(receipt.preserved_ips.contains(&IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))));
-    assert!(receipt.preserved_ips.contains(&IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1))));
+    assert!(receipt
+        .preserved_ips
+        .contains(&IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))));
+    assert!(receipt
+        .preserved_ips
+        .contains(&IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1))));
 
     // Connect from client and verify data transfer succeeds during quarantine
     let mut client_v4 =
@@ -183,10 +187,17 @@ fn test_quarantine_receipt_preserved_ports_and_ips_integrity() {
     // 2. Windows WFP Isolator receipt contract
     let wfp_isolator = WindowsWfpIsolator;
     let receipt_wfp = wfp_isolator
-        .engage_quarantine(&preserved_ports, "admin", "Windows WFP Receipt Verification")
+        .engage_quarantine(
+            &preserved_ports,
+            "admin",
+            "Windows WFP Receipt Verification",
+        )
         .unwrap();
 
-    assert_eq!(receipt_wfp.engine, NetworkIsolationEngine::WindowsWfpDynamic);
+    assert_eq!(
+        receipt_wfp.engine,
+        NetworkIsolationEngine::WindowsWfpDynamic
+    );
     assert_eq!(receipt_wfp.preserved_ports, preserved_ports);
     assert!(receipt_wfp
         .preserved_ips
@@ -229,7 +240,11 @@ fn test_darwin_pf_quarantine_rules_structure_and_order() {
         .iter()
         .filter(|r| r.src_port == Some(3030) || r.dst_port == Some(3030))
         .collect();
-    assert_eq!(port_3030_rules.len(), 2, "Must have in and out rules for 3030");
+    assert_eq!(
+        port_3030_rules.len(),
+        2,
+        "Must have in and out rules for 3030"
+    );
     for r in &port_3030_rules {
         assert_eq!(r.action, PfAction::Pass);
         assert_eq!(r.protocol, PfProtocol::Tcp);
@@ -238,8 +253,12 @@ fn test_darwin_pf_quarantine_rules_structure_and_order() {
 
     // Invariant: DNS 53 (UDP & TCP) and DHCP 67/68 must strictly NOT be preserved
     assert!(!rules.iter().any(|r| r.dst_port == Some(53)));
-    assert!(!rules.iter().any(|r| r.dst_port == Some(67) || r.src_port == Some(67)));
-    assert!(!rules.iter().any(|r| r.dst_port == Some(68) || r.src_port == Some(68)));
+    assert!(!rules
+        .iter()
+        .any(|r| r.dst_port == Some(67) || r.src_port == Some(67)));
+    assert!(!rules
+        .iter()
+        .any(|r| r.dst_port == Some(68) || r.src_port == Some(68)));
 
     // Invariant: Last two rules must be hermetic block drop in & out all with quick: true
     let last_rule_in = &rules[rules.len() - 2];
@@ -251,7 +270,10 @@ fn test_darwin_pf_quarantine_rules_structure_and_order() {
 
     assert_eq!(last_rule_out.action, PfAction::Drop);
     assert_eq!(last_rule_out.direction, PfDirection::Out);
-    assert!(last_rule_out.quick, "Default out block must have quick: true");
+    assert!(
+        last_rule_out.quick,
+        "Default out block must have quick: true"
+    );
 
     // Verify generated syntax string contains anchor and exact quick block statements
     assert!(syntax.contains("Anchor: test_killswitch_anchor"));
@@ -265,10 +287,22 @@ fn test_darwin_pf_ioctl_constants_and_bitfield_integrity() {
     // Group 'D' (0x44), numbers 1, 2, 4, 81, 82, 83
     assert_eq!(DIOCSTART, 0x20004401, "DIOCSTART must match _IO('D', 1)");
     assert_eq!(DIOCSTOP, 0x20004402, "DIOCSTOP must match _IO('D', 2)");
-    assert_eq!(DIOCADDRULE, 0xC8084404, "DIOCADDRULE must match _IOWR('D', 4, pfioc_rule)");
-    assert_eq!(DIOCXBEGIN, 0xC8104451, "DIOCXBEGIN must match _IOWR('D', 81, pfioc_trans)");
-    assert_eq!(DIOCXCOMMIT, 0xC8104452, "DIOCXCOMMIT must match _IOWR('D', 82, pfioc_trans)");
-    assert_eq!(DIOCXROLLBACK, 0xC8104453, "DIOCXROLLBACK must match _IOWR('D', 83, pfioc_trans)");
+    assert_eq!(
+        DIOCADDRULE, 0xC8084404,
+        "DIOCADDRULE must match _IOWR('D', 4, pfioc_rule)"
+    );
+    assert_eq!(
+        DIOCXBEGIN, 0xC8104451,
+        "DIOCXBEGIN must match _IOWR('D', 81, pfioc_trans)"
+    );
+    assert_eq!(
+        DIOCXCOMMIT, 0xC8104452,
+        "DIOCXCOMMIT must match _IOWR('D', 82, pfioc_trans)"
+    );
+    assert_eq!(
+        DIOCXROLLBACK, 0xC8104453,
+        "DIOCXROLLBACK must match _IOWR('D', 83, pfioc_trans)"
+    );
 }
 
 #[test]
@@ -576,12 +610,21 @@ fn test_immunity_case_insensitivity_and_path_normalization() {
         // macOS case variants and paths
         ("/System/Library/CoreServices/WindowServer", 4000),
         ("wInDoWsErVeR", 4001),
-        ("/System/Library/CoreServices/loginwindow.app/Contents/MacOS/loginwindow", 4002),
-        ("/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal", 4003),
+        (
+            "/System/Library/CoreServices/loginwindow.app/Contents/MacOS/loginwindow",
+            4002,
+        ),
+        (
+            "/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal",
+            4003,
+        ),
         ("TeRmInAl", 4004),
         ("/Applications/iTerm.app/Contents/MacOS/iTerm2", 4005),
         ("ITERM2", 4006),
-        ("/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder", 4007),
+        (
+            "/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder",
+            4007,
+        ),
     ];
 
     for (input, pid) in test_cases {
@@ -744,7 +787,10 @@ fn test_cyclic_and_terminated_process_ancestry_traversal() {
         curr = parent;
     }
 
-    assert!(depth <= 5, "Traversal must terminate safely upon cycle detection");
+    assert!(
+        depth <= 5,
+        "Traversal must terminate safely upon cycle detection"
+    );
 }
 
 // =============================================================================
@@ -1088,7 +1134,10 @@ fn test_unconditional_disarm_resumes_frozen_pids_from_ledger() {
 
     // 2. Invoke execute_host_disarm_unauthenticated
     let disarm_res = execute_host_disarm_unauthenticated();
-    assert!(disarm_res.is_ok(), "execute_host_disarm_unauthenticated must succeed");
+    assert!(
+        disarm_res.is_ok(),
+        "execute_host_disarm_unauthenticated must succeed"
+    );
     let status = disarm_res.unwrap();
     assert!(!status.isolated);
     assert_eq!(status.containment_level, ContainmentLevel::Disarmed);

@@ -95,11 +95,7 @@ pub fn begin_database_maintenance_lease(
     let capped_duration = duration_secs.min(600);
     let expected_hex = compute_maintenance_auth_token(scope, expiry_unix);
     if provided_token_hex.len() != expected_hex.len()
-        || !bool::from(
-            provided_token_hex
-                .as_bytes()
-                .ct_eq(expected_hex.as_bytes()),
-        )
+        || !bool::from(provided_token_hex.as_bytes().ct_eq(expected_hex.as_bytes()))
     {
         return Err("MAINTENANCE_AUTH_FAILED: Invalid HMAC-SHA256 maintenance token".to_string());
     }
@@ -215,10 +211,7 @@ impl LocalMySqlTamperGuard {
     /// - Gate 2: Active InnoDB `#sql-*.ibd` or engine compaction artifact on disk.
     /// - Gate 3: Row-level BLAKE3 / content verification against `golden_mirror`.
     /// - Gate 4: On hostile tamper, engages `KILLSWITCH_ACTIVE` in-process and self-heals from memory.
-    pub fn verify_live_rows(
-        &self,
-        live_rows: &mut HashMap<String, String>,
-    ) -> TamperCheckOutcome {
+    pub fn verify_live_rows(&self, live_rows: &mut HashMap<String, String>) -> TamperCheckOutcome {
         if is_maintenance_window_active() {
             return TamperCheckOutcome::MaintenanceDeferred {
                 reason: "Authenticated HMAC-SHA256 database maintenance lease is active"
@@ -300,8 +293,8 @@ pub struct EdrExecutableTamperGuard {
 impl EdrExecutableTamperGuard {
     /// Protects the currently executing binary (`std::env::current_exe()`).
     pub fn protect_current_executable() -> Result<Self, String> {
-        let exe_path = std::env::current_exe()
-            .map_err(|e| format!("Failed to resolve current_exe: {}", e))?;
+        let exe_path =
+            std::env::current_exe().map_err(|e| format!("Failed to resolve current_exe: {}", e))?;
         Self::protect_executable_at(&exe_path)
     }
 

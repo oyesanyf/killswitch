@@ -103,7 +103,9 @@ pub fn is_canonical_protected_binary_name(name: &str) -> bool {
 pub fn validate_rea_target_path(raw_path: &str) -> Result<PathBuf> {
     let trimmed = raw_path.trim().trim_matches('"');
     if trimmed.is_empty() {
-        return Err(anyhow!("REA_SANDBOX_PATH_VIOLATION: target path cannot be empty"));
+        return Err(anyhow!(
+            "REA_SANDBOX_PATH_VIOLATION: target path cannot be empty"
+        ));
     }
 
     // 1. Control chars and null bytes
@@ -295,7 +297,11 @@ pub fn detect_binary_masquerade_spoof(
     }
 
     // Check payload header integrity & format validity
-    if is_protected_name && (base_lower.ends_with(".exe") || base_lower.ends_with(".dll") || !base_lower.contains('.')) {
+    if is_protected_name
+        && (base_lower.ends_with(".exe")
+            || base_lower.ends_with(".dll")
+            || !base_lower.contains('.'))
+    {
         if let Some(buf) = bytes {
             if !buf.is_empty() {
                 if !buf.starts_with(b"MZ") && !buf.starts_with(b"\x7fELF") {
@@ -334,13 +340,16 @@ pub fn detect_binary_masquerade_spoof(
                     }
                     if let Ok(file_bytes) = std::fs::read(p) {
                         if !file_bytes.is_empty() {
-                            if !file_bytes.starts_with(b"MZ") && !file_bytes.starts_with(b"\x7fELF") {
+                            if !file_bytes.starts_with(b"MZ") && !file_bytes.starts_with(b"\x7fELF")
+                            {
                                 return Some(format!(
                                     "REA_MASQUERADE_SPOOF_DETECTED: Protected binary '{}' has non-executable payload header (expected PE 'MZ' or ELF magic)",
                                     base_lower
                                 ));
                             }
-                            if let Err(err) = crate::rea::binary_format::inspect_binary_format_safe(&file_bytes) {
+                            if let Err(err) =
+                                crate::rea::binary_format::inspect_binary_format_safe(&file_bytes)
+                            {
                                 return Some(format!(
                                     "REA_MASQUERADE_SPOOF_DETECTED: Protected binary '{}' failed binary format validation: {}",
                                     base_lower, err
@@ -387,27 +396,21 @@ mod tests {
         // Masquerade in temp dir
         let temp_spoof = detect_binary_masquerade_spoof(
             "svchost.exe",
-            Some(Path::new("C:\\Users\\User\\AppData\\Local\\Temp\\svchost.exe")),
+            Some(Path::new(
+                "C:\\Users\\User\\AppData\\Local\\Temp\\svchost.exe",
+            )),
             Some(b"MZfake"),
         );
         assert!(temp_spoof.is_some());
         assert!(temp_spoof.unwrap().contains("untrusted writable/temp path"));
 
         // Double extension
-        let double_ext = detect_binary_masquerade_spoof(
-            "cargo.exe.scr",
-            None,
-            None,
-        );
+        let double_ext = detect_binary_masquerade_spoof("cargo.exe.scr", None, None);
         assert!(double_ext.is_some());
         assert!(double_ext.unwrap().contains("double extension"));
 
         // Bad payload header
-        let bad_hdr = detect_binary_masquerade_spoof(
-            "svchost.exe",
-            None,
-            Some(b"NOT_A_PE_HEADER"),
-        );
+        let bad_hdr = detect_binary_masquerade_spoof("svchost.exe", None, Some(b"NOT_A_PE_HEADER"));
         assert!(bad_hdr.is_some());
         assert!(bad_hdr.unwrap().contains("non-executable payload header"));
     }

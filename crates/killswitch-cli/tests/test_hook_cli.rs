@@ -4,10 +4,9 @@ use tempfile::tempdir;
 use killswitch_telemetry::agent_hooks::{
     clear_interceptions, evaluate_hook_synchronously, format_claude_response,
     format_copilot_response, format_cursor_response, format_mcp_error_response,
-    format_opencode_response, get_recent_interceptions, install_agent_hooks,
-    parse_claude_request, parse_copilot_request, parse_cursor_request,
-    parse_mcp_call_request, parse_opencode_request, HookEventType,
-    NormalizedHookRequest, SupportedAgentKind, GLOBAL_CORRELATOR,
+    format_opencode_response, get_recent_interceptions, install_agent_hooks, parse_claude_request,
+    parse_copilot_request, parse_cursor_request, parse_mcp_call_request, parse_opencode_request,
+    HookEventType, NormalizedHookRequest, SupportedAgentKind, GLOBAL_CORRELATOR,
 };
 
 #[test]
@@ -59,13 +58,20 @@ fn test_cursor_wire_format_and_dlp_rejection() {
 
     let decision = evaluate_hook_synchronously(&req);
     assert!(!decision.allowed);
-    assert_eq!(decision.denied_by_layer.as_deref(), Some("Layer 3: SemanticDlpEngine"));
+    assert_eq!(
+        decision.denied_by_layer.as_deref(),
+        Some("Layer 3: SemanticDlpEngine")
+    );
 
     let (code, stdout) = format_cursor_response(&decision);
     assert_eq!(code, 0);
-    let json: serde_json::Value = serde_json::from_str(&stdout).expect("parse cursor response json");
+    let json: serde_json::Value =
+        serde_json::from_str(&stdout).expect("parse cursor response json");
     assert_eq!(json["permission"], "deny");
-    assert!(json["agent_message"].as_str().unwrap().contains("Sensitive data"));
+    assert!(json["agent_message"]
+        .as_str()
+        .unwrap()
+        .contains("Sensitive data"));
 }
 
 #[test]
@@ -98,7 +104,8 @@ fn test_copilot_and_opencode_parsers() {
     assert!(opencode_decision.allowed);
     let (opencode_code, opencode_stdout) = format_opencode_response(&opencode_decision);
     assert_eq!(opencode_code, 0);
-    let opencode_json: serde_json::Value = serde_json::from_str(&opencode_stdout).expect("opencode json");
+    let opencode_json: serde_json::Value =
+        serde_json::from_str(&opencode_stdout).expect("opencode json");
     assert_eq!(opencode_json["allow"], true);
 }
 
@@ -125,7 +132,10 @@ fn test_mcp_tools_call_interception() {
     let val: serde_json::Value = serde_json::from_str(&err_resp).expect("mcp json parse");
     assert_eq!(val["id"], 42);
     assert_eq!(val["result"]["isError"], true);
-    assert!(val["result"]["content"][0]["text"].as_str().unwrap().contains("Policy Violation"));
+    assert!(val["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("Policy Violation"));
 }
 
 #[test]
@@ -165,7 +175,10 @@ fn test_incident_a_post_tool_denial_correlation() {
     let retry_req = parse_claude_request(&retry_payload, false).expect("parse claude retry");
     let retry_decision = evaluate_hook_synchronously(&retry_req);
     assert!(!retry_decision.allowed);
-    assert!(retry_decision.rationale.contains("Incident A") || retry_decision.rationale.contains("Privileged"));
+    assert!(
+        retry_decision.rationale.contains("Incident A")
+            || retry_decision.rationale.contains("Privileged")
+    );
 }
 
 #[test]
@@ -213,8 +226,16 @@ fn test_install_agent_hooks() {
 
     assert!(ws.join(".claude").join("settings.json").exists());
     assert!(ws.join(".cursor").join("hooks.json").exists());
-    assert!(ws.join(".github").join("hooks").join("killswitch.json").exists());
-    assert!(ws.join(".opencode").join("plugin").join("killswitch-guard.js").exists());
+    assert!(ws
+        .join(".github")
+        .join("hooks")
+        .join("killswitch.json")
+        .exists());
+    assert!(ws
+        .join(".opencode")
+        .join("plugin")
+        .join("killswitch-guard.js")
+        .exists());
 
     // Verify Claude settings content
     let claude_content = std::fs::read_to_string(ws.join(".claude").join("settings.json")).unwrap();
@@ -335,7 +356,9 @@ fn test_sensitive_root_credential_path_interception_pre_tool() {
     let req = parse_claude_request(claude_payload, false).expect("parse claude");
     let decision = evaluate_hook_synchronously(&req);
     assert!(!decision.allowed);
-    assert!(decision.rationale.contains("sensitive system credential store"));
+    assert!(decision
+        .rationale
+        .contains("sensitive system credential store"));
 
     // 2. Cursor beforeReadFile on /etc/sudoers
     let cursor_payload = r#"{
@@ -344,7 +367,9 @@ fn test_sensitive_root_credential_path_interception_pre_tool() {
     let cursor_req = parse_cursor_request(cursor_payload, "beforeReadFile").expect("parse cursor");
     let cursor_decision = evaluate_hook_synchronously(&cursor_req);
     assert!(!cursor_decision.allowed);
-    assert!(cursor_decision.rationale.contains("sensitive system credential store"));
+    assert!(cursor_decision
+        .rationale
+        .contains("sensitive system credential store"));
 
     // 3. MCP read_file tool with SAM registry hive path
     let mcp_payload = r#"{
@@ -361,6 +386,7 @@ fn test_sensitive_root_credential_path_interception_pre_tool() {
     let mcp_req = parse_mcp_call_request(mcp_payload).expect("parse mcp");
     let mcp_decision = evaluate_hook_synchronously(&mcp_req);
     assert!(!mcp_decision.allowed);
-    assert!(mcp_decision.rationale.contains("sensitive system credential store"));
+    assert!(mcp_decision
+        .rationale
+        .contains("sensitive system credential store"));
 }
-

@@ -254,19 +254,13 @@ fn freeze_process_win32(
         let ntdll = GetModuleHandleA(c"ntdll.dll".as_ptr().cast());
         if ntdll.is_null() {
             CloseHandle(handle);
-            return Err(KillSwitchError::NtSuspendProcessFailed {
-                pid,
-                ntstatus: -1,
-            });
+            return Err(KillSwitchError::NtSuspendProcessFailed { pid, ntstatus: -1 });
         }
 
         let proc = GetProcAddress(ntdll, c"NtSuspendProcess".as_ptr().cast());
         if proc.is_none() {
             CloseHandle(handle);
-            return Err(KillSwitchError::NtSuspendProcessFailed {
-                pid,
-                ntstatus: -2,
-            });
+            return Err(KillSwitchError::NtSuspendProcessFailed { pid, ntstatus: -2 });
         }
 
         let nt_suspend: NtSuspendProcessFn = std::mem::transmute(proc.unwrap());
@@ -308,19 +302,13 @@ fn resume_process_win32(
         let ntdll = GetModuleHandleA(c"ntdll.dll".as_ptr().cast());
         if ntdll.is_null() {
             CloseHandle(handle);
-            return Err(KillSwitchError::NtResumeProcessFailed {
-                pid,
-                ntstatus: -1,
-            });
+            return Err(KillSwitchError::NtResumeProcessFailed { pid, ntstatus: -1 });
         }
 
         let proc = GetProcAddress(ntdll, c"NtResumeProcess".as_ptr().cast());
         if proc.is_none() {
             CloseHandle(handle);
-            return Err(KillSwitchError::NtResumeProcessFailed {
-                pid,
-                ntstatus: -2,
-            });
+            return Err(KillSwitchError::NtResumeProcessFailed { pid, ntstatus: -2 });
         }
 
         let nt_resume: NtResumeProcessFn = std::mem::transmute(proc.unwrap());
@@ -434,10 +422,19 @@ mod tests {
             ("iTerm2", 109),
             // With paths
             ("/System/Library/CoreServices/WindowServer", 200),
-            ("/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal", 201),
+            (
+                "/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal",
+                201,
+            ),
             ("/Applications/iTerm.app/Contents/MacOS/iTerm2", 202),
-            ("/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder", 203),
-            ("/System/Library/CoreServices/Dock.app/Contents/MacOS/Dock", 204),
+            (
+                "/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder",
+                203,
+            ),
+            (
+                "/System/Library/CoreServices/Dock.app/Contents/MacOS/Dock",
+                204,
+            ),
         ];
 
         for (name, pid) in macos_procs {

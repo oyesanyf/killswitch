@@ -16,7 +16,11 @@ use killswitch_telemetry::siquery::{
 #[test]
 fn test_siquery_tables_list() {
     let tables = SiqueryEngine::list_tables();
-    assert!(tables.len() >= 41, "Must expose at least 41 relational tables, found {}", tables.len());
+    assert!(
+        tables.len() >= 41,
+        "Must expose at least 41 relational tables, found {}",
+        tables.len()
+    );
     assert!(tables.contains(&"processes"));
     assert!(tables.contains(&"process_open_sockets"));
     assert!(tables.contains(&"coding_tools"));
@@ -38,15 +42,23 @@ fn test_siquery_processes_and_sockets_queries() {
     let proc_rows = engine
         .execute_query("SELECT pid, name, memory_rss_mb FROM processes LIMIT 5;")
         .expect("Should query processes");
-    assert!(!proc_rows.is_empty(), "Processes table should return running processes");
+    assert!(
+        !proc_rows.is_empty(),
+        "Processes table should return running processes"
+    );
     assert!(proc_rows[0].get("pid").is_some());
     assert!(proc_rows[0].get("name").is_some());
 
     // Query sockets
     let sock_rows = engine
-        .execute_query("SELECT pid, local_port, remote_address, state FROM process_open_sockets LIMIT 5;")
+        .execute_query(
+            "SELECT pid, local_port, remote_address, state FROM process_open_sockets LIMIT 5;",
+        )
         .expect("Should query sockets");
-    assert!(!sock_rows.is_empty(), "Sockets table should return live sockets");
+    assert!(
+        !sock_rows.is_empty(),
+        "Sockets table should return live sockets"
+    );
 
     // Test coding tools
     let tools = engine
@@ -97,8 +109,14 @@ fn test_siquery_telemetry_virtual_tables() {
         .execute_query("SELECT event_id, agent_kind, tool_name, verdict FROM agent_interceptions WHERE command_line LIKE '%git status%';")
         .expect("Should query agent_interceptions");
     assert!(!intercept_rows.is_empty());
-    assert_eq!(intercept_rows[0].get("agent_kind").unwrap().as_str(), Some("claude"));
-    assert_eq!(intercept_rows[0].get("verdict").unwrap().as_str(), Some("ALLOW"));
+    assert_eq!(
+        intercept_rows[0].get("agent_kind").unwrap().as_str(),
+        Some("claude")
+    );
+    assert_eq!(
+        intercept_rows[0].get("verdict").unwrap().as_str(),
+        Some("ALLOW")
+    );
 }
 
 #[test]
@@ -120,7 +138,9 @@ fn test_siquery_quadruple_read_only_guard() {
     ];
 
     for q in &mutating_queries {
-        let err = engine.execute_query(q).expect_err(&format!("Mutating query '{}' must be rejected", q));
+        let err = engine
+            .execute_query(q)
+            .expect_err(&format!("Mutating query '{}' must be rejected", q));
         assert!(
             err.contains("Mutating SQL statements are forbidden (read-only query engine)"),
             "Error was: {}",
@@ -134,7 +154,10 @@ fn test_siquery_quadruple_read_only_guard() {
     let _res = engine.execute_query(injection_attempt);
     // Verify file_events table still exists and queryable
     let check = engine.execute_query("SELECT COUNT(*) AS total FROM file_events;");
-    assert!(check.is_ok(), "file_events table must not have been dropped");
+    assert!(
+        check.is_ok(),
+        "file_events table must not have been dropped"
+    );
 }
 
 #[test]
@@ -152,9 +175,16 @@ fn test_siquery_file_events_ring_buffer_flood_and_fifo() {
     }
 
     let guard = LIVE_FILE_EVENTS.read();
-    assert_eq!(guard.len(), 1024, "LIVE_FILE_EVENTS must be strictly capped at 1024");
+    assert_eq!(
+        guard.len(),
+        1024,
+        "LIVE_FILE_EVENTS must be strictly capped at 1024"
+    );
     // Verify FIFO: oldest remaining should be event 1976 (3000 - 1024)
-    assert_eq!(guard.front().unwrap().target_path, "C:\\temp\\test_1976.txt");
+    assert_eq!(
+        guard.front().unwrap().target_path,
+        "C:\\temp\\test_1976.txt"
+    );
     assert_eq!(guard.back().unwrap().target_path, "C:\\temp\\test_2999.txt");
     drop(guard);
 
@@ -211,7 +241,11 @@ fn test_siquery_multithreaded_contention() {
 fn test_siquery_lineage_hooks_registration() {
     register_lineage_open_files_hook(|| {
         vec![
-            (4242, 10, "C:\\confidential\\patient_records.pdf".to_string()),
+            (
+                4242,
+                10,
+                "C:\\confidential\\patient_records.pdf".to_string(),
+            ),
             (4242, 11, "C:\\confidential\\keys.pem".to_string()),
         ]
     });
@@ -247,7 +281,9 @@ fn test_siquery_formatters_json_csv_pretty() {
     let sql = "SELECT 1 AS id, 'killswitch' AS name, 3.14 AS pi;";
 
     // 1. JSON
-    let json = engine.execute_json(sql).expect("execute_json should succeed");
+    let json = engine
+        .execute_json(sql)
+        .expect("execute_json should succeed");
     assert!(json.contains("\"id\": 1"));
     assert!(json.contains("\"name\": \"killswitch\""));
 
@@ -257,7 +293,9 @@ fn test_siquery_formatters_json_csv_pretty() {
     assert!(csv.contains("1|killswitch|3.14"));
 
     // 3. Pretty box
-    let pretty = engine.execute_pretty(sql).expect("execute_pretty should succeed");
+    let pretty = engine
+        .execute_pretty(sql)
+        .expect("execute_pretty should succeed");
     assert!(pretty.contains("+"));
     assert!(pretty.contains("| id"));
     assert!(pretty.contains("| name"));
@@ -270,7 +308,10 @@ fn test_siquery_12_sweep_edr_audit() {
     let report = engine.run_siquery_edr_audit_sweep();
 
     assert_eq!(report.get("status").and_then(|v| v.as_str()), Some("ok"));
-    assert_eq!(report.get("sweeps_executed").and_then(|v| v.as_i64()), Some(12));
+    assert_eq!(
+        report.get("sweeps_executed").and_then(|v| v.as_i64()),
+        Some(12)
+    );
     assert!(report.get("execution_duration_ms").is_some());
 
     let metrics = report.get("metrics").expect("Must contain metrics");

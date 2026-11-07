@@ -167,7 +167,10 @@ async fn test_stress_multithreaded_process_freeze_and_resume_cycle() {
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    assert!(counter_started, "Child process failed to initialize counter");
+    assert!(
+        counter_started,
+        "Child process failed to initialize counter"
+    );
 
     let freezer = NativeProcessFreezer::new();
 

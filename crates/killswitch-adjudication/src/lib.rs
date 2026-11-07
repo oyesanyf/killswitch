@@ -31,26 +31,21 @@ pub use binary_probe::{
     inspect_binary_metadata, inspect_binary_metadata_from_bytes, DynamicBinaryMetadata,
     ElevationRequirement,
 };
-pub use token_delta::{
-    evaluate_security_context_delta, observe_parent_child_token_delta,
-    query_process_security_context, ProcessSecurityContext, SecurityContextDelta,
+pub use byzantine::{
+    build_kill_switch_fraud_proof, veto_peer_kill_switch_candidate, PEER_SLASHED_STAKE,
 };
 pub use conformal::{
     bounds, linalg, project_text_to_feature_vector, CalibratedSource, LayeredGuardrail,
     MultiSourceCalibration, PersistDetector, PersistStepResult, SrDetector,
 };
+pub use consensus::MultiVoterConsensusEngine;
 pub use edr_bench::{
-    load_all_bench_tasks, resolve_fixture_path, BenignBaselineAssertion, BenchmarkReport,
+    load_all_bench_tasks, resolve_fixture_path, BenchmarkReport, BenignBaselineAssertion,
     EdrBenchHarness, EdrBenchTask, ExpectedVerdict, GateIterationTrace, HarnessBounds, TargetArch,
     TelemetryContext, ThreatAssertion, MAX_RULE_SOURCE_BYTES,
 };
-pub use byzantine::{
-    build_kill_switch_fraud_proof, veto_peer_kill_switch_candidate, PEER_SLASHED_STAKE,
-};
-pub use consensus::MultiVoterConsensusEngine;
 pub use immunity::{
-    get_process_ancestry_chain, inspect_process_lineage, LineageImmunityVerdict,
-    MAX_ANCESTRY_DEPTH,
+    get_process_ancestry_chain, inspect_process_lineage, LineageImmunityVerdict, MAX_ANCESTRY_DEPTH,
 };
 pub use inventory::{
     get_protected_local_binary_hashes, is_protected_local_binary_hash,
@@ -64,6 +59,10 @@ pub use rea::{
     scan_and_sanitize_counter_ai_strings, validate_rea_target_path, AutonomousReaEngine,
     BinaryFormatInfo, BinaryFormatKind, SectionInfo, MAX_EXTRACTED_STRINGS, MAX_PE_SECTIONS,
     MAX_REA_FILE_BYTES, MAX_SINGLE_STRING_BYTES,
+};
+pub use token_delta::{
+    evaluate_security_context_delta, observe_parent_child_token_delta,
+    query_process_security_context, ProcessSecurityContext, SecurityContextDelta,
 };
 pub use voters::{
     AdjudicationContext, BehaviorVoter, DataLineageVoter, DlpClassification, DlpPolicy,

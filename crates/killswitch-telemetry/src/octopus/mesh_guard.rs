@@ -70,7 +70,10 @@ impl HomologicalBoundaryAuditor {
             };
         }
 
-        let potentials: Vec<i64> = chain.iter().map(|r| role_trust_tier(r).potential()).collect();
+        let potentials: Vec<i64> = chain
+            .iter()
+            .map(|r| role_trust_tier(r).potential())
+            .collect();
         let n = potentials.len();
         let phi_s = potentials[0];
         let phi_r = potentials[n - 1];
@@ -121,7 +124,13 @@ impl HomologicalBoundaryAuditor {
             allowed,
             sender: describe(&chain[0]),
             intermediary: if n > 2 {
-                Some(chain[1..n - 1].iter().map(describe).collect::<Vec<_>>().join(" -> "))
+                Some(
+                    chain[1..n - 1]
+                        .iter()
+                        .map(describe)
+                        .collect::<Vec<_>>()
+                        .join(" -> "),
+                )
             } else {
                 None
             },
@@ -192,8 +201,7 @@ impl MeshGuard {
         let sig_bytes = hex::decode(&msg.signature_hex)
             .map_err(|e| KillSwitchError::CryptoError(format!("Invalid signature hex: {}", e)))?;
 
-        if sig_bytes.len() != expected_bytes.len()
-            || bool::from(!expected_bytes.ct_eq(&sig_bytes))
+        if sig_bytes.len() != expected_bytes.len() || bool::from(!expected_bytes.ct_eq(&sig_bytes))
         {
             return Err(KillSwitchError::MeshHmacVerificationFailed {
                 arm_id: msg.sender_generation as usize,

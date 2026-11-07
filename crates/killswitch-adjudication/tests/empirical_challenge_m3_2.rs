@@ -145,7 +145,10 @@ async fn test_empirical_dlp_fan_in_exfiltration_adjudication() {
     // 1. Assert DataLineageVoter directly casts Isolate vote on curl.exe PID 5001
     let voter = DataLineageVoter::new();
     let vote = voter.vote(&candidate, Some(&context)).await;
-    assert!(vote.is_some(), "DataLineageVoter must cast a vote on DLP exfiltration");
+    assert!(
+        vote.is_some(),
+        "DataLineageVoter must cast a vote on DLP exfiltration"
+    );
     let v = vote.unwrap();
     assert_eq!(v.candidate_pid, Some(5001));
     assert_eq!(v.action, VoteAction::Isolate);
@@ -165,7 +168,10 @@ async fn test_empirical_dlp_fan_in_exfiltration_adjudication() {
         .adjudicate_threat_candidate(&candidate, Some(&context))
         .await;
     println!("result_single: {:?}", result_single);
-    assert!(!result_single.is_vetoed(), "curl.exe PID 5001 must not be vetoed");
+    assert!(
+        !result_single.is_vetoed(),
+        "curl.exe PID 5001 must not be vetoed"
+    );
 
     // 3. Now corroborate across >= 3 classes (LiveNetwork from Lineage + Behavior + Memory):
     // Register custom multi-class votes and verify ConfirmedThreat is reached for PID 5001
@@ -196,7 +202,10 @@ async fn test_empirical_dlp_fan_in_exfiltration_adjudication() {
         "Corroborated 3-class evidence must confirm autonomous threat containment"
     );
     assert!(result_confirmed.confidence() >= 0.94);
-    if let AdjudicationResult::ConfirmedThreat { recommended_action, .. } = result_confirmed {
+    if let AdjudicationResult::ConfirmedThreat {
+        recommended_action, ..
+    } = result_confirmed
+    {
         assert_eq!(recommended_action, VoteAction::Isolate);
     } else {
         panic!("Expected ConfirmedThreat");
@@ -245,10 +254,15 @@ async fn test_empirical_admin_shell_veto_vs_lotl_exfiltration() {
     let clean_vote = voter.vote(&clean_candidate, Some(&clean_context)).await;
     assert!(clean_vote.is_some());
     let v_clean = clean_vote.unwrap();
-    assert!(v_clean.is_veto(), "Clean admin shell must receive a veto vote");
+    assert!(
+        v_clean.is_veto(),
+        "Clean admin shell must receive a veto vote"
+    );
     assert_eq!(v_clean.weight, -1.50);
     assert_eq!(v_clean.action, VoteAction::Monitor);
-    assert!(v_clean.explanation.contains("attested clean by DataLineageVoter"));
+    assert!(v_clean
+        .explanation
+        .contains("attested clean by DataLineageVoter"));
 
     // Adjudicator must veto isolation of clean powershell.exe (both via Layer 1 immunity and consensus)
     let clean_adjudication = adjudicator
@@ -312,7 +326,9 @@ async fn test_empirical_admin_shell_veto_vs_lotl_exfiltration() {
     assert_eq!(v_comp.action, VoteAction::Isolate);
     assert_eq!(v_comp.confidence, 0.96);
     assert!(
-        v_comp.explanation.contains("Preserving PID from freeze termination; network isolation recommended"),
+        v_comp
+            .explanation
+            .contains("Preserving PID from freeze termination; network isolation recommended"),
         "Vote must explicitly preserve shell PID from process freeze"
     );
 
@@ -399,9 +415,16 @@ fn test_empirical_ancestry_depth_5_boundary_and_cyclic_defense() {
 
     let verdict1 = simulate_process_lineage_traversal(5001, "custom_worker.exe", &tree_depth1);
     assert!(verdict1.is_immune());
-    assert_eq!(verdict1.to_veto_reason(), Some(VetoReason::ProtectedParentLineage));
+    assert_eq!(
+        verdict1.to_veto_reason(),
+        Some(VetoReason::ProtectedParentLineage)
+    );
     match verdict1 {
-        LineageImmunityVerdict::ImmuneAncestor { depth, ancestor_name, .. } => {
+        LineageImmunityVerdict::ImmuneAncestor {
+            depth,
+            ancestor_name,
+            ..
+        } => {
             assert_eq!(depth, 1);
             assert_eq!(ancestor_name, "cargo.exe");
         }
@@ -418,9 +441,16 @@ fn test_empirical_ancestry_depth_5_boundary_and_cyclic_defense() {
 
     let verdict3 = simulate_process_lineage_traversal(5003, "leaf_proc.exe", &tree_depth3);
     assert!(verdict3.is_immune());
-    assert_eq!(verdict3.to_veto_reason(), Some(VetoReason::ProtectedParentLineage));
+    assert_eq!(
+        verdict3.to_veto_reason(),
+        Some(VetoReason::ProtectedParentLineage)
+    );
     match verdict3 {
-        LineageImmunityVerdict::ImmuneAncestor { depth, ancestor_name, .. } => {
+        LineageImmunityVerdict::ImmuneAncestor {
+            depth,
+            ancestor_name,
+            ..
+        } => {
             assert_eq!(depth, 3);
             assert_eq!(ancestor_name, "explorer.exe");
         }
@@ -439,10 +469,20 @@ fn test_empirical_ancestry_depth_5_boundary_and_cyclic_defense() {
     tree_depth5.insert(6001, (2004, "rustc.exe".to_string()));
 
     let verdict5 = simulate_process_lineage_traversal(6005, "leaf_at_5.exe", &tree_depth5);
-    assert!(verdict5.is_immune(), "Depth 5 ancestor MUST receive immunity");
-    assert_eq!(verdict5.to_veto_reason(), Some(VetoReason::ProtectedParentLineage));
+    assert!(
+        verdict5.is_immune(),
+        "Depth 5 ancestor MUST receive immunity"
+    );
+    assert_eq!(
+        verdict5.to_veto_reason(),
+        Some(VetoReason::ProtectedParentLineage)
+    );
     match verdict5 {
-        LineageImmunityVerdict::ImmuneAncestor { depth, ancestor_name, .. } => {
+        LineageImmunityVerdict::ImmuneAncestor {
+            depth,
+            ancestor_name,
+            ..
+        } => {
             assert_eq!(depth, 5);
             assert_eq!(ancestor_name, "rustc.exe");
         }
@@ -533,55 +573,85 @@ fn test_empirical_byzantine_fraud_proof_tamper_detection() {
     );
 
     // 1. Untampered proof MUST verify
-    assert!(proof.verify_seal(), "Untampered proof seal must verify successfully");
+    assert!(
+        proof.verify_seal(),
+        "Untampered proof seal must verify successfully"
+    );
 
     // 2. Tamper with `peer_id` by 1 character
     let mut tampered_peer = proof.clone();
     tampered_peer.peer_id = format!("{}_tampered", peer_id);
-    assert!(!tampered_peer.verify_seal(), "Tampered peer_id must fail verification");
+    assert!(
+        !tampered_peer.verify_seal(),
+        "Tampered peer_id must fail verification"
+    );
 
     // 3. Tamper with `accused_peer_id`
     let mut tampered_accused = proof.clone();
     tampered_accused.accused_peer_id = "innocent-peer-01".to_string();
-    assert!(!tampered_accused.verify_seal(), "Tampered accused_peer_id must fail verification");
+    assert!(
+        !tampered_accused.verify_seal(),
+        "Tampered accused_peer_id must fail verification"
+    );
 
     // 4. Tamper with `target_binary_hash` (flip 1 character)
     let mut tampered_hash = proof.clone();
     let mut hash_chars: Vec<char> = target_hash.chars().collect();
     hash_chars[0] = if hash_chars[0] == '0' { '1' } else { '0' };
     tampered_hash.target_binary_hash = hash_chars.into_iter().collect();
-    assert!(!tampered_hash.verify_seal(), "Tampered target_binary_hash must fail verification");
+    assert!(
+        !tampered_hash.verify_seal(),
+        "Tampered target_binary_hash must fail verification"
+    );
 
     // 5. Tamper with `proc_name`
     let mut tampered_proc = proof.clone();
     tampered_proc.proc_name = "svchost.exe".to_string();
-    assert!(!tampered_proc.verify_seal(), "Tampered proc_name must fail verification");
+    assert!(
+        !tampered_proc.verify_seal(),
+        "Tampered proc_name must fail verification"
+    );
 
     // 6. Tamper with `fraud_reason`
     let mut tampered_reason = proof.clone();
     tampered_reason.fraud_reason = format!("{} (modified)", fraud_reason);
-    assert!(!tampered_reason.verify_seal(), "Tampered fraud_reason must fail verification");
+    assert!(
+        !tampered_reason.verify_seal(),
+        "Tampered fraud_reason must fail verification"
+    );
 
     // 7. Tamper with `proof_seal` by 1 bit/character
     let mut tampered_seal = proof.clone();
     let mut seal_chars: Vec<char> = tampered_seal.proof_seal.chars().collect();
     seal_chars[0] = if seal_chars[0] == 'a' { 'b' } else { 'a' };
     tampered_seal.proof_seal = seal_chars.into_iter().collect();
-    assert!(!tampered_seal.verify_seal(), "Tampered proof_seal must fail verification");
+    assert!(
+        !tampered_seal.verify_seal(),
+        "Tampered proof_seal must fail verification"
+    );
 
     // 8. Truncated seal and empty seal failure
     let mut truncated_seal = proof.clone();
     truncated_seal.proof_seal = proof.proof_seal[..10].to_string();
-    assert!(!truncated_seal.verify_seal(), "Truncated proof_seal must fail verification");
+    assert!(
+        !truncated_seal.verify_seal(),
+        "Truncated proof_seal must fail verification"
+    );
 
     let mut empty_seal = proof.clone();
     empty_seal.proof_seal = String::new();
-    assert!(!empty_seal.verify_seal(), "Empty proof_seal must fail verification");
+    assert!(
+        !empty_seal.verify_seal(),
+        "Empty proof_seal must fail verification"
+    );
 
     // 9. Tamper with `timestamp`
     let mut tampered_ts = proof.clone();
     tampered_ts.timestamp = "2020-01-01T00:00:00Z".to_string();
-    assert!(!tampered_ts.verify_seal(), "Tampered timestamp must fail verification");
+    assert!(
+        !tampered_ts.verify_seal(),
+        "Tampered timestamp must fail verification"
+    );
 
     // 10. Keyed seal verification and tampering
     let key = [0x5au8; 32];
@@ -604,10 +674,16 @@ fn test_empirical_byzantine_fraud_proof_tamper_detection() {
         proof_seal: keyed_seal,
         timestamp: timestamp.to_string(),
     };
-    assert!(keyed_proof.verify_keyed_seal(&key), "Valid keyed seal must verify");
+    assert!(
+        keyed_proof.verify_keyed_seal(&key),
+        "Valid keyed seal must verify"
+    );
 
     let wrong_key = [0x5bu8; 32];
-    assert!(!keyed_proof.verify_keyed_seal(&wrong_key), "Wrong key must fail verification");
+    assert!(
+        !keyed_proof.verify_keyed_seal(&wrong_key),
+        "Wrong key must fail verification"
+    );
 }
 
 // ============================================================================
@@ -617,7 +693,10 @@ fn test_empirical_byzantine_fraud_proof_tamper_detection() {
 #[test]
 fn test_empirical_inventory_lookup_concurrency_no_deadlocks() {
     let inventory = get_protected_local_binary_hashes();
-    assert!(!inventory.is_empty(), "Initial inventory must be pre-populated");
+    assert!(
+        !inventory.is_empty(),
+        "Initial inventory must be pre-populated"
+    );
 
     const NUM_THREADS: usize = 16;
     const OPERATIONS_PER_THREAD: usize = 100;

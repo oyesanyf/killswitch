@@ -18,13 +18,9 @@ use killswitch_telemetry::canary::CanaryManager;
 use killswitch_telemetry::causal::CausalSecurityGraph;
 use killswitch_telemetry::octopus::arm_ring::ArmContainmentRing;
 use killswitch_telemetry::octopus::mesh_guard::{HomologicalBoundaryAuditor, MeshGuard};
-use killswitch_telemetry::otel_lineage::{
-    DlpClassification, DlpPolicy, TaintBaggage,
-};
+use killswitch_telemetry::otel_lineage::{DlpClassification, DlpPolicy, TaintBaggage};
 use killswitch_telemetry::phaselock::PerPidPhaseLockMonitor;
-use killswitch_telemetry::watchdog::{
-    HardwareWatchdog, MemoryPressureLevel, WatchdogConfig,
-};
+use killswitch_telemetry::watchdog::{HardwareWatchdog, MemoryPressureLevel, WatchdogConfig};
 use killswitch_types::identity::ProcessInstanceIdentity;
 use killswitch_types::telemetry::ThreatSeverity;
 use killswitch_types::{ArmMessage, ArmRole, KillSwitchError, MessageKind, TrustTier};
@@ -43,11 +39,17 @@ fn test_empirical_phaselock_stable_periodic_signals_non_chaotic() {
     for i in 0..30 {
         let v = const_monitor.observe(5.0);
         if v.is_chaotic_breakout {
-            println!("Constant 5.0 triggered breakout at step {}: lyapunov={}, drift={}", i, v.lyapunov_exponent, v.mahalanobis_drift);
+            println!(
+                "Constant 5.0 triggered breakout at step {}: lyapunov={}, drift={}",
+                i, v.lyapunov_exponent, v.mahalanobis_drift
+            );
             const_breakout = true;
         }
     }
-    assert!(!const_breakout, "Constant 5.0 signal must NEVER trigger chaotic breakout");
+    assert!(
+        !const_breakout,
+        "Constant 5.0 signal must NEVER trigger chaotic breakout"
+    );
 
     // Period 4 orbit: test after initial attractor embedding warmup (16 samples)
     monitor.reset();
@@ -125,9 +127,7 @@ fn test_empirical_phaselock_chaotic_burst_injection_lyapunov_divergence() {
     }
 
     // Now inject chaotic high-entropy burst: oscillating high magnitude random-like spikes
-    let burst = [
-        120.0, 0.05, 340.0, 1.2, 500.0, 0.01, 800.0, 0.5, 950.0,
-    ];
+    let burst = [120.0, 0.05, 340.0, 1.2, 500.0, 0.01, 800.0, 0.5, 950.0];
     let mut triggered_chaotic = false;
     let mut max_lyapunov = f64::NEG_INFINITY;
     let mut max_drift = 0.0f64;
@@ -287,8 +287,22 @@ fn test_empirical_causal_dag_cycle_prevention() {
     let graph = CausalSecurityGraph::new();
 
     let p_a = ProcessInstanceIdentity::new(2001, 100, "hash_a", None, None, "Session-0");
-    let p_b = ProcessInstanceIdentity::new(2002, 200, "hash_b", Some(p_a.instance_id.clone()), None, "Session-0");
-    let p_c = ProcessInstanceIdentity::new(2003, 300, "hash_c", Some(p_b.instance_id.clone()), None, "Session-0");
+    let p_b = ProcessInstanceIdentity::new(
+        2002,
+        200,
+        "hash_b",
+        Some(p_a.instance_id.clone()),
+        None,
+        "Session-0",
+    );
+    let p_c = ProcessInstanceIdentity::new(
+        2003,
+        300,
+        "hash_c",
+        Some(p_b.instance_id.clone()),
+        None,
+        "Session-0",
+    );
 
     graph.record_process_spawn(None, &p_a, "a.exe");
     graph.record_process_spawn(Some(&p_a.instance_id), &p_b, "b.exe");

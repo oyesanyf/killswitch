@@ -157,7 +157,10 @@ impl CompiledSubstrateArtifact {
     /// Verifies the embedded `substrate_contract_digest` against the recalculated digest.
     pub fn verify_digest(&self) -> bool {
         let expected = self.compute_digest();
-        self.substrate_contract_digest.as_bytes().ct_eq(expected.as_bytes()).into()
+        self.substrate_contract_digest
+            .as_bytes()
+            .ct_eq(expected.as_bytes())
+            .into()
     }
 }
 
@@ -166,7 +169,9 @@ pub struct SubstrateCompiler;
 
 impl SubstrateCompiler {
     /// Auto-detects the specification format and compiles it into a `CompiledSubstrateArtifact`.
-    pub fn detect_and_compile(payload: &serde_json::Value) -> Result<CompiledSubstrateArtifact, String> {
+    pub fn detect_and_compile(
+        payload: &serde_json::Value,
+    ) -> Result<CompiledSubstrateArtifact, String> {
         let format = Self::detect_format(payload)?;
         Self::compile_with_format(payload, format)
     }
@@ -190,14 +195,29 @@ impl SubstrateCompiler {
 
             if trimmed.starts_with("kind:") {
                 let val = trimmed.trim_start_matches("kind:").trim().trim_matches('"');
-                map.insert("kind".to_string(), serde_json::Value::String(val.to_string()));
+                map.insert(
+                    "kind".to_string(),
+                    serde_json::Value::String(val.to_string()),
+                );
             } else if trimmed.starts_with("oscal-version:") {
-                let val = trimmed.trim_start_matches("oscal-version:").trim().trim_matches('"');
-                map.insert("oscal-version".to_string(), serde_json::Value::String(val.to_string()));
+                let val = trimmed
+                    .trim_start_matches("oscal-version:")
+                    .trim()
+                    .trim_matches('"');
+                map.insert(
+                    "oscal-version".to_string(),
+                    serde_json::Value::String(val.to_string()),
+                );
             } else if trimmed.starts_with("behaviorDeclarations:") {
-                map.insert("behaviorDeclarations".to_string(), serde_json::Value::Array(Vec::new()));
+                map.insert(
+                    "behaviorDeclarations".to_string(),
+                    serde_json::Value::Array(Vec::new()),
+                );
             } else if trimmed.starts_with("governedRunLoop:") {
-                map.insert("governedRunLoop".to_string(), serde_json::Value::Object(serde_json::Map::new()));
+                map.insert(
+                    "governedRunLoop".to_string(),
+                    serde_json::Value::Object(serde_json::Map::new()),
+                );
             } else if trimmed.starts_with("allowed_tools:") {
                 in_allowed_tools = true;
             } else if in_allowed_tools && trimmed.starts_with("- ") {
@@ -208,21 +228,35 @@ impl SubstrateCompiler {
                 let key = k.trim().trim_matches('"');
                 let val_str = v.trim().trim_matches('"');
                 if let Ok(n) = val_str.parse::<f64>() {
-                    map.insert(key.to_string(), serde_json::Number::from_f64(n).map(serde_json::Value::Number).unwrap_or(serde_json::Value::String(val_str.to_string())));
+                    map.insert(
+                        key.to_string(),
+                        serde_json::Number::from_f64(n)
+                            .map(serde_json::Value::Number)
+                            .unwrap_or(serde_json::Value::String(val_str.to_string())),
+                    );
                 } else if val_str == "true" || val_str == "false" {
                     map.insert(key.to_string(), serde_json::Value::Bool(val_str == "true"));
                 } else if !val_str.is_empty() {
-                    map.insert(key.to_string(), serde_json::Value::String(val_str.to_string()));
+                    map.insert(
+                        key.to_string(),
+                        serde_json::Value::String(val_str.to_string()),
+                    );
                 }
             }
         }
 
         if !tools_list.is_empty() {
-            map.insert("allowed_tools".to_string(), serde_json::Value::Array(tools_list));
+            map.insert(
+                "allowed_tools".to_string(),
+                serde_json::Value::Array(tools_list),
+            );
         }
 
         if map.is_empty() {
-            return Err("Malformed substrate specification: unable to parse as valid JSON or YAML contract".to_string());
+            return Err(
+                "Malformed substrate specification: unable to parse as valid JSON or YAML contract"
+                    .to_string(),
+            );
         }
 
         Self::detect_and_compile(&serde_json::Value::Object(map))
@@ -235,7 +269,9 @@ impl SubstrateCompiler {
     /// 4. `LinuxFoundationAaif` (`governedRunLoop`)
     /// 5. `NativeCage` (fallback)
     pub fn detect_format(payload: &serde_json::Value) -> Result<SubstrateFormat, String> {
-        let obj = payload.as_object().ok_or_else(|| "Substrate specification must be a JSON object".to_string())?;
+        let obj = payload
+            .as_object()
+            .ok_or_else(|| "Substrate specification must be a JSON object".to_string())?;
 
         // Check LulaValidation directly
         if let Some(kind) = obj.get("kind").and_then(|k| k.as_str()) {
@@ -247,7 +283,10 @@ impl SubstrateCompiler {
         // Check OSCAL version
         if obj.contains_key("oscal-version") {
             // Check if OSCAL wraps a Lula Rego manifest in back-matter
-            if let Some(bm) = obj.get("component-definition").and_then(|cd| cd.get("back-matter")) {
+            if let Some(bm) = obj
+                .get("component-definition")
+                .and_then(|cd| cd.get("back-matter"))
+            {
                 let bm_str = bm.to_string().to_ascii_lowercase();
                 if bm_str.contains("lula") || bm_str.contains("rego") {
                     return Ok(SubstrateFormat::LulaValidation);
@@ -273,7 +312,10 @@ impl SubstrateCompiler {
             || obj.contains_key("parameter_bounds")
             || obj.contains_key("norms")
             || obj.contains_key("domain")
-            || obj.get("kind").and_then(|k| k.as_str()).is_some_and(|k| k.eq_ignore_ascii_case("NativeCage"))
+            || obj
+                .get("kind")
+                .and_then(|k| k.as_str())
+                .is_some_and(|k| k.eq_ignore_ascii_case("NativeCage"))
             || obj.is_empty()
         {
             return Ok(SubstrateFormat::NativeCage);
@@ -282,7 +324,10 @@ impl SubstrateCompiler {
         Err("Unrecognized substrate contract specification format".to_string())
     }
 
-    fn compile_with_format(payload: &serde_json::Value, format: SubstrateFormat) -> Result<CompiledSubstrateArtifact, String> {
+    fn compile_with_format(
+        payload: &serde_json::Value,
+        format: SubstrateFormat,
+    ) -> Result<CompiledSubstrateArtifact, String> {
         let mut allowed_tools = Vec::new();
         let mut max_single_transfer_usd = 10_000.0;
         let mut max_dose_mg = 100.0;
@@ -298,25 +343,50 @@ impl SubstrateCompiler {
                     contract_id = id.to_string();
                 }
                 // Extract props from component-definition -> components -> control-implementations
-                if let Some(components) = payload.pointer("/component-definition/components").and_then(|c| c.as_array()) {
+                if let Some(components) = payload
+                    .pointer("/component-definition/components")
+                    .and_then(|c| c.as_array())
+                {
                     for comp in components {
-                        if let Some(ctrl_impls) = comp.get("control-implementations").and_then(|ci| ci.as_array()) {
+                        if let Some(ctrl_impls) = comp
+                            .get("control-implementations")
+                            .and_then(|ci| ci.as_array())
+                        {
                             for ci in ctrl_impls {
-                                if let Some(reqs) = ci.get("implemented-requirements").and_then(|r| r.as_array()) {
+                                if let Some(reqs) = ci
+                                    .get("implemented-requirements")
+                                    .and_then(|r| r.as_array())
+                                {
                                     for req in reqs {
-                                        if let Some(cid) = req.get("control-id").and_then(|c| c.as_str()) {
+                                        if let Some(cid) =
+                                            req.get("control-id").and_then(|c| c.as_str())
+                                        {
                                             match cid {
-                                                "ac-3" => allowed_tools.push("access_enforcement".to_string()),
-                                                "si-10" => allowed_tools.push("information_input_validation".to_string()),
-                                                other => allowed_tools.push(other.to_ascii_lowercase()),
+                                                "ac-3" => allowed_tools
+                                                    .push("access_enforcement".to_string()),
+                                                "si-10" => allowed_tools.push(
+                                                    "information_input_validation".to_string(),
+                                                ),
+                                                other => {
+                                                    allowed_tools.push(other.to_ascii_lowercase())
+                                                }
                                             }
                                         }
-                                        if let Some(props) = req.get("props").and_then(|p| p.as_array()) {
+                                        if let Some(props) =
+                                            req.get("props").and_then(|p| p.as_array())
+                                        {
                                             for prop in props {
-                                                let name = prop.get("name").and_then(|n| n.as_str()).unwrap_or("");
-                                                let val = prop.get("value").and_then(|v| v.as_str()).unwrap_or("");
+                                                let name = prop
+                                                    .get("name")
+                                                    .and_then(|n| n.as_str())
+                                                    .unwrap_or("");
+                                                let val = prop
+                                                    .get("value")
+                                                    .and_then(|v| v.as_str())
+                                                    .unwrap_or("");
                                                 match name {
-                                                    "max_single_transfer_usd" | "max-transfer-usd" => {
+                                                    "max_single_transfer_usd"
+                                                    | "max-transfer-usd" => {
                                                         if let Ok(n) = val.parse::<f64>() {
                                                             max_single_transfer_usd = n;
                                                         }
@@ -332,11 +402,14 @@ impl SubstrateCompiler {
                                                         }
                                                     }
                                                     "requires_warrant" => {
-                                                        requires_warrant = val.eq_ignore_ascii_case("true") || val == "1";
+                                                        requires_warrant = val
+                                                            .eq_ignore_ascii_case("true")
+                                                            || val == "1";
                                                     }
                                                     "consensus_threshold" => {
                                                         if let Ok(n) = val.parse::<f64>() {
-                                                            consensus_risk_threshold = n.clamp(0.0, 1.0);
+                                                            consensus_risk_threshold =
+                                                                n.clamp(0.0, 1.0);
                                                         }
                                                     }
                                                     _ => {}
@@ -355,25 +428,47 @@ impl SubstrateCompiler {
                     contract_id = name.to_string();
                 }
                 // Extract from metadata annotations
-                if let Some(ann) = payload.pointer("/metadata/annotations").and_then(|a| a.as_object()) {
-                    if let Some(v) = ann.get("max_single_transfer_usd").and_then(|v| v.as_str()).and_then(|s| s.parse::<f64>().ok()) {
+                if let Some(ann) = payload
+                    .pointer("/metadata/annotations")
+                    .and_then(|a| a.as_object())
+                {
+                    if let Some(v) = ann
+                        .get("max_single_transfer_usd")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| s.parse::<f64>().ok())
+                    {
                         max_single_transfer_usd = v;
                     }
-                    if let Some(v) = ann.get("max_dose_mg").and_then(|v| v.as_str()).and_then(|s| s.parse::<f64>().ok()) {
+                    if let Some(v) = ann
+                        .get("max_dose_mg")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| s.parse::<f64>().ok())
+                    {
                         max_dose_mg = v;
                     }
-                    if let Some(v) = ann.get("fiscal_cap_usd").and_then(|v| v.as_str()).and_then(|s| s.parse::<f64>().ok()) {
+                    if let Some(v) = ann
+                        .get("fiscal_cap_usd")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| s.parse::<f64>().ok())
+                    {
                         fiscal_cap_usd = v;
                     }
                     if let Some(v) = ann.get("requires_warrant").and_then(|v| v.as_str()) {
                         requires_warrant = v.eq_ignore_ascii_case("true") || v == "1";
                     }
-                    if let Some(v) = ann.get("consensus_threshold").and_then(|v| v.as_str()).and_then(|s| s.parse::<f64>().ok()) {
+                    if let Some(v) = ann
+                        .get("consensus_threshold")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| s.parse::<f64>().ok())
+                    {
                         consensus_risk_threshold = v.clamp(0.0, 1.0);
                     }
                 }
                 // Extract resources as tools
-                if let Some(resources) = payload.pointer("/spec/domain/kubernetes-spec/resources").and_then(|r| r.as_array()) {
+                if let Some(resources) = payload
+                    .pointer("/spec/domain/kubernetes-spec/resources")
+                    .and_then(|r| r.as_array())
+                {
                     for r in resources {
                         if let Some(name) = r.get("name").and_then(|n| n.as_str()) {
                             allowed_tools.push(name.to_ascii_lowercase());
@@ -385,25 +480,35 @@ impl SubstrateCompiler {
                 if let Some(name) = payload.pointer("/metadata/name").and_then(|n| n.as_str()) {
                     contract_id = name.to_string();
                 }
-                if let Some(decls) = payload.get("behaviorDeclarations").and_then(|b| b.as_array()) {
+                if let Some(decls) = payload
+                    .get("behaviorDeclarations")
+                    .and_then(|b| b.as_array())
+                {
                     for decl in decls {
                         if let Some(action) = decl.get("action").and_then(|a| a.as_str()) {
                             allowed_tools.push(action.to_ascii_lowercase());
                         }
-                        if let Some(req_w) = decl.get("requires_warrant").and_then(|w| w.as_bool()) {
+                        if let Some(req_w) = decl.get("requires_warrant").and_then(|w| w.as_bool())
+                        {
                             if req_w {
                                 requires_warrant = true;
                             }
                         }
-                        if let Some(constraints) = decl.get("constraints").and_then(|c| c.as_array()) {
+                        if let Some(constraints) =
+                            decl.get("constraints").and_then(|c| c.as_array())
+                        {
                             for c in constraints {
-                                let param = c.get("parameter").and_then(|p| p.as_str()).unwrap_or("");
+                                let param =
+                                    c.get("parameter").and_then(|p| p.as_str()).unwrap_or("");
                                 let val = c.get("value").and_then(|v| v.as_f64()).unwrap_or(0.0);
                                 if param.contains("transfer") || param.contains("amount") {
                                     max_single_transfer_usd = val;
                                 } else if param.contains("dose") || param.contains("mg") {
                                     max_dose_mg = val;
-                                } else if param.contains("fiscal") || param.contains("limit") || param.contains("spend") {
+                                } else if param.contains("fiscal")
+                                    || param.contains("limit")
+                                    || param.contains("spend")
+                                {
                                     fiscal_cap_usd = val;
                                 } else if param.contains("consensus") {
                                     consensus_risk_threshold = val.clamp(0.0, 1.0);
@@ -414,7 +519,10 @@ impl SubstrateCompiler {
                 }
             }
             SubstrateFormat::LinuxFoundationAaif => {
-                if let Some(stages) = payload.pointer("/governedRunLoop/stages").and_then(|s| s.as_array()) {
+                if let Some(stages) = payload
+                    .pointer("/governedRunLoop/stages")
+                    .and_then(|s| s.as_array())
+                {
                     for stage in stages {
                         if let Some(act) = stage.get("action").and_then(|a| a.as_str()) {
                             allowed_tools.push(act.to_ascii_lowercase());
@@ -422,9 +530,12 @@ impl SubstrateCompiler {
                         if let Some(thresh) = stage.get("threshold").and_then(|t| t.as_f64()) {
                             consensus_risk_threshold = thresh.clamp(0.0, 1.0);
                         }
-                        if let Some(constraints) = stage.get("constraints").and_then(|c| c.as_array()) {
+                        if let Some(constraints) =
+                            stage.get("constraints").and_then(|c| c.as_array())
+                        {
                             for c in constraints {
-                                let param = c.get("parameter").and_then(|p| p.as_str()).unwrap_or("");
+                                let param =
+                                    c.get("parameter").and_then(|p| p.as_str()).unwrap_or("");
                                 let val = c.get("value").and_then(|v| v.as_f64()).unwrap_or(0.0);
                                 if param.contains("transfer") {
                                     max_single_transfer_usd = val;
@@ -439,7 +550,11 @@ impl SubstrateCompiler {
                 }
             }
             SubstrateFormat::NativeCage => {
-                if let Some(id) = payload.get("contract_id").or_else(|| payload.get("domain")).and_then(|d| d.as_str()) {
+                if let Some(id) = payload
+                    .get("contract_id")
+                    .or_else(|| payload.get("domain"))
+                    .and_then(|d| d.as_str())
+                {
                     contract_id = id.to_string();
                 }
                 if let Some(tools) = payload.get("allowed_tools").and_then(|t| t.as_array()) {
@@ -450,7 +565,10 @@ impl SubstrateCompiler {
                     }
                 }
                 if let Some(bounds) = payload.get("parameter_bounds").and_then(|b| b.as_object()) {
-                    if let Some(v) = bounds.get("max_single_transfer_usd").and_then(|v| v.as_f64()) {
+                    if let Some(v) = bounds
+                        .get("max_single_transfer_usd")
+                        .and_then(|v| v.as_f64())
+                    {
                         max_single_transfer_usd = v;
                     }
                     if let Some(v) = bounds.get("max_dose_mg").and_then(|v| v.as_f64()) {
@@ -462,8 +580,15 @@ impl SubstrateCompiler {
                 }
                 if let Some(n_arr) = payload.get("norms").and_then(|n| n.as_array()) {
                     for n in n_arr {
-                        let id = n.get("id").and_then(|i| i.as_str()).unwrap_or("NORM_001").to_string();
-                        let req_w = n.get("requires_warrant").and_then(|w| w.as_bool()).unwrap_or(false);
+                        let id = n
+                            .get("id")
+                            .and_then(|i| i.as_str())
+                            .unwrap_or("NORM_001")
+                            .to_string();
+                        let req_w = n
+                            .get("requires_warrant")
+                            .and_then(|w| w.as_bool())
+                            .unwrap_or(false);
                         if req_w {
                             requires_warrant = true;
                         }
@@ -472,14 +597,32 @@ impl SubstrateCompiler {
                         }
                         norms.push(SubstrateNorm {
                             rule_id: id,
-                            description: n.get("description").and_then(|d| d.as_str()).unwrap_or("").to_string(),
-                            tool_pattern: n.get("tool_pattern").and_then(|t| t.as_str()).unwrap_or("*").to_string(),
-                            max_single_transfer_usd: n.get("max_single_transfer_usd").and_then(|m| m.as_f64()),
+                            description: n
+                                .get("description")
+                                .and_then(|d| d.as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            tool_pattern: n
+                                .get("tool_pattern")
+                                .and_then(|t| t.as_str())
+                                .unwrap_or("*")
+                                .to_string(),
+                            max_single_transfer_usd: n
+                                .get("max_single_transfer_usd")
+                                .and_then(|m| m.as_f64()),
                             max_dose_mg: n.get("max_dose_mg").and_then(|m| m.as_f64()),
                             requires_warrant: req_w,
-                            required_role: n.get("required_role").and_then(|r| r.as_str()).map(ToString::to_string),
-                            consensus_threshold: n.get("consensus_threshold").and_then(|c| c.as_f64()),
-                            forbidden: n.get("forbidden").and_then(|f| f.as_bool()).unwrap_or(false),
+                            required_role: n
+                                .get("required_role")
+                                .and_then(|r| r.as_str())
+                                .map(ToString::to_string),
+                            consensus_threshold: n
+                                .get("consensus_threshold")
+                                .and_then(|c| c.as_f64()),
+                            forbidden: n
+                                .get("forbidden")
+                                .and_then(|f| f.as_bool())
+                                .unwrap_or(false),
                         });
                     }
                 }
@@ -563,7 +706,11 @@ pub enum CageVerdict {
     Allow,
     #[serde(rename = "NARROW", alias = "Narrow", alias = "narrow")]
     Narrow,
-    #[serde(rename = "REQUIRE_APPROVAL", alias = "RequireApproval", alias = "require_approval")]
+    #[serde(
+        rename = "REQUIRE_APPROVAL",
+        alias = "RequireApproval",
+        alias = "require_approval"
+    )]
     RequireApproval,
     #[serde(rename = "DEFER", alias = "Defer", alias = "defer")]
     Defer,
@@ -651,7 +798,8 @@ impl CageWarrantToken {
         issued_at_ms: u64,
         expires_at_ms: u64,
     ) -> Self {
-        let payload = format!("{agent_id}:{tool_name}:{argument_digest}:{issued_at_ms}:{expires_at_ms}");
+        let payload =
+            format!("{agent_id}:{tool_name}:{argument_digest}:{issued_at_ms}:{expires_at_ms}");
         let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC supports keys of any length");
         mac.update(payload.as_bytes());
         let signature_hex = hex::encode(mac.finalize().into_bytes());
@@ -674,7 +822,11 @@ impl CageWarrantToken {
 
         let payload = format!(
             "{}:{}:{}:{}:{}",
-            self.agent_id, self.tool_name, self.argument_digest, self.issued_at_ms, self.expires_at_ms
+            self.agent_id,
+            self.tool_name,
+            self.argument_digest,
+            self.issued_at_ms,
+            self.expires_at_ms
         );
         let mut mac = match HmacSha256::new_from_slice(secret) {
             Ok(m) => m,
@@ -683,7 +835,10 @@ impl CageWarrantToken {
         mac.update(payload.as_bytes());
         let expected = hex::encode(mac.finalize().into_bytes());
 
-        self.signature_hex.as_bytes().ct_eq(expected.as_bytes()).into()
+        self.signature_hex
+            .as_bytes()
+            .ct_eq(expected.as_bytes())
+            .into()
     }
 }
 
@@ -795,7 +950,8 @@ impl CageDecisionReceipt {
             let sig = signing_key.sign(sha256_hex.as_bytes());
             unhashed.receipt_signature = hex::encode(sig.to_bytes());
         } else {
-            let mut mac = HmacSha256::new_from_slice(secret_key).expect("HMAC supports keys of any length");
+            let mut mac =
+                HmacSha256::new_from_slice(secret_key).expect("HMAC supports keys of any length");
             mac.update(sha256_hex.as_bytes());
             unhashed.receipt_signature = hex::encode(mac.finalize().into_bytes());
         }
@@ -812,9 +968,18 @@ impl CageDecisionReceipt {
         let expected_sha256 = hex::encode(hasher.finalize());
         let expected_blake3 = blake3::hash(canonical.as_bytes()).to_hex().to_string();
 
-        let sha_ok = self.sha256_digest.as_bytes().ct_eq(expected_sha256.as_bytes());
-        let blake_ok = self.blake3_digest.as_bytes().ct_eq(expected_blake3.as_bytes());
-        let decision_ok = self.decision_digest.as_bytes().ct_eq(expected_sha256.as_bytes());
+        let sha_ok = self
+            .sha256_digest
+            .as_bytes()
+            .ct_eq(expected_sha256.as_bytes());
+        let blake_ok = self
+            .blake3_digest
+            .as_bytes()
+            .ct_eq(expected_blake3.as_bytes());
+        let decision_ok = self
+            .decision_digest
+            .as_bytes()
+            .ct_eq(expected_sha256.as_bytes());
 
         (sha_ok & blake_ok & decision_ok).into()
     }
@@ -835,7 +1000,11 @@ impl CageDecisionReceipt {
 
                     // 1. If secret_key is the 32-byte signing key, derive its verifying key
                     let sk = ed25519_dalek::SigningKey::from_bytes(&key_arr);
-                    if sk.verifying_key().verify(self.decision_digest.as_bytes(), &sig).is_ok() {
+                    if sk
+                        .verifying_key()
+                        .verify(self.decision_digest.as_bytes(), &sig)
+                        .is_ok()
+                    {
                         return true;
                     }
 
@@ -851,7 +1020,11 @@ impl CageDecisionReceipt {
         if let Ok(mut mac) = HmacSha256::new_from_slice(secret_key) {
             mac.update(self.decision_digest.as_bytes());
             let expected_sig = hex::encode(mac.finalize().into_bytes());
-            if bool::from(self.receipt_signature.as_bytes().ct_eq(expected_sig.as_bytes())) {
+            if bool::from(
+                self.receipt_signature
+                    .as_bytes()
+                    .ct_eq(expected_sig.as_bytes()),
+            ) {
                 return true;
             }
         }
@@ -902,10 +1075,16 @@ impl CageEvidenceWriter {
     }
 
     /// Appends a decision receipt after strictly validating its cryptographic decision digest.
-    pub fn append_receipt(&self, receipt: CageDecisionReceipt) -> Result<CageEvidenceEntry, String> {
+    pub fn append_receipt(
+        &self,
+        receipt: CageDecisionReceipt,
+    ) -> Result<CageEvidenceEntry, String> {
         // 1. Fail-closed availability check
         if !self.available.load(Ordering::SeqCst) {
-            return Err("CAGE_EVIDENCE_SINK_UNAVAILABLE: Fail-closed logging requirement violated".to_string());
+            return Err(
+                "CAGE_EVIDENCE_SINK_UNAVAILABLE: Fail-closed logging requirement violated"
+                    .to_string(),
+            );
         }
 
         // 2. Strict decision digest verification (MANDATORY GATE)
@@ -1068,7 +1247,11 @@ impl CageEvidenceWriter {
     }
 
     pub fn list_receipts(&self) -> Vec<CageDecisionReceipt> {
-        self.records.read().iter().map(|e| e.receipt.clone()).collect()
+        self.records
+            .read()
+            .iter()
+            .map(|e| e.receipt.clone())
+            .collect()
     }
 
     pub fn count(&self) -> usize {
@@ -1102,7 +1285,12 @@ pub struct FinanceBoundingBarrier {
 }
 
 impl FinanceBoundingBarrier {
-    pub fn new(max_notional_usd: f64, max_exposure_usd: f64, current_exposure_usd: f64, gamma: f64) -> Self {
+    pub fn new(
+        max_notional_usd: f64,
+        max_exposure_usd: f64,
+        current_exposure_usd: f64,
+        gamma: f64,
+    ) -> Self {
         Self {
             max_notional_usd,
             max_exposure_usd,
@@ -1164,7 +1352,12 @@ pub struct HealthcareDoseBarrier {
 }
 
 impl HealthcareDoseBarrier {
-    pub fn new(max_single_dose_mg: f64, max_daily_dose_mg: f64, cumulative_dose_24h_mg: f64, gamma: f64) -> Self {
+    pub fn new(
+        max_single_dose_mg: f64,
+        max_daily_dose_mg: f64,
+        cumulative_dose_24h_mg: f64,
+        gamma: f64,
+    ) -> Self {
         Self {
             max_single_dose_mg,
             max_daily_dose_mg,
@@ -1319,7 +1512,8 @@ impl AtomicFiscalBarrier {
 
     pub fn set_cap_usd(&self, cap_usd: f64) {
         let cap_micro = (cap_usd.max(0.0) * 1_000_000.0) as u64;
-        self.fiscal_cap_micro_usd.store(cap_micro, Ordering::Release);
+        self.fiscal_cap_micro_usd
+            .store(cap_micro, Ordering::Release);
     }
 
     /// Atomic compare-and-exchange: returns `Ok(new_total_micro)` or `Err("FISCAL_CAP_EXCEEDED")`.
@@ -1527,18 +1721,16 @@ impl CageTraceVerifier {
                         ));
                     }
                 }
-                GovernanceTraceEventType::ReceiptSigned => {
-                    match event.verdict {
-                        Some(CageVerdict::Clear | CageVerdict::Allow) => clear_receipt_signed = true,
-                        Some(CageVerdict::Refuse | CageVerdict::Deny) => refuse_receipt_signed = true,
-                        Some(CageVerdict::Narrow) => clear_receipt_signed = true,
-                        Some(CageVerdict::RequireApproval | CageVerdict::Defer) => {},
-                        None => violations.push(format!(
-                            "RECEIPT_MISSING_VERDICT: ReceiptSigned event at step {} lacks verdict",
-                            event.step
-                        )),
-                    }
-                }
+                GovernanceTraceEventType::ReceiptSigned => match event.verdict {
+                    Some(CageVerdict::Clear | CageVerdict::Allow) => clear_receipt_signed = true,
+                    Some(CageVerdict::Refuse | CageVerdict::Deny) => refuse_receipt_signed = true,
+                    Some(CageVerdict::Narrow) => clear_receipt_signed = true,
+                    Some(CageVerdict::RequireApproval | CageVerdict::Defer) => {}
+                    None => violations.push(format!(
+                        "RECEIPT_MISSING_VERDICT: ReceiptSigned event at step {} lacks verdict",
+                        event.step
+                    )),
+                },
                 GovernanceTraceEventType::ActuationCompleted => {
                     actuation_completed = true;
                     if !clear_receipt_signed {
@@ -1576,7 +1768,10 @@ impl CageTraceVerifier {
                 final_verdict.unwrap_or(CageVerdict::Clear)
             )
         } else {
-            format!("Trace non-conformant: {} violation(s) detected", violations.len())
+            format!(
+                "Trace non-conformant: {} violation(s) detected",
+                violations.len()
+            )
         };
 
         TraceConformanceReport {
@@ -1756,7 +1951,10 @@ impl CageGovernanceKernel {
 
     /// Returns the SHA-256 digest of the currently loaded substrate contract.
     pub fn active_substrate_digest(&self) -> String {
-        self.active_substrate.read().substrate_contract_digest.clone()
+        self.active_substrate
+            .read()
+            .substrate_contract_digest
+            .clone()
     }
 
     /// Accessor for the cryptographic evidence writer.
@@ -1814,7 +2012,10 @@ impl CageGovernanceKernel {
             verdict: None,
             rule_id: None,
             requires_warrant: sub.requires_warrant,
-            details: format!("Agent '{}' proposed action '{}'", req.agent_id, req.tool_name),
+            details: format!(
+                "Agent '{}' proposed action '{}'",
+                req.agent_id, req.tool_name
+            ),
         });
 
         // --------------------------------------------------------------------
@@ -1824,9 +2025,12 @@ impl CageGovernanceKernel {
         if let Some(ref ctx) = req.context {
             let ctx_str = ctx.to_string().to_ascii_lowercase();
             // Check minimal cut set: unauthenticated external egress + sensitive/confidential payload
-            let has_sensitive_dlp = ctx_str.contains("confidential") || ctx_str.contains("restricted");
-            let has_unauth_egress = ctx_str.contains("unauthenticated_egress") || ctx_str.contains("unauthenticated external network");
-            let is_irreversible = ctx_str.contains("irreversible_terminal") && req.human_approval.is_none();
+            let has_sensitive_dlp =
+                ctx_str.contains("confidential") || ctx_str.contains("restricted");
+            let has_unauth_egress = ctx_str.contains("unauthenticated_egress")
+                || ctx_str.contains("unauthenticated external network");
+            let is_irreversible =
+                ctx_str.contains("irreversible_terminal") && req.human_approval.is_none();
 
             if (has_sensitive_dlp && has_unauth_egress) || is_irreversible {
                 let reason = "Minimal cut set triggered: unauthenticated external egress with sensitive payload or unapproved terminal action";
@@ -1861,7 +2065,8 @@ impl CageGovernanceKernel {
         step += 1;
         if let Some(ref ctx) = req.context {
             let ctx_str = ctx.to_string().to_ascii_lowercase();
-            if ctx_str.contains("omitted_safety_action") || ctx_str.contains("missing_safety_token") {
+            if ctx_str.contains("omitted_safety_action") || ctx_str.contains("missing_safety_token")
+            {
                 return self.emit_refusal(
                     req,
                     &argument_digest,
@@ -1875,7 +2080,8 @@ impl CageGovernanceKernel {
                     sub.requires_warrant,
                 );
             }
-            if ctx_str.contains("conflicting_state") || ctx_str.contains("contradictory_actuation") {
+            if ctx_str.contains("conflicting_state") || ctx_str.contains("contradictory_actuation")
+            {
                 return self.emit_refusal(
                     req,
                     &argument_digest,
@@ -1941,7 +2147,10 @@ impl CageGovernanceKernel {
                 &sub.substrate_contract_digest,
                 CageTier::Tier3Opa,
                 "CTRL_OPA_FORBIDDEN_TOOL",
-                &format!("Tool '{}' is not in substrate allowed_tools list", req.tool_name),
+                &format!(
+                    "Tool '{}' is not in substrate allowed_tools list",
+                    req.tool_name
+                ),
                 now_ms,
                 trace,
                 step,
@@ -1998,7 +2207,11 @@ impl CageGovernanceKernel {
         for claim in unverified_claims {
             if args_str.contains(claim) {
                 // If claim present without a valid warrant token, refuse
-                let has_valid_warrant = req.warrant_token.as_ref().map(|w| w.verify(&self.secret_key, now_ms)).unwrap_or(false);
+                let has_valid_warrant = req
+                    .warrant_token
+                    .as_ref()
+                    .map(|w| w.verify(&self.secret_key, now_ms))
+                    .unwrap_or(false);
                 if !has_valid_warrant {
                     return self.emit_refusal(
                         req,
@@ -2006,7 +2219,9 @@ impl CageGovernanceKernel {
                         &sub.substrate_contract_digest,
                         CageTier::Tier4Confidence,
                         CTRL_CONF_001,
-                        &format!("Unverified self-authorization claim detected in arguments: '{claim}'"),
+                        &format!(
+                            "Unverified self-authorization claim detected in arguments: '{claim}'"
+                        ),
                         now_ms,
                         trace,
                         step,
@@ -2024,7 +2239,10 @@ impl CageGovernanceKernel {
                     &sub.substrate_contract_digest,
                     CageTier::Tier4Confidence,
                     CTRL_CONF_001,
-                    &format!("Agent confidence score {:.2} below safety threshold 0.80", conf),
+                    &format!(
+                        "Agent confidence score {:.2} below safety threshold 0.80",
+                        conf
+                    ),
                     now_ms,
                     trace,
                     step,
@@ -2201,7 +2419,8 @@ impl CageGovernanceKernel {
         step += 1;
         if let Some(dose) = req.dose_mg {
             let cum_dose = self.dose_tracker.get_cumulative_24h(now_ms);
-            let dose_barrier = HealthcareDoseBarrier::new(sub.max_dose_mg, sub.max_dose_mg * 2.0, cum_dose, 0.50);
+            let dose_barrier =
+                HealthcareDoseBarrier::new(sub.max_dose_mg, sub.max_dose_mg * 2.0, cum_dose, 0.50);
             if let Err((code, reason)) = dose_barrier.evaluate(dose) {
                 return self.emit_refusal(
                     req,
@@ -2219,7 +2438,12 @@ impl CageGovernanceKernel {
         }
         if let Some(amt) = req.amount_usd {
             let cum_exposure = self.exposure_tracker.get_cumulative_24h(now_ms);
-            let fin_barrier = FinanceBoundingBarrier::new(sub.max_single_transfer_usd, sub.fiscal_cap_usd, cum_exposure, 1.0);
+            let fin_barrier = FinanceBoundingBarrier::new(
+                sub.max_single_transfer_usd,
+                sub.fiscal_cap_usd,
+                cum_exposure,
+                1.0,
+            );
             if let Err((code, reason)) = fin_barrier.evaluate(amt) {
                 return self.emit_refusal(
                     req,
@@ -2287,7 +2511,8 @@ impl CageGovernanceKernel {
         }
         if let Some(amt) = req.amount_usd {
             self.exposure_tracker.record(now_ms, amt);
-            self.keyed_exposure_tracker.record(&req.agent_id, now_ms, amt);
+            self.keyed_exposure_tracker
+                .record(&req.agent_id, now_ms, amt);
         }
 
         // --------------------------------------------------------------------
@@ -2319,7 +2544,10 @@ impl CageGovernanceKernel {
             verdict: Some(CageVerdict::Clear),
             rule_id: Some("CAGE_8_TIERS_CLEARED".to_string()),
             requires_warrant: sub.requires_warrant,
-            details: format!("Decision receipt '{}' signed with Clear verdict", receipt.receipt_id),
+            details: format!(
+                "Decision receipt '{}' signed with Clear verdict",
+                receipt.receipt_id
+            ),
         });
 
         step += 1;
@@ -2396,7 +2624,10 @@ impl CageGovernanceKernel {
             verdict: Some(CageVerdict::Refuse),
             rule_id: Some(rule_id.to_string()),
             requires_warrant,
-            details: format!("Decision receipt '{}' signed with Refuse verdict ({})", receipt.receipt_id, rule_id),
+            details: format!(
+                "Decision receipt '{}' signed with Refuse verdict ({})",
+                receipt.receipt_id, rule_id
+            ),
         });
 
         step += 1;
@@ -2423,7 +2654,8 @@ impl CageGovernanceKernel {
 }
 
 // Global Singleton
-pub static GLOBAL_CAGE_KERNEL: std::sync::OnceLock<CageGovernanceKernel> = std::sync::OnceLock::new();
+pub static GLOBAL_CAGE_KERNEL: std::sync::OnceLock<CageGovernanceKernel> =
+    std::sync::OnceLock::new();
 
 /// Returns the process-wide CAGE Governance Kernel singleton.
 pub fn global_cage_kernel() -> &'static CageGovernanceKernel {
@@ -2686,10 +2918,30 @@ mod tests {
         let writer = CageEvidenceWriter::new(true, Some(secret.to_vec()));
 
         let r1 = CageDecisionReceipt::create_and_sign(
-            "agent-01", "tool_a", "arg1", "sub1", CageVerdict::Clear, CageTier::Tier8Fiscal, "RULE_1", vec![], None, 100, secret,
+            "agent-01",
+            "tool_a",
+            "arg1",
+            "sub1",
+            CageVerdict::Clear,
+            CageTier::Tier8Fiscal,
+            "RULE_1",
+            vec![],
+            None,
+            100,
+            secret,
         );
         let r2 = CageDecisionReceipt::create_and_sign(
-            "agent-01", "tool_b", "arg2", "sub1", CageVerdict::Clear, CageTier::Tier8Fiscal, "RULE_2", vec![], None, 200, secret,
+            "agent-01",
+            "tool_b",
+            "arg2",
+            "sub1",
+            CageVerdict::Clear,
+            CageTier::Tier8Fiscal,
+            "RULE_2",
+            vec![],
+            None,
+            200,
+            secret,
         );
 
         let e1 = writer.append_receipt(r1).unwrap();
@@ -2702,7 +2954,17 @@ mod tests {
 
         // Tampered receipt rejection
         let mut bad_r = CageDecisionReceipt::create_and_sign(
-            "agent-01", "tool_c", "arg3", "sub1", CageVerdict::Clear, CageTier::Tier8Fiscal, "RULE_3", vec![], None, 300, secret,
+            "agent-01",
+            "tool_c",
+            "arg3",
+            "sub1",
+            CageVerdict::Clear,
+            CageTier::Tier8Fiscal,
+            "RULE_3",
+            vec![],
+            None,
+            300,
+            secret,
         );
         bad_r.rule_id = "TAMPERED".to_string(); // Invalidate digest
         let res = writer.append_receipt(bad_r);
@@ -2712,11 +2974,23 @@ mod tests {
         // Fail-closed availability
         writer.set_available(false);
         let good_r = CageDecisionReceipt::create_and_sign(
-            "agent-01", "tool_d", "arg4", "sub1", CageVerdict::Clear, CageTier::Tier8Fiscal, "RULE_4", vec![], None, 400, secret,
+            "agent-01",
+            "tool_d",
+            "arg4",
+            "sub1",
+            CageVerdict::Clear,
+            CageTier::Tier8Fiscal,
+            "RULE_4",
+            vec![],
+            None,
+            400,
+            secret,
         );
         let res_unavail = writer.append_receipt(good_r);
         assert!(res_unavail.is_err());
-        assert!(res_unavail.unwrap_err().contains("CAGE_EVIDENCE_SINK_UNAVAILABLE"));
+        assert!(res_unavail
+            .unwrap_err()
+            .contains("CAGE_EVIDENCE_SINK_UNAVAILABLE"));
     }
 
     #[test]
@@ -2783,7 +3057,10 @@ mod tests {
         out_of_order[2].tier = Some(CageTier::Tier1Ftra); // Tier 1 after Tier 1 (or lower)
         let rep_ooo = CageTraceVerifier::verify_trace_conformance(&out_of_order);
         assert!(!rep_ooo.is_conformant);
-        assert!(rep_ooo.violations.iter().any(|v| v.contains("TRACE_OUT_OF_ORDER_TIER")));
+        assert!(rep_ooo
+            .violations
+            .iter()
+            .any(|v| v.contains("TRACE_OUT_OF_ORDER_TIER")));
 
         // Actuation without clear receipt
         let no_receipt = vec![
@@ -2802,14 +3079,20 @@ mod tests {
         ];
         let rep_no_rcpt = CageTraceVerifier::verify_trace_conformance(&no_receipt);
         assert!(!rep_no_rcpt.is_conformant);
-        assert!(rep_no_rcpt.violations.iter().any(|v| v.contains("ILLEGAL_ACTUATION_WITHOUT_CLEAR_RECEIPT")));
+        assert!(rep_no_rcpt
+            .violations
+            .iter()
+            .any(|v| v.contains("ILLEGAL_ACTUATION_WITHOUT_CLEAR_RECEIPT")));
 
         // Reversed timestamp / clock skew
         let mut clock_skew = valid_trace.clone();
         clock_skew[2].timestamp_ms = 99; // Decreases from 101 to 99
         let rep_skew = CageTraceVerifier::verify_trace_conformance(&clock_skew);
         assert!(!rep_skew.is_conformant);
-        assert!(rep_skew.violations.iter().any(|v| v.contains("NON_MONOTONIC_TIMESTAMP")));
+        assert!(rep_skew
+            .violations
+            .iter()
+            .any(|v| v.contains("NON_MONOTONIC_TIMESTAMP")));
     }
 
     #[test]
@@ -2932,9 +3215,7 @@ mod tests {
 
         for _ in 0..num_threads {
             let b = barrier.clone();
-            handles.push(std::thread::spawn(move || {
-                b.try_spend(amount_per_thread)
-            }));
+            handles.push(std::thread::spawn(move || b.try_spend(amount_per_thread)));
         }
 
         let mut successes = 0;

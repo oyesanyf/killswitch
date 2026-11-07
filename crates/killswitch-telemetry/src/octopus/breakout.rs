@@ -7,10 +7,10 @@
 //! 3. Safe `Path::join` Traversal Defense: Rejects `:`, leading slashes, UNC `\\`, percent-encoded traversal,
 //!    and ensures every component is `Component::Normal` or `Component::CurDir`.
 
+use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::{Component, Path, PathBuf};
-use parking_lot::RwLock;
 use url::Url;
 
 use killswitch_types::{KillSwitchError, KillSwitchResult};
@@ -25,7 +25,10 @@ pub fn validate_egress_url(url_str: &str, allow_local_inference: bool) -> KillSw
 
     // Inspect raw authority host before URL normalization to catch non-standard IP formats
     if let Some(after_scheme) = trimmed.split("://").nth(1) {
-        let authority = after_scheme.split(&['/', '?', '#'][..]).next().unwrap_or("");
+        let authority = after_scheme
+            .split(&['/', '?', '#'][..])
+            .next()
+            .unwrap_or("");
         let raw_host_port = authority.rsplit('@').next().unwrap_or(authority);
         let raw_host = if raw_host_port.starts_with('[') {
             raw_host_port.split(']').next().unwrap_or(raw_host_port)
@@ -44,7 +47,8 @@ pub fn validate_egress_url(url_str: &str, allow_local_inference: bool) -> KillSw
         }
     }
 
-    let parsed = Url::parse(trimmed).map_err(|e| KillSwitchError::OctopusViolation(e.to_string()))?;
+    let parsed =
+        Url::parse(trimmed).map_err(|e| KillSwitchError::OctopusViolation(e.to_string()))?;
 
     // Only http and https permitted
     let scheme = parsed.scheme().to_ascii_lowercase();
@@ -86,7 +90,11 @@ pub fn validate_egress_url(url_str: &str, allow_local_inference: bool) -> KillSw
                 }
             } else if lower == "localhost" || lower.ends_with(".localhost") {
                 if allow_local_inference
-                    && (port == 11434 || port == 3030 || port == 5000 || port == 8000 || port == 8080)
+                    && (port == 11434
+                        || port == 3030
+                        || port == 5000
+                        || port == 8000
+                        || port == 8080)
                 {
                     return Ok(());
                 }
@@ -148,7 +156,11 @@ fn is_non_standard_ip_host_encoding(host: &str) -> bool {
     false
 }
 
-fn validate_ipv4_literal(ip: Ipv4Addr, port: u16, allow_local_inference: bool) -> KillSwitchResult<()> {
+fn validate_ipv4_literal(
+    ip: Ipv4Addr,
+    port: u16,
+    allow_local_inference: bool,
+) -> KillSwitchResult<()> {
     let octets = ip.octets();
 
     // 1. Current Network (0.0.0.0/8)
@@ -222,7 +234,11 @@ fn validate_ipv4_literal(ip: Ipv4Addr, port: u16, allow_local_inference: bool) -
     Ok(())
 }
 
-fn validate_ipv6_literal(ip: Ipv6Addr, port: u16, allow_local_inference: bool) -> KillSwitchResult<()> {
+fn validate_ipv6_literal(
+    ip: Ipv6Addr,
+    port: u16,
+    allow_local_inference: bool,
+) -> KillSwitchResult<()> {
     let octets = ip.octets();
     let segments = ip.segments();
 
@@ -395,11 +411,30 @@ pub fn validate_sandbox_path(
 
         if matches!(
             stem.as_str(),
-            "con" | "prn" | "aux" | "nul" | "conin$" | "conout$"
-                | "com1" | "com2" | "com3" | "com4" | "com5"
-                | "com6" | "com7" | "com8" | "com9"
-                | "lpt1" | "lpt2" | "lpt3" | "lpt4" | "lpt5"
-                | "lpt6" | "lpt7" | "lpt8" | "lpt9"
+            "con"
+                | "prn"
+                | "aux"
+                | "nul"
+                | "conin$"
+                | "conout$"
+                | "com1"
+                | "com2"
+                | "com3"
+                | "com4"
+                | "com5"
+                | "com6"
+                | "com7"
+                | "com8"
+                | "com9"
+                | "lpt1"
+                | "lpt2"
+                | "lpt3"
+                | "lpt4"
+                | "lpt5"
+                | "lpt6"
+                | "lpt7"
+                | "lpt8"
+                | "lpt9"
         ) {
             return Err(KillSwitchError::PathTraversalBlocked {
                 path: requested_path.to_string(),
@@ -502,7 +537,11 @@ impl BreakoutDefenseCoordinator {
             .insert(harness_name.into(), hash.into());
     }
 
-    pub fn evaluate_technical(&self, command_or_path: &str, payload: &str) -> TechnicalBreakoutVerdict {
+    pub fn evaluate_technical(
+        &self,
+        command_or_path: &str,
+        payload: &str,
+    ) -> TechnicalBreakoutVerdict {
         let mut detected_vectors = Vec::new();
         let lower = format!("{} {}", command_or_path, payload).to_ascii_lowercase();
 
@@ -518,12 +557,17 @@ impl BreakoutDefenseCoordinator {
 
         for &pattern in &docker_sockets {
             if lower.contains(pattern) {
-                detected_vectors.push(format!("Container daemon socket access detected: '{}'", pattern));
+                detected_vectors.push(format!(
+                    "Container daemon socket access detected: '{}'",
+                    pattern
+                ));
             }
         }
 
-        if lower.contains("nsenter") || lower.contains("unshare") || lower.contains("--privileged") {
-            detected_vectors.push("Host namespace access or privileged container spawn attempt".to_string());
+        if lower.contains("nsenter") || lower.contains("unshare") || lower.contains("--privileged")
+        {
+            detected_vectors
+                .push("Host namespace access or privileged container spawn attempt".to_string());
         }
 
         // OpenAI Sept 2026 & Anthropic RSP ASL-3 Container / Kernel / Hypervisor Boundary Escape Vectors
@@ -646,7 +690,10 @@ impl BreakoutDefenseCoordinator {
                     || upper.contains(&format!("${}", key))
                     || upper.contains(&format!("%{}%", key)))
             {
-                detected_leaks.push(format!("Sensitive environment variable leak detected: '{}'", key));
+                detected_leaks.push(format!(
+                    "Sensitive environment variable leak detected: '{}'",
+                    key
+                ));
             }
         }
 
@@ -697,7 +744,12 @@ impl BreakoutDefenseCoordinator {
         }
     }
 
-    pub fn evaluate_behavioral(&self, action: &str, resource: &str, payload: &str) -> BehavioralBreakoutVerdict {
+    pub fn evaluate_behavioral(
+        &self,
+        action: &str,
+        resource: &str,
+        payload: &str,
+    ) -> BehavioralBreakoutVerdict {
         let mut detected_deviations = Vec::new();
         let lower = format!("{} {} {}", action, resource, payload).to_ascii_lowercase();
 
@@ -717,7 +769,10 @@ impl BreakoutDefenseCoordinator {
 
         for &marker in &evasion_markers {
             if lower.contains(marker) {
-                detected_deviations.push(format!("Network evasion or exfiltration channel detected: '{}'", marker));
+                detected_deviations.push(format!(
+                    "Network evasion or exfiltration channel detected: '{}'",
+                    marker
+                ));
             }
         }
 
@@ -803,8 +858,15 @@ impl BreakoutDefenseCoordinator {
         // OpenAI Sept 2026 DNS Resolver & Covert Channel Escape (OUTGOING):
         // Mathematical Shannon Entropy & Subdomain Label Analysis (Zero Hardcoded Domain Lists)
         for token in lower.split_whitespace() {
-            let clean_tok = token
-                .trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '.' && c != '-' && c != '/' && c != ':' && c != '+' && c != '=');
+            let clean_tok = token.trim_matches(|c: char| {
+                !c.is_ascii_alphanumeric()
+                    && c != '.'
+                    && c != '-'
+                    && c != '/'
+                    && c != ':'
+                    && c != '+'
+                    && c != '='
+            });
             let (host, _, _) = crate::rl_traffic::RlTrafficLearner::parse_host_and_port(clean_tok);
             let is_file_or_binary = token.contains('\\')
                 || host.contains('\\')
@@ -826,7 +888,11 @@ impl BreakoutDefenseCoordinator {
             }
             // Signature-Free Zero-Day Exploit / Obfuscated Shellcode Blob Detection:
             // Any contiguous non-URL payload token >= 48 chars with high Shannon entropy (H >= 4.55 bits/byte)
-            if !token.contains('\\') && !token.contains('/') && !clean_tok.contains('.') && clean_tok.len() >= 48 {
+            if !token.contains('\\')
+                && !token.contains('/')
+                && !clean_tok.contains('.')
+                && clean_tok.len() >= 48
+            {
                 let blob_entropy = crate::phaselock::compute_shannon_entropy(clean_tok);
                 if blob_entropy >= 4.55 {
                     detected_deviations.push(format!(
@@ -884,7 +950,10 @@ impl BreakoutDefenseCoordinator {
 
         for &marker in &memory_dump_markers {
             if lower.contains(marker) {
-                detected_violations.push(format!("Memory dumping or credential extraction probe detected: '{}'", marker));
+                detected_violations.push(format!(
+                    "Memory dumping or credential extraction probe detected: '{}'",
+                    marker
+                ));
             }
         }
 
@@ -910,19 +979,16 @@ impl BreakoutDefenseCoordinator {
         // Only record burst velocity when an indicator is present so normal multi-socket OS processes never false-positive
         if !tech.is_clean || !oper.is_clean || !behav.is_clean || !data.is_clean {
             let session_key = format!("{}:{}", action, resource);
-            let velocity = crate::rate_limit_backoff::global_agent_velocity_limiter().record_and_check(
-                &session_key,
-                action,
-                1,
-                (payload.len() / 4) as u32,
-                false,
-            );
+            let velocity = crate::rate_limit_backoff::global_agent_velocity_limiter()
+                .record_and_check(&session_key, action, 1, (payload.len() / 4) as u32, false);
             if velocity.is_anomalous {
                 if let Some(reason) = velocity.reason {
                     behav.is_clean = false;
                     behav.detected_deviations.push(format!(
                         "[EDR-RATE-LIMIT] {}: {}",
-                        velocity.owasp_risk.unwrap_or_else(|| "OWASP ASI09".to_string()),
+                        velocity
+                            .owasp_risk
+                            .unwrap_or_else(|| "OWASP ASI09".to_string()),
                         reason
                     ));
                 }
@@ -941,7 +1007,10 @@ impl BreakoutDefenseCoordinator {
         }
         if !behav.is_clean {
             risk_score += 0.35 * (behav.detected_deviations.len() as f64).min(2.0);
-            issues.push(format!("Behavioral ({})", behav.detected_deviations.join("; ")));
+            issues.push(format!(
+                "Behavioral ({})",
+                behav.detected_deviations.join("; ")
+            ));
         }
         if !data.is_clean {
             risk_score += 0.40 * (data.detected_violations.len() as f64).min(2.0);
@@ -949,32 +1018,39 @@ impl BreakoutDefenseCoordinator {
         }
 
         // Continuous Security Architecture (Oyesanya 2026 Taxonomy & Vassilev Sisyphean Bound)
-        let cont_verdict = crate::continuous_defense::global_continuous_defense().inspect_boundary(
-            action,
-            resource,
-            payload,
-            None,
-            1,
-        );
+        let cont_verdict = crate::continuous_defense::global_continuous_defense()
+            .inspect_boundary(action, resource, payload, None, 1);
         if !cont_verdict.is_clean {
             behav.is_clean = false;
             for v in &cont_verdict.detected_violations {
                 behav.detected_deviations.push(v.clone());
             }
-            issues.push(format!("ContinuousDefense ({})", cont_verdict.detected_violations.join("; ")));
+            issues.push(format!(
+                "ContinuousDefense ({})",
+                cont_verdict.detected_violations.join("; ")
+            ));
             risk_score = risk_score.max(cont_verdict.risk_score);
         }
 
-        let is_clean = tech.is_clean && oper.is_clean && behav.is_clean && data.is_clean && cont_verdict.is_clean;
+        let is_clean = tech.is_clean
+            && oper.is_clean
+            && behav.is_clean
+            && data.is_clean
+            && cont_verdict.is_clean;
         let live_os_suspicious_processes = Vec::new();
 
         let breakout_risk_score = risk_score.clamp(0.0, 1.0);
-        let frontier_framework_classification = if is_clean && live_os_suspicious_processes.is_empty() {
+        let frontier_framework_classification = if is_clean
+            && live_os_suspicious_processes.is_empty()
+        {
             "ASL-2 / OpenAI Preparedness-Low (Contained & Clean)".to_string()
-        } else if breakout_risk_score >= 0.70 || (!tech.is_clean && (!oper.is_clean || !behav.is_clean)) {
+        } else if breakout_risk_score >= 0.70
+            || (!tech.is_clean && (!oper.is_clean || !behav.is_clean))
+        {
             "Anthropic RSP ASL-4 / OpenAI Preparedness-Critical: Autonomous Replication & Self-Exfiltration (ARA)".to_string()
         } else {
-            "Anthropic RSP ASL-3 / OpenAI Preparedness-High: Sandbox & Harness Boundary Escape".to_string()
+            "Anthropic RSP ASL-3 / OpenAI Preparedness-High: Sandbox & Harness Boundary Escape"
+                .to_string()
         };
 
         let joined_issues = issues.join(" | ");
@@ -998,10 +1074,7 @@ impl BreakoutDefenseCoordinator {
         } else {
             format!(
                 "[{} | {}] Breakout defense intercepted violations (risk={:.2}): {}",
-                direction,
-                frontier_framework_classification,
-                breakout_risk_score,
-                joined_issues
+                direction, frontier_framework_classification, breakout_risk_score, joined_issues
             )
         };
 

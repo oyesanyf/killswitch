@@ -6,7 +6,6 @@
 //! 5. POST /v1/cage/quarantine
 //! 6. POST /v1/cage/release
 
-use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -14,6 +13,7 @@ use base64::Engine;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use rand::rngs::OsRng;
 use serde_json::json;
+use std::sync::Arc;
 use tower::ServiceExt;
 
 use killswitch_core::killchain::HostContainmentManager;
@@ -32,8 +32,7 @@ fn setup_test_server_state() -> Arc<ServerState> {
         "test_master_token_0123456789abcdef0123456789abcdef",
     );
     let temp_dir = tempfile::tempdir().unwrap();
-    let containment =
-        Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
+    let containment = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
     Arc::new(ServerState::with_defaults(containment))
 }
 
@@ -58,7 +57,10 @@ async fn test_substrate_endpoint_1_jwks() {
     let body_bytes = body_to_bytes(resp.into_body()).await;
     let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
 
-    let keys = json.get("keys").and_then(|k| k.as_array()).expect("keys array");
+    let keys = json
+        .get("keys")
+        .and_then(|k| k.as_array())
+        .expect("keys array");
     assert!(!keys.is_empty(), "JWKS must contain at least one key");
 
     let key = &keys[0];
@@ -118,7 +120,11 @@ async fn test_substrate_endpoint_2_normative_baseline() {
     sig_arr.copy_from_slice(&sig_bytes);
     let sig = Signature::from_bytes(&sig_arr);
 
-    assert!(state.signing_key.verifying_key().verify(&preimage, &sig).is_ok());
+    assert!(state
+        .signing_key
+        .verifying_key()
+        .verify(&preimage, &sig)
+        .is_ok());
 }
 
 #[tokio::test]
@@ -161,7 +167,11 @@ async fn test_substrate_endpoint_3_attest() {
     sig_arr.copy_from_slice(&sig_bytes);
     let sig = Signature::from_bytes(&sig_arr);
 
-    assert!(state.signing_key.verifying_key().verify(&preimage, &sig).is_ok());
+    assert!(state
+        .signing_key
+        .verifying_key()
+        .verify(&preimage, &sig)
+        .is_ok());
 }
 
 #[tokio::test]
@@ -224,7 +234,10 @@ async fn test_substrate_endpoint_4_conformal_validate() {
 
     let body_bytes = body_to_bytes(resp.into_body()).await;
     let val_resp: CageConformalValidateResponse = serde_json::from_slice(&body_bytes).unwrap();
-    assert!(!val_resp.admitted, "Score 20.0 must be rejected as non-conforming");
+    assert!(
+        !val_resp.admitted,
+        "Score 20.0 must be rejected as non-conforming"
+    );
     assert!(val_resp.p_value <= 0.05, "P-value must not exceed alpha");
     assert_eq!(val_resp.voter_consensus, "CONSENSUS_DENY");
 }
@@ -315,7 +328,12 @@ async fn test_substrate_endpoint_6_release() {
     };
     state.journal.record_quarantine(lease).unwrap();
     assert_eq!(state.journal.unexpired_leases().len(), 1);
-    assert_eq!(state.journal.get_generation_epoch("test-workload-release-01"), 1);
+    assert_eq!(
+        state
+            .journal
+            .get_generation_epoch("test-workload-release-01"),
+        1
+    );
 
     // Generate CAGE signer keypair and register in state
     let signer_key = SigningKey::generate(&mut OsRng);
@@ -351,7 +369,8 @@ async fn test_substrate_endpoint_6_release() {
     assert_eq!(resp.status(), StatusCode::OK);
 
     let body_bytes = body_to_bytes(resp.into_body()).await;
-    let receipt: CageQuarantineReleaseReceiptResponse = serde_json::from_slice(&body_bytes).unwrap();
+    let receipt: CageQuarantineReleaseReceiptResponse =
+        serde_json::from_slice(&body_bytes).unwrap();
 
     assert!(receipt.released);
     assert_eq!(receipt.enforcement_plane, "HOST_OS_KERNEL");
@@ -362,7 +381,12 @@ async fn test_substrate_endpoint_6_release() {
 
     // Verify lease was removed and epoch advanced
     assert_eq!(state.journal.unexpired_leases().len(), 0);
-    assert_eq!(state.journal.get_generation_epoch("test-workload-release-01"), 2);
+    assert_eq!(
+        state
+            .journal
+            .get_generation_epoch("test-workload-release-01"),
+        2
+    );
 
     // Verify receipt signature
     let unsigned_val = json!({
@@ -384,7 +408,11 @@ async fn test_substrate_endpoint_6_release() {
     sig_arr.copy_from_slice(&sig_bytes);
     let sig = Signature::from_bytes(&sig_arr);
 
-    assert!(state.signing_key.verifying_key().verify(&receipt_preimage, &sig).is_ok());
+    assert!(state
+        .signing_key
+        .verifying_key()
+        .verify(&receipt_preimage, &sig)
+        .is_ok());
 
     // Insufficient quorum count (< 2) rejected
     let bad_quorum = json!({

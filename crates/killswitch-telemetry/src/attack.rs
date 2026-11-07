@@ -3,9 +3,9 @@
 //! Models the 10 canonical MITRE ATT&CK killchain stages, sequence pattern matching,
 //! multi-stage progression tracking, and composite confidence amplification.
 
-use std::collections::HashSet;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 use killswitch_types::telemetry::{TelemetryEventKind, ThreatSeverity};
 
@@ -262,6 +262,8 @@ mod tests {
         let eval = matcher.evaluate_sequence(&timeline);
         assert_eq!(eval.stages_count, 2);
         assert!(eval.multi_stage_multiplier > 1.3);
-        assert!(eval.matched_patterns.contains(&"Multi-Hop Data Exfiltration Pipeline".to_string()));
+        assert!(eval
+            .matched_patterns
+            .contains(&"Multi-Hop Data Exfiltration Pipeline".to_string()));
     }
 }

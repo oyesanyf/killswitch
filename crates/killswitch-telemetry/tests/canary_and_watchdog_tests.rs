@@ -1,11 +1,11 @@
 //! Integration tests for Canaries, Watchdog & Honeytokens (Feature 18)
 
-use std::fs;
-use std::time::Duration;
 use killswitch_telemetry::canary::CanaryManager;
 use killswitch_telemetry::honeytokens::HoneytokenManager;
 use killswitch_telemetry::watchdog::{HardwareWatchdog, MemoryPressureLevel, WatchdogConfig};
 use killswitch_types::telemetry::ThreatSeverity;
+use std::fs;
+use std::time::Duration;
 
 #[test]
 fn test_t1_f18_01_canary_deployment_and_tripwire_audit() {

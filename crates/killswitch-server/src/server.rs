@@ -2,14 +2,14 @@
 //!
 //! Enforces loopback and control port 3030 preservation during full network containment.
 
-use std::future::Future;
-use std::net::SocketAddr;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
 use base64::Engine;
 use dashmap::DashMap;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use sha2::Digest;
+use std::future::Future;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 use tracing::info;
@@ -61,7 +61,8 @@ impl NonceReplayCache {
 
     pub fn purge_expired(&self) {
         let now = Instant::now();
-        self.entries.retain(|_, &mut inserted_at| now.duration_since(inserted_at) < self.ttl);
+        self.entries
+            .retain(|_, &mut inserted_at| now.duration_since(inserted_at) < self.ttl);
     }
 }
 
@@ -87,8 +88,8 @@ impl CageKeyManifestResolver {
     }
 
     pub fn load_jwks_json(&self, json_str: &str) -> Result<usize, String> {
-        let val: serde_json::Value = serde_json::from_str(json_str)
-            .map_err(|e| format!("Invalid JWKS JSON: {}", e))?;
+        let val: serde_json::Value =
+            serde_json::from_str(json_str).map_err(|e| format!("Invalid JWKS JSON: {}", e))?;
         let keys_arr = val
             .get("keys")
             .and_then(|k| k.as_array())
@@ -507,11 +508,15 @@ impl KillSwitchServer {
                     }
 
                     let token_deltas = if row.parent_pid > 0 {
-                        killswitch_adjudication::observe_parent_child_token_delta(row.parent_pid, row.pid)
+                        killswitch_adjudication::observe_parent_child_token_delta(
+                            row.parent_pid,
+                            row.pid,
+                        )
                     } else {
                         Vec::new()
                     };
-                    let has_priv_escalation = token_deltas.iter().any(|d| d.is_privilege_escalation());
+                    let has_priv_escalation =
+                        token_deltas.iter().any(|d| d.is_privilege_escalation());
 
                     // Fresh per-candidate breakout evaluation so OS process enumeration does not self-poison rate limits
                     let coord = killswitch_telemetry::BreakoutDefenseCoordinator::new();

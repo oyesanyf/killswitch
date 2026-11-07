@@ -354,7 +354,8 @@ fn test_challenge_apc_single_use_token_exhaustion_sequential() {
         "Failed condition must be C4_APPROVAL_REPLAY"
     );
     assert!(
-        dec2.reason.contains("Single-use ApprovalToken already consumed"),
+        dec2.reason
+            .contains("Single-use ApprovalToken already consumed"),
         "Reason must state token was consumed: {}",
         dec2.reason
     );
@@ -552,7 +553,10 @@ fn test_challenge_apc_envelope_expiry_boundaries() {
     let intent = permissive_intent();
     let dec_stale = pdp.evaluate(&env, &intent, &req_stale);
     assert!(!dec_stale.allowed);
-    assert_eq!(dec_stale.failed_condition.as_deref(), Some("C3_CONTEXT_EXPIRY"));
+    assert_eq!(
+        dec_stale.failed_condition.as_deref(),
+        Some("C3_CONTEXT_EXPIRY")
+    );
 
     // Case B: Request timestamp BEFORE envelope issue time
     let req_future = ApcActionRequest {
@@ -573,7 +577,10 @@ fn test_challenge_apc_envelope_expiry_boundaries() {
     };
     let dec_future = pdp.evaluate(&env, &intent, &req_future);
     assert!(!dec_future.allowed);
-    assert_eq!(dec_future.failed_condition.as_deref(), Some("C3_CONTEXT_EXPIRY"));
+    assert_eq!(
+        dec_future.failed_condition.as_deref(),
+        Some("C3_CONTEXT_EXPIRY")
+    );
 }
 
 // ============================================================================
@@ -631,8 +638,13 @@ fn test_challenge_apc_action_hash_mismatch_detection() {
     let dec = pdp.evaluate(&env, &intent, &req);
 
     assert!(!dec.allowed, "Hash mismatch must be denied");
-    assert_eq!(dec.failed_condition.as_deref(), Some("C4_APPROVAL_HASH_MISMATCH"));
-    assert!(dec.reason.contains("ApprovalToken action hash does not match"));
+    assert_eq!(
+        dec.failed_condition.as_deref(),
+        Some("C4_APPROVAL_HASH_MISMATCH")
+    );
+    assert!(dec
+        .reason
+        .contains("ApprovalToken action hash does not match"));
 }
 
 #[test]
@@ -691,7 +703,10 @@ fn test_challenge_apc_signature_tampering_and_forgery() {
     let dec = pdp.evaluate(&env, &intent, &req);
 
     assert!(!dec.allowed, "Forged HMAC signature must be denied");
-    assert_eq!(dec.failed_condition.as_deref(), Some("C4_APPROVAL_SIGNATURE_INVALID"));
+    assert_eq!(
+        dec.failed_condition.as_deref(),
+        Some("C4_APPROVAL_SIGNATURE_INVALID")
+    );
     assert!(dec.reason.contains("ApprovalToken HMAC signature invalid"));
 }
 
@@ -804,7 +819,11 @@ fn test_challenge_apc_pairwise_composition_privileged_execution_restrictions() {
         approval_token: None,
     };
     let dec_read = pdp.evaluate(&env, &intent, &req_read);
-    assert!(dec_read.allowed, "READ_CONFIDENTIAL step 1 must succeed: {:?}", dec_read.reason);
+    assert!(
+        dec_read.allowed,
+        "READ_CONFIDENTIAL step 1 must succeed: {:?}",
+        dec_read.reason
+    );
 
     // Step 2: Attempt PRIVILEGED_EXECUTION (e.g. sudo -n id)
     // Even with a valid ApprovalToken, composition rule MUST DENY!
@@ -844,7 +863,9 @@ fn test_challenge_apc_pairwise_composition_privileged_execution_restrictions() {
     );
     assert_eq!(dec_priv.failed_condition.as_deref(), Some("C2_COMPOSITION"));
     assert!(
-        dec_priv.reason.contains("no_privileged_execution_after_confidential_read"),
+        dec_priv
+            .reason
+            .contains("no_privileged_execution_after_confidential_read"),
         "Reason must name the violated pairwise restriction: {}",
         dec_priv.reason
     );
@@ -882,10 +903,8 @@ fn test_challenge_dynamic_binary_probe_posix_suid_renamed_executable() {
     // SGID only (0o2000) without SUID -> UnprivilegedStandard
     let mode_sgid_only = 0o2755;
     let probe_sgid = DynamicBinaryMetadataProbe::from_posix(mode_sgid_only, 0, 0);
-    let cmd_sgid = parse_semantic_command_with_probe(
-        "/usr/local/bin/mail_spooler --check",
-        Some(&probe_sgid),
-    );
+    let cmd_sgid =
+        parse_semantic_command_with_probe("/usr/local/bin/mail_spooler --check", Some(&probe_sgid));
 
     assert_eq!(
         cmd_sgid.privilege_class,
@@ -903,10 +922,8 @@ fn test_challenge_dynamic_binary_probe_linux_capabilities_mask() {
     assert!(probe_cap.has_linux_capabilities);
     assert!(probe_cap.is_privileged_target());
 
-    let cmd = parse_semantic_command_with_probe(
-        "/tmp/custom_container_helper --fork",
-        Some(&probe_cap),
-    );
+    let cmd =
+        parse_semantic_command_with_probe("/tmp/custom_container_helper --fork", Some(&probe_cap));
 
     assert_eq!(
         cmd.privilege_class,
@@ -1026,10 +1043,7 @@ fn test_challenge_dynamic_binary_probe_as_invoker_not_privileged() {
     let path = temp.path();
     let probe = DynamicBinaryMetadataProbe::probe_path(path).unwrap();
 
-    assert_eq!(
-        probe.elevation_requirement,
-        ElevationRequirement::AsInvoker
-    );
+    assert_eq!(probe.elevation_requirement, ElevationRequirement::AsInvoker);
     assert!(!probe.is_privileged_target());
 
     let fwd_path = path.to_str().unwrap().replace('\\', "/");
@@ -1121,7 +1135,10 @@ fn test_challenge_apc_e2e_renamed_executable_requires_token_and_enforces_lifecyc
         !dec_no_token.allowed,
         "Renamed binary requiring administrator MUST BE DENIED when no ApprovalToken is provided!"
     );
-    assert_eq!(dec_no_token.failed_condition.as_deref(), Some("C4_APPROVAL_MISSING"));
+    assert_eq!(
+        dec_no_token.failed_condition.as_deref(),
+        Some("C4_APPROVAL_MISSING")
+    );
     assert!(
         dec_no_token
             .reason
@@ -1163,7 +1180,10 @@ fn test_challenge_apc_e2e_renamed_executable_requires_token_and_enforces_lifecyc
         !dec_replay.allowed,
         "Replay of ApprovalToken on renamed binary must be denied!"
     );
-    assert_eq!(dec_replay.failed_condition.as_deref(), Some("C4_APPROVAL_REPLAY"));
+    assert_eq!(
+        dec_replay.failed_condition.as_deref(),
+        Some("C4_APPROVAL_REPLAY")
+    );
 
     // Case 4: Subsequent External Transmit in same session -> DENIED by composition!
     let req_egress = ApcActionRequest {
@@ -1188,7 +1208,10 @@ fn test_challenge_apc_e2e_renamed_executable_requires_token_and_enforces_lifecyc
         !dec_egress.allowed,
         "External transmit after privileged execution must be denied by composition rule!"
     );
-    assert_eq!(dec_egress.failed_condition.as_deref(), Some("C2_COMPOSITION"));
+    assert_eq!(
+        dec_egress.failed_condition.as_deref(),
+        Some("C2_COMPOSITION")
+    );
     assert!(
         dec_egress
             .reason
@@ -1224,8 +1247,7 @@ fn test_defect_tokenize_command_strips_windows_backslashes() {
 
     // REMEDIATED: Windows path backslashes inside double quotes are preserved
     assert_eq!(
-        tokens[0],
-        r#"C:\Program Files\App\updater.exe"#,
+        tokens[0], r#"C:\Program Files\App\updater.exe"#,
         "Remediated: Backslashes in quoted path are preserved"
     );
     assert_eq!(tokens[1], "--check");
@@ -1245,10 +1267,8 @@ fn test_defect_non_root_suid_target_user_delegation_unreachable() {
     );
 
     // Confirm that parse_semantic_command_with_probe classifies as TargetUserDelegation:
-    let cmd = parse_semantic_command_with_probe(
-        "/usr/local/bin/service_worker --run",
-        Some(&probe_user),
-    );
+    let cmd =
+        parse_semantic_command_with_probe("/usr/local/bin/service_worker --run", Some(&probe_user));
 
     assert_eq!(
         cmd.privilege_class,

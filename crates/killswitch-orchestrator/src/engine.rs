@@ -8,11 +8,11 @@ use tokio::sync::RwLock;
 
 use killswitch_adjudication::ZeroFalsePositiveAdjudicator;
 use killswitch_core::killchain::HostContainmentManager;
-use killswitch_telemetry::{
-    global_cage_kernel, CageDecisionReceipt, CageEvaluationRequest, CageVerdict,
-    CageWarrantToken, HitlConsensusApproval,
-};
 use killswitch_telemetry::otel_lineage::EndpointLineageEngine;
+use killswitch_telemetry::{
+    global_cage_kernel, CageDecisionReceipt, CageEvaluationRequest, CageVerdict, CageWarrantToken,
+    HitlConsensusApproval,
+};
 use killswitch_types::adjudication::ThreatCandidate;
 use killswitch_types::errors::{KillSwitchError, Result};
 use killswitch_types::graph::{
@@ -73,26 +73,33 @@ impl KillSwitchOrchestrator {
                 .unwrap_or_else(|_| PathBuf::from("."))
         });
 
-        let checkpointer: Arc<dyn StateCheckpointer> =
-            Arc::new(DurableFileCheckpointer::new(storage_dir).unwrap_or_else(|_| {
+        let checkpointer: Arc<dyn StateCheckpointer> = Arc::new(
+            DurableFileCheckpointer::new(storage_dir).unwrap_or_else(|_| {
                 let secure_temp = std::env::temp_dir().join(".killswitch_secure");
                 let _ = std::fs::create_dir_all(&secure_temp);
                 DurableFileCheckpointer::new(secure_temp).expect("tempdir checkpointer")
-            }));
+            }),
+        );
 
         let ollama = Arc::new(OllamaReasoningEngine::default());
 
         // Assemble standard 10-node StateGraph
         let builder = StateGraphBuilder::new()
             .add_node(LifecycleStage::Ingest, Arc::new(IngestNode))
-            .add_node(LifecycleStage::Correlate, Arc::new(CorrelateNode::new(None)))
+            .add_node(
+                LifecycleStage::Correlate,
+                Arc::new(CorrelateNode::new(None)),
+            )
             .add_node(
                 LifecycleStage::Adjudicate,
                 Arc::new(AdjudicateNode::new(adjudicator.clone())),
             )
             .add_node(
                 LifecycleStage::LineageTrigger,
-                Arc::new(LineageTriggerNode::new(lineage.clone(), adjudicator.clone())),
+                Arc::new(LineageTriggerNode::new(
+                    lineage.clone(),
+                    adjudicator.clone(),
+                )),
             )
             .add_node(
                 LifecycleStage::ReasonOllama,
@@ -127,7 +134,9 @@ impl KillSwitchOrchestrator {
                 Arc::new(|state| {
                     if state.mode == OrchestratorMode::Manual && state.operator_approval.is_none() {
                         LifecycleStage::Terminal
-                    } else if state.aggregate_threat_score >= 0.85 || !state.active_threats.is_empty() {
+                    } else if state.aggregate_threat_score >= 0.85
+                        || !state.active_threats.is_empty()
+                    {
                         LifecycleStage::Contain
                     } else {
                         LifecycleStage::Terminal
@@ -183,7 +192,9 @@ impl KillSwitchOrchestrator {
     pub async fn run_incident_cycle(&self) -> Result<KillSwitchGraphState> {
         let mut state = self.active_state.write().await;
         let entry = self.graph.entry_stage;
-        self.graph.run_until_pause_or_terminal(&mut state, entry).await?;
+        self.graph
+            .run_until_pause_or_terminal(&mut state, entry)
+            .await?;
         Ok(state.clone())
     }
 
@@ -349,7 +360,10 @@ pub fn evaluate_cage_guard(
     let mut effective_args = arguments.clone();
     if let Some(confab) = state.metadata.get("cage_confabulation") {
         if let Some(obj) = effective_args.as_object_mut() {
-            obj.insert("claim".to_string(), serde_json::Value::String(confab.clone()));
+            obj.insert(
+                "claim".to_string(),
+                serde_json::Value::String(confab.clone()),
+            );
         }
     }
     if let Some(override_args) = state.metadata.get("cage_arguments") {
@@ -428,12 +442,24 @@ pub fn evaluate_cage_guard(
                 "cage_receipt_id".to_string(),
                 resp.receipt.receipt_id.clone(),
             );
-            state.metadata.insert("cage_verdict".to_string(), "Clear".to_string());
-            state.metadata.insert("cage_last_verdict".to_string(), "Clear".to_string());
-            state.metadata.insert("cage_rule_id".to_string(), resp.rule_id.clone());
-            state.metadata.insert("cage_last_rule_id".to_string(), resp.rule_id);
-            state.metadata.insert("cage_tier".to_string(), format!("{:?}", resp.tier));
-            state.metadata.insert("cage_last_tier".to_string(), format!("{:?}", resp.tier));
+            state
+                .metadata
+                .insert("cage_verdict".to_string(), "Clear".to_string());
+            state
+                .metadata
+                .insert("cage_last_verdict".to_string(), "Clear".to_string());
+            state
+                .metadata
+                .insert("cage_rule_id".to_string(), resp.rule_id.clone());
+            state
+                .metadata
+                .insert("cage_last_rule_id".to_string(), resp.rule_id);
+            state
+                .metadata
+                .insert("cage_tier".to_string(), format!("{:?}", resp.tier));
+            state
+                .metadata
+                .insert("cage_last_tier".to_string(), format!("{:?}", resp.tier));
 
             Ok(resp.receipt)
         }
@@ -448,7 +474,9 @@ pub fn evaluate_cage_guard(
                     .unwrap_or_else(|| format!("CAGE policy verdict: {:?}", resp.verdict))
             });
 
-            state.metadata.insert("cage_refusal".to_string(), reason.clone());
+            state
+                .metadata
+                .insert("cage_refusal".to_string(), reason.clone());
             state.metadata.insert(
                 "cage_receipt_digest".to_string(),
                 resp.receipt.decision_digest.clone(),
@@ -469,12 +497,25 @@ pub fn evaluate_cage_guard(
                 "cage_receipt_id".to_string(),
                 resp.receipt.receipt_id.clone(),
             );
-            state.metadata.insert("cage_verdict".to_string(), format!("{:?}", resp.verdict));
-            state.metadata.insert("cage_last_verdict".to_string(), format!("{:?}", resp.verdict));
-            state.metadata.insert("cage_rule_id".to_string(), resp.rule_id.clone());
-            state.metadata.insert("cage_last_rule_id".to_string(), resp.rule_id.clone());
-            state.metadata.insert("cage_tier".to_string(), format!("{:?}", resp.tier));
-            state.metadata.insert("cage_last_tier".to_string(), format!("{:?}", resp.tier));
+            state
+                .metadata
+                .insert("cage_verdict".to_string(), format!("{:?}", resp.verdict));
+            state.metadata.insert(
+                "cage_last_verdict".to_string(),
+                format!("{:?}", resp.verdict),
+            );
+            state
+                .metadata
+                .insert("cage_rule_id".to_string(), resp.rule_id.clone());
+            state
+                .metadata
+                .insert("cage_last_rule_id".to_string(), resp.rule_id.clone());
+            state
+                .metadata
+                .insert("cage_tier".to_string(), format!("{:?}", resp.tier));
+            state
+                .metadata
+                .insert("cage_last_tier".to_string(), format!("{:?}", resp.tier));
 
             Err(KillSwitchError::GraphHalted(format!(
                 "CAGE PEP refused action '{}' by rule '{}' at {:?}: {}",

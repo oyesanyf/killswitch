@@ -6,7 +6,6 @@
 //! `ZeroFalsePositiveAdjudicator`, and if confirmed, triggers autonomous containment
 //! while preserving critical system PIDs.
 
-use std::sync::Arc;
 use killswitch_adjudication::voters::{
     AdjudicationContext, DlpClassification as AdjClassification, DlpPolicy as AdjPolicy,
     EgressVerdict as AdjEgressVerdict, LineageAdjudicationEvidence, LineageCausalLink,
@@ -21,6 +20,7 @@ use killswitch_telemetry::otel_lineage::{
 use killswitch_types::adjudication::{AdjudicationResult, EvidenceClass, ThreatCandidate};
 use killswitch_types::errors::Result;
 use killswitch_types::graph::KillSwitchGraphState;
+use std::sync::Arc;
 use tracing::info;
 
 pub struct LineageTriggerEvaluator {
@@ -40,18 +40,33 @@ impl LineageTriggerEvaluator {
     }
 
     /// Evaluates live endpoint taint states and handles autonomous DLP Lineage containment triggers.
-    pub async fn evaluate_dlp_trigger(&self, state: &mut KillSwitchGraphState) -> Result<Option<ThreatCandidate>> {
+    pub async fn evaluate_dlp_trigger(
+        &self,
+        state: &mut KillSwitchGraphState,
+    ) -> Result<Option<ThreatCandidate>> {
         let tainted_procs = self.lineage_engine.all_tainted_processes();
 
         for proc in tainted_procs {
-            let proc_key = self.lineage_engine.find_process_by_pid(proc.proc_key.pid).unwrap_or(proc.proc_key);
+            let proc_key = self
+                .lineage_engine
+                .find_process_by_pid(proc.proc_key.pid)
+                .unwrap_or(proc.proc_key);
 
             // Fast inline evaluation of egress state
             let destination = "https://egress-check.internal";
             let verdict = self.lineage_engine.evaluate_egress(proc_key, destination);
 
-            if let EgressVerdict::Block { reason, trace_id, classification, policy, source_hashes } = verdict {
-                if policy == DlpPolicy::Quarantine || classification == DlpClassification::CrownJewel {
+            if let EgressVerdict::Block {
+                reason,
+                trace_id,
+                classification,
+                policy,
+                source_hashes,
+            } = verdict
+            {
+                if policy == DlpPolicy::Quarantine
+                    || classification == DlpClassification::CrownJewel
+                {
                     let is_critical = is_critical_system_pid(proc_key.pid, &proc.exe_path);
 
                     let adj_verdict = AdjEgressVerdict::Block {
@@ -74,31 +89,37 @@ impl LineageTriggerEvaluator {
                         AdjBaggage::new(adj_class, adj_pol, &b.source_sha256)
                     });
 
-                    let adj_datasets: Vec<AdjDataset> = proc.input_datasets.iter().map(|d| {
-                        let adj_class = match d.facets.dlp_classification {
-                            DlpClassification::Public => AdjClassification::Public,
-                            DlpClassification::Internal => AdjClassification::Internal,
-                            DlpClassification::Confidential => AdjClassification::Confidential,
-                            DlpClassification::CrownJewel => AdjClassification::CrownJewel,
-                        };
-                        AdjDataset {
-                            namespace: d.namespace.clone(),
-                            name: d.name.clone(),
-                            facets: AdjFacets {
-                                content_sha256: d.facets.content_sha256.clone(),
-                                dlp_classification: adj_class,
-                            },
-                        }
-                    }).collect();
+                    let adj_datasets: Vec<AdjDataset> = proc
+                        .input_datasets
+                        .iter()
+                        .map(|d| {
+                            let adj_class = match d.facets.dlp_classification {
+                                DlpClassification::Public => AdjClassification::Public,
+                                DlpClassification::Internal => AdjClassification::Internal,
+                                DlpClassification::Confidential => AdjClassification::Confidential,
+                                DlpClassification::CrownJewel => AdjClassification::CrownJewel,
+                            };
+                            AdjDataset {
+                                namespace: d.namespace.clone(),
+                                name: d.name.clone(),
+                                facets: AdjFacets {
+                                    content_sha256: d.facets.content_sha256.clone(),
+                                    dlp_classification: adj_class,
+                                },
+                            }
+                        })
+                        .collect();
 
-                    let adj_links: Vec<LineageCausalLink> = proc.causal_links.iter().map(|l| {
-                        LineageCausalLink {
+                    let adj_links: Vec<LineageCausalLink> = proc
+                        .causal_links
+                        .iter()
+                        .map(|l| LineageCausalLink {
                             trace_id: l.span_context.trace_id().to_string(),
                             span_id: l.span_context.span_id().to_string(),
                             role: "INPUT".to_string(),
                             file_path: String::new(),
-                        }
-                    }).collect();
+                        })
+                        .collect();
 
                     let evidence = LineageAdjudicationEvidence {
                         actor_pid: proc_key.pid,
@@ -129,16 +150,31 @@ impl LineageTriggerEvaluator {
                     };
 
                     // Run through 5-layer Zero-False-Positive Adjudication Gate
-                    let adj_result = self.adjudicator.adjudicate_threat_candidate(&candidate, Some(&context)).await;
+                    let adj_result = self
+                        .adjudicator
+                        .adjudicate_threat_candidate(&candidate, Some(&context))
+                        .await;
                     if let AdjudicationResult::ConfirmedThreat { .. } = adj_result {
                         info!("🚨 [LINEAGE-AUTONOMOUS-TRIGGER] DLP Lineage confirmed threat for PID {}", proc_key.pid);
 
                         // Store Lineage Provenance in State Metadata
-                        state.metadata.insert("lineage_trace_id".to_string(), trace_id);
-                        state.metadata.insert("lineage_source_hashes".to_string(), source_hashes.join(","));
-                        state.metadata.insert("lineage_classification".to_string(), format!("{:?}", classification));
-                        state.metadata.insert("lineage_policy".to_string(), format!("{:?}", policy));
-                        state.metadata.insert("lineage_critical_pid_preserved".to_string(), is_critical.to_string());
+                        state
+                            .metadata
+                            .insert("lineage_trace_id".to_string(), trace_id);
+                        state
+                            .metadata
+                            .insert("lineage_source_hashes".to_string(), source_hashes.join(","));
+                        state.metadata.insert(
+                            "lineage_classification".to_string(),
+                            format!("{:?}", classification),
+                        );
+                        state
+                            .metadata
+                            .insert("lineage_policy".to_string(), format!("{:?}", policy));
+                        state.metadata.insert(
+                            "lineage_critical_pid_preserved".to_string(),
+                            is_critical.to_string(),
+                        );
 
                         return Ok(Some(candidate));
                     }

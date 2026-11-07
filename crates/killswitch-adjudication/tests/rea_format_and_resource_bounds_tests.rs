@@ -120,11 +120,7 @@ fn create_valid_elf64_bytes(rwx: bool) -> Vec<u8> {
     // Section header 0 at offset 64 (64 bytes)
     let sec_off = 64;
     // sh_flags = SHF_WRITE (0x1) | SHF_ALLOC (0x2) | SHF_EXECINSTR (0x4)
-    let flags: u64 = if rwx {
-        0x1 | 0x2 | 0x4
-    } else {
-        0x2 | 0x4
-    };
+    let flags: u64 = if rwx { 0x1 | 0x2 | 0x4 } else { 0x2 | 0x4 };
     buf[sec_off + 8..sec_off + 16].copy_from_slice(&flags.to_le_bytes());
     // sh_addr = 0x401000
     let addr: u64 = 0x40_1000;
@@ -319,7 +315,10 @@ fn test_win_trust_file_size_bound_enforcement() {
                 reason
             );
         }
-        other => panic!("Expected UntrustedIoError or UntrustedWritableLocation, got: {:?}", other),
+        other => panic!(
+            "Expected UntrustedIoError or UntrustedWritableLocation, got: {:?}",
+            other
+        ),
     }
 }
 
@@ -342,10 +341,16 @@ fn test_process_lineage_refresh_optimization() {
 
     // Immunity check on PID 0 and 4
     let pid0_verdict = inspect_process_lineage(0, None);
-    assert!(matches!(pid0_verdict, LineageImmunityVerdict::ImmuneTarget { pid: 0, .. }));
+    assert!(matches!(
+        pid0_verdict,
+        LineageImmunityVerdict::ImmuneTarget { pid: 0, .. }
+    ));
 
     let pid4_verdict = inspect_process_lineage(4, None);
-    assert!(matches!(pid4_verdict, LineageImmunityVerdict::ImmuneTarget { pid: 4, .. }));
+    assert!(matches!(
+        pid4_verdict,
+        LineageImmunityVerdict::ImmuneTarget { pid: 4, .. }
+    ));
 }
 
 #[test]
@@ -385,7 +390,10 @@ fn test_end_to_end_masquerade_spoof_escalation_in_rea_engine() {
 
     assert!(eval_bomb.masquerade_escalated);
     assert_eq!(eval_bomb.verdict, "MALICIOUS_MASQUERADE_SPOOF");
-    assert!(eval_bomb.explanation.contains("excessive section count") || eval_bomb.explanation.contains("binary format validation"));
+    assert!(
+        eval_bomb.explanation.contains("excessive section count")
+            || eval_bomb.explanation.contains("binary format validation")
+    );
 
     // Completely non-executable header posing as protected explorer.exe
     let eval_bad_magic = engine.evaluate_detector_candidate_with_payload(
@@ -398,7 +406,9 @@ fn test_end_to_end_masquerade_spoof_escalation_in_rea_engine() {
 
     assert!(eval_bad_magic.masquerade_escalated);
     assert_eq!(eval_bad_magic.verdict, "MALICIOUS_MASQUERADE_SPOOF");
-    assert!(eval_bad_magic.explanation.contains("non-executable payload header"));
+    assert!(eval_bad_magic
+        .explanation
+        .contains("non-executable payload header"));
 }
 
 #[test]
@@ -406,7 +416,8 @@ fn test_detect_binary_masquerade_spoof_disk_file_oversized() {
     let tmp = tempfile::tempdir().expect("Failed to create tempdir");
     let huge_protected = tmp.path().join("svchost.exe");
     let file = File::create(&huge_protected).expect("Failed to create file");
-    file.set_len(MAX_REA_FILE_BYTES + 512).expect("set_len failed");
+    file.set_len(MAX_REA_FILE_BYTES + 512)
+        .expect("set_len failed");
 
     let result = detect_binary_masquerade_spoof(
         huge_protected.to_str().unwrap(),

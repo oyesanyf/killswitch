@@ -124,8 +124,7 @@ impl ActiveProcessTarpit {
     ) -> Result<(), KillSwitchError> {
         use windows_sys::Win32::Foundation::CloseHandle;
         use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-            CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD,
-            THREADENTRY32,
+            CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
         };
         use windows_sys::Win32::System::Threading::{
             OpenThread, ResumeThread, SuspendThread, THREAD_QUERY_INFORMATION,
@@ -364,16 +363,29 @@ mod tests {
         assert!(tarpit.is_trapped(test_pid));
 
         // Task 1 attempts cleanup using remove_if with Arc::ptr_eq
-        let removed = tarpit.active_traps.remove_if(&test_pid, |_, val| Arc::ptr_eq(val, &flag1));
-        assert!(removed.is_none(), "Old task must NOT remove newly trapped entry!");
+        let removed = tarpit
+            .active_traps
+            .remove_if(&test_pid, |_, val| Arc::ptr_eq(val, &flag1));
+        assert!(
+            removed.is_none(),
+            "Old task must NOT remove newly trapped entry!"
+        );
 
         // Trap 2 must still be intact
         assert!(tarpit.is_trapped(test_pid));
-        assert!(Arc::ptr_eq(&tarpit.active_traps.get(&test_pid).unwrap(), &flag2));
+        assert!(Arc::ptr_eq(
+            &tarpit.active_traps.get(&test_pid).unwrap(),
+            &flag2
+        ));
 
         // Task 2 cleans up with its own flag
-        let removed2 = tarpit.active_traps.remove_if(&test_pid, |_, val| Arc::ptr_eq(val, &flag2));
-        assert!(removed2.is_some(), "Active task must successfully remove its own entry upon termination");
+        let removed2 = tarpit
+            .active_traps
+            .remove_if(&test_pid, |_, val| Arc::ptr_eq(val, &flag2));
+        assert!(
+            removed2.is_some(),
+            "Active task must successfully remove its own entry upon termination"
+        );
         assert!(!tarpit.is_trapped(test_pid));
     }
 }

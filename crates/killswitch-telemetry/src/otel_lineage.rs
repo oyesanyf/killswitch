@@ -17,8 +17,8 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use opentelemetry::trace::{
-    Link, Span, SpanContext, SpanId, SpanKind, TraceFlags, TraceId, TraceState,
-    Tracer, TracerProvider,
+    Link, Span, SpanContext, SpanId, SpanKind, TraceFlags, TraceId, TraceState, Tracer,
+    TracerProvider,
 };
 use serde::{Deserialize, Serialize};
 
@@ -626,7 +626,8 @@ impl EndpointLineageEngine {
         };
 
         self.file_table.insert(file_key, state.clone());
-        self.content_catalog.insert(sha256.to_ascii_lowercase(), state);
+        self.content_catalog
+            .insert(sha256.to_ascii_lowercase(), state);
     }
 
     /// Dynamically taints an active process from semantic entities identified at runtime,
@@ -677,7 +678,8 @@ impl EndpointLineageEngine {
         let is_long_lived = self.config.long_lived_process_names.contains(&exe_name);
 
         // Check if parent process exists and is tainted
-        let parent_state = parent_key.and_then(|pk| self.process_table.get(&pk).map(|e| e.value().clone()));
+        let parent_state =
+            parent_key.and_then(|pk| self.process_table.get(&pk).map(|e| e.value().clone()));
 
         let (active_sc, baggage, links, provenance_hops) = if let Some(parent) = parent_state {
             let mut hops = parent.provenance_hops.clone();
@@ -689,11 +691,18 @@ impl EndpointLineageEngine {
             let trace_seed = format!("TRACE:PROC:{}", child_key);
             let span_seed = format!("SPAN:PROC:{}:{}", exe_name, child_key);
             let sc = synthesize_deterministic_span_context(&trace_seed, &span_seed);
-            (sc, None, Vec::new(), vec![format!("{}:{}", exe_name, child_key.pid)])
+            (
+                sc,
+                None,
+                Vec::new(),
+                vec![format!("{}:{}", exe_name, child_key.pid)],
+            )
         };
 
         // Synthesize ProcessExec OpenTelemetry span
-        let mut builder = self.tracer.span_builder(format!("ProcessExec: {}", exe_path));
+        let mut builder = self
+            .tracer
+            .span_builder(format!("ProcessExec: {}", exe_path));
         builder.span_kind = Some(SpanKind::Internal);
         builder.links = Some(links.clone());
         let mut span = self.tracer.build(builder);
@@ -752,13 +761,20 @@ impl EndpointLineageEngine {
                 dlp_classification: file_state.baggage.classification,
             },
         };
-        if !proc_entry.input_datasets.iter().any(|d| d.name == dataset.name) {
+        if !proc_entry
+            .input_datasets
+            .iter()
+            .any(|d| d.name == dataset.name)
+        {
             proc_entry.input_datasets.push(dataset);
         }
 
         // Attach W3C Link with dataset role INPUT
         let link_attrs = vec![
-            opentelemetry::KeyValue::new("openlineage.dataset.role", DatasetRole::InputReader.as_str()),
+            opentelemetry::KeyValue::new(
+                "openlineage.dataset.role",
+                DatasetRole::InputReader.as_str(),
+            ),
             opentelemetry::KeyValue::new("file.path", file_state.path.clone()),
             opentelemetry::KeyValue::new("file.hash.sha256", file_state.content_sha256.clone()),
         ];
@@ -823,7 +839,11 @@ impl EndpointLineageEngine {
         }
 
         // Synthesize child SpanContext
-        let out_trace_seed = format!("TRACE:OUT:{}:{}", proc_state.active_span_context.trace_id(), out_path);
+        let out_trace_seed = format!(
+            "TRACE:OUT:{}:{}",
+            proc_state.active_span_context.trace_id(),
+            out_path
+        );
         let out_span_seed = format!("SPAN:OUT:{}:{}", out_file_key, out_sha256);
         let out_sc = synthesize_deterministic_span_context(&out_trace_seed, &out_span_seed);
 
@@ -873,7 +893,8 @@ impl EndpointLineageEngine {
 
         self.file_table.insert(out_file_key, out_file_state.clone());
         if !out_sha256.is_empty() {
-            self.content_catalog.insert(out_sha256.to_ascii_lowercase(), out_file_state);
+            self.content_catalog
+                .insert(out_sha256.to_ascii_lowercase(), out_file_state);
         }
     }
 
@@ -886,7 +907,11 @@ impl EndpointLineageEngine {
         dst_file_key: FileKey,
         dst_path: &str,
     ) {
-        let Some(src_state) = self.file_table.get(&src_file_key).map(|r| r.value().clone()) else {
+        let Some(src_state) = self
+            .file_table
+            .get(&src_file_key)
+            .map(|r| r.value().clone())
+        else {
             return;
         };
 
@@ -898,7 +923,11 @@ impl EndpointLineageEngine {
 
         let now = Utc::now();
         let copy_sc = synthesize_deterministic_span_context(
-            &format!("TRACE:COPY:{}:{}", src_state.origin_span_context.trace_id(), dst_path),
+            &format!(
+                "TRACE:COPY:{}:{}",
+                src_state.origin_span_context.trace_id(),
+                dst_path
+            ),
             &format!("SPAN:COPY:{}:{}", dst_file_key, src_state.content_sha256),
         );
         let dst_state = FileTaintState {
@@ -926,7 +955,11 @@ impl EndpointLineageEngine {
         new_file_key: FileKey,
         new_path: &str,
     ) {
-        let Some(old_state) = self.file_table.get(&old_file_key).map(|r| r.value().clone()) else {
+        let Some(old_state) = self
+            .file_table
+            .get(&old_file_key)
+            .map(|r| r.value().clone())
+        else {
             return;
         };
 
@@ -988,7 +1021,9 @@ impl EndpointLineageEngine {
         }
         if let Some(sha) = content_sha256 {
             let key_lc = sha.trim().to_ascii_lowercase();
-            if let Some(catalog_state) = self.content_catalog.get(&key_lc).map(|r| r.value().clone()) {
+            if let Some(catalog_state) =
+                self.content_catalog.get(&key_lc).map(|r| r.value().clone())
+            {
                 let rebound = FileTaintState {
                     file_key,
                     ..catalog_state
@@ -1034,7 +1069,13 @@ impl EndpointLineageEngine {
             } else {
                 Vec::new()
             };
-            (tid, baggage.classification, baggage.policy, enforced, hashes)
+            (
+                tid,
+                baggage.classification,
+                baggage.policy,
+                enforced,
+                hashes,
+            )
         };
 
         if is_enforced {
@@ -1077,10 +1118,7 @@ impl EndpointLineageEngine {
 
     /// Returns all currently tainted file artifacts.
     pub fn all_tainted_files(&self) -> Vec<FileTaintState> {
-        self.file_table
-            .iter()
-            .map(|f| f.value().clone())
-            .collect()
+        self.file_table.iter().map(|f| f.value().clone()).collect()
     }
 
     /// Resolves ProcessKey by numerical PID if known.
@@ -1193,7 +1231,10 @@ mod tests {
         );
 
         let zip_taint = engine.get_file_taint(&zip_key).unwrap();
-        assert_eq!(zip_taint.baggage.classification, DlpClassification::CrownJewel);
+        assert_eq!(
+            zip_taint.baggage.classification,
+            DlpClassification::CrownJewel
+        );
         assert_eq!(zip_taint.baggage.policy, DlpPolicy::Quarantine);
 
         // 5. curl.exe (5001) spawns, reads zip, and calls evaluate_egress
@@ -1270,7 +1311,10 @@ mod tests {
         let iterations = 1_000u32;
         for _ in 0..iterations {
             let v = engine.evaluate_egress(uploader_key, "https://attacker-c2.example.org/exfil");
-            assert!(v.is_block(), "Multi-hop copy/rename/archive/hash exfiltration must be blocked");
+            assert!(
+                v.is_block(),
+                "Multi-hop copy/rename/archive/hash exfiltration must be blocked"
+            );
         }
         let elapsed_ns = start.elapsed().as_nanos() as u64;
         let avg_ns = elapsed_ns / (iterations as u64);

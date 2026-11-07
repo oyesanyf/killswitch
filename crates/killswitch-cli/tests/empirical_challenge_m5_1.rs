@@ -43,8 +43,7 @@ const TEST_MASTER_TOKEN: &str = "test_master_token_0123456789abcdef0123456789abc
 fn setup_test_server_state() -> (Arc<ServerState>, tempfile::TempDir) {
     std::env::set_var("KILLSWITCH_MASTER_TOKEN", TEST_MASTER_TOKEN);
     let temp_dir = tempfile::tempdir().unwrap();
-    let containment =
-        Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
+    let containment = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
     (Arc::new(ServerState::with_defaults(containment)), temp_dir)
 }
 
@@ -112,8 +111,7 @@ async fn test_challenge_cyclic_langgraph_rapid_step_iterations() {
     let temp_dir = tempfile::tempdir().unwrap();
     let lineage = Arc::new(EndpointLineageEngine::new_in_memory());
     let adjudicator = Arc::new(ZeroFalsePositiveAdjudicator::new());
-    let containment =
-        Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
+    let containment = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
 
     let config = OrchestratorConfig {
         mode: OrchestratorMode::Autonomous,
@@ -152,8 +150,14 @@ async fn test_challenge_cyclic_langgraph_rapid_step_iterations() {
 async fn test_challenge_cyclic_langgraph_recursion_limit_enforcement() {
     // Construct an infinite loop: Ingest -> Correlate -> Ingest
     let builder = StateGraphBuilder::new()
-        .add_node(LifecycleStage::Ingest, Arc::new(DummyStepNode(LifecycleStage::Ingest)))
-        .add_node(LifecycleStage::Correlate, Arc::new(DummyStepNode(LifecycleStage::Correlate)))
+        .add_node(
+            LifecycleStage::Ingest,
+            Arc::new(DummyStepNode(LifecycleStage::Ingest)),
+        )
+        .add_node(
+            LifecycleStage::Correlate,
+            Arc::new(DummyStepNode(LifecycleStage::Correlate)),
+        )
         .add_edge(LifecycleStage::Ingest, LifecycleStage::Correlate)
         .add_edge(LifecycleStage::Correlate, LifecycleStage::Ingest)
         .set_entry_stage(LifecycleStage::Ingest)
@@ -163,7 +167,9 @@ async fn test_challenge_cyclic_langgraph_recursion_limit_enforcement() {
     let mut state = KillSwitchGraphState::new("inc-cycle-limit-test", OrchestratorMode::Autonomous);
 
     // Run until terminal: must halt and fail with GraphHalted recursion limit
-    let res = graph.run_until_pause_or_terminal(&mut state, LifecycleStage::Ingest).await;
+    let res = graph
+        .run_until_pause_or_terminal(&mut state, LifecycleStage::Ingest)
+        .await;
     assert!(res.is_err(), "Must reject cyclic recursion beyond limit");
 
     match res.unwrap_err() {
@@ -186,8 +192,7 @@ async fn test_challenge_cyclic_langgraph_recursion_limit_enforcement() {
 async fn test_challenge_cyclic_langgraph_rollback_and_probe_lifecycle() {
     // Build a graph containing: Contain -> Monitor -> [Conditional: eligible -> Rollback, else -> Terminal] -> Terminal
     let temp_dir = tempfile::tempdir().unwrap();
-    let containment =
-        Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
+    let containment = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
 
     // 1. Ineligible for rollback: should transition to Terminal without rolling back
     {
@@ -200,7 +205,10 @@ async fn test_challenge_cyclic_langgraph_rollback_and_probe_lifecycle() {
                     eligible_for_rollback: false,
                 }),
             )
-            .add_node(LifecycleStage::Terminal, Arc::new(DummyStepNode(LifecycleStage::Terminal)))
+            .add_node(
+                LifecycleStage::Terminal,
+                Arc::new(DummyStepNode(LifecycleStage::Terminal)),
+            )
             .add_conditional_edge(
                 LifecycleStage::Monitor,
                 Arc::new(|state| {
@@ -215,7 +223,10 @@ async fn test_challenge_cyclic_langgraph_rollback_and_probe_lifecycle() {
 
         let graph = builder.compile();
         let mut state = KillSwitchGraphState::new("inc-probe-test-1", OrchestratorMode::Autonomous);
-        let trans = graph.step(&mut state, LifecycleStage::Monitor).await.unwrap();
+        let trans = graph
+            .step(&mut state, LifecycleStage::Monitor)
+            .await
+            .unwrap();
 
         assert_eq!(trans.to_stage, LifecycleStage::Terminal);
     }
@@ -233,7 +244,9 @@ async fn test_challenge_cyclic_langgraph_rollback_and_probe_lifecycle() {
             )
             .add_node(
                 LifecycleStage::Rollback,
-                Arc::new(killswitch_orchestrator::nodes::RollbackNode::new(containment.clone())),
+                Arc::new(killswitch_orchestrator::nodes::RollbackNode::new(
+                    containment.clone(),
+                )),
             )
             .add_conditional_edge(
                 LifecycleStage::Monitor,
@@ -251,11 +264,20 @@ async fn test_challenge_cyclic_langgraph_rollback_and_probe_lifecycle() {
         let mut state = KillSwitchGraphState::new("inc-probe-test-2", OrchestratorMode::Autonomous);
         state.containment_status.isolated = true;
 
-        let trans1 = graph.step(&mut state, LifecycleStage::Monitor).await.unwrap();
+        let trans1 = graph
+            .step(&mut state, LifecycleStage::Monitor)
+            .await
+            .unwrap();
         assert_eq!(trans1.to_stage, LifecycleStage::Rollback);
 
-        let _trans2 = graph.step(&mut state, LifecycleStage::Rollback).await.unwrap();
-        assert!(!state.containment_status.isolated, "Rollback must disarm isolation");
+        let _trans2 = graph
+            .step(&mut state, LifecycleStage::Rollback)
+            .await
+            .unwrap();
+        assert!(
+            !state.containment_status.isolated,
+            "Rollback must disarm isolation"
+        );
         assert!(state.verify_trace_chain());
     }
 }
@@ -294,14 +316,19 @@ async fn test_challenge_checkpointer_tamper_injection_detection() {
     );
 
     assert!(state.verify_trace_chain());
-    checkpointer.save_checkpoint(&state).await.expect("Initial checkpoint save must succeed");
+    checkpointer
+        .save_checkpoint(&state)
+        .await
+        .expect("Initial checkpoint save must succeed");
 
     // Verify clean load first
     let clean = checkpointer.load_checkpoint(incident_id).await.unwrap();
     assert!(clean.is_some());
     assert!(clean.unwrap().verify_trace_chain());
 
-    let file_path = temp_dir.path().join(format!("checkpoint_{}.json", incident_id));
+    let file_path = temp_dir
+        .path()
+        .join(format!("checkpoint_{}.json", incident_id));
     assert!(file_path.exists());
 
     // Attack Scenario A: Tamper with step 1's output_digest on disk
@@ -311,7 +338,10 @@ async fn test_challenge_checkpointer_tamper_injection_detection() {
         std::fs::write(&file_path, tampered).unwrap();
 
         let load_res = checkpointer.load_checkpoint(incident_id).await;
-        assert!(load_res.is_err(), "Must reject checkpoint with tampered output digest");
+        assert!(
+            load_res.is_err(),
+            "Must reject checkpoint with tampered output digest"
+        );
         match load_res.unwrap_err() {
             KillSwitchError::CryptoError(msg) => {
                 assert!(msg.contains("BLAKE3 execution trace chain verification failed"));
@@ -328,7 +358,10 @@ async fn test_challenge_checkpointer_tamper_injection_detection() {
         std::fs::write(&file_path, tampered).unwrap();
 
         let load_res = checkpointer.load_checkpoint(incident_id).await;
-        assert!(load_res.is_err(), "Must reject checkpoint with tampered chain_hash");
+        assert!(
+            load_res.is_err(),
+            "Must reject checkpoint with tampered chain_hash"
+        );
     }
 
     // Attack Scenario C: Corrupt JSON structure / truncate
@@ -338,7 +371,10 @@ async fn test_challenge_checkpointer_tamper_injection_detection() {
         std::fs::write(&file_path, truncated).unwrap();
 
         let load_res = checkpointer.load_checkpoint(incident_id).await;
-        assert!(load_res.is_err(), "Must fail safely on truncated/malformed checkpoint file");
+        assert!(
+            load_res.is_err(),
+            "Must fail safely on truncated/malformed checkpoint file"
+        );
     }
 }
 
@@ -350,25 +386,58 @@ async fn test_challenge_checkpointer_tamper_injection_detection() {
 fn test_challenge_ollama_dynamic_memory_law_boundaries() {
     // Exact threshold boundary tests:
     // >= 48.0 GB -> qwen2.5:32b
-    assert_eq!(OllamaReasoningEngine::select_model_from_free_ram_gb(64.0), "qwen2.5:32b");
-    assert_eq!(OllamaReasoningEngine::select_model_from_free_ram_gb(48.0), "qwen2.5:32b");
+    assert_eq!(
+        OllamaReasoningEngine::select_model_from_free_ram_gb(64.0),
+        "qwen2.5:32b"
+    );
+    assert_eq!(
+        OllamaReasoningEngine::select_model_from_free_ram_gb(48.0),
+        "qwen2.5:32b"
+    );
 
     // 24.0 <= RAM < 48.0 -> qwen2.5:14b
-    assert_eq!(OllamaReasoningEngine::select_model_from_free_ram_gb(47.99), "qwen2.5:14b");
-    assert_eq!(OllamaReasoningEngine::select_model_from_free_ram_gb(24.0), "qwen2.5:14b");
+    assert_eq!(
+        OllamaReasoningEngine::select_model_from_free_ram_gb(47.99),
+        "qwen2.5:14b"
+    );
+    assert_eq!(
+        OllamaReasoningEngine::select_model_from_free_ram_gb(24.0),
+        "qwen2.5:14b"
+    );
 
     // 12.0 <= RAM < 24.0 -> qwen2.5:7b
-    assert_eq!(OllamaReasoningEngine::select_model_from_free_ram_gb(23.99), "qwen2.5:7b");
-    assert_eq!(OllamaReasoningEngine::select_model_from_free_ram_gb(12.0), "qwen2.5:7b");
+    assert_eq!(
+        OllamaReasoningEngine::select_model_from_free_ram_gb(23.99),
+        "qwen2.5:7b"
+    );
+    assert_eq!(
+        OllamaReasoningEngine::select_model_from_free_ram_gb(12.0),
+        "qwen2.5:7b"
+    );
 
     // 6.0 <= RAM < 12.0 -> qwen2.5:3b
-    assert_eq!(OllamaReasoningEngine::select_model_from_free_ram_gb(11.99), "qwen2.5:3b");
-    assert_eq!(OllamaReasoningEngine::select_model_from_free_ram_gb(6.0), "qwen2.5:3b");
+    assert_eq!(
+        OllamaReasoningEngine::select_model_from_free_ram_gb(11.99),
+        "qwen2.5:3b"
+    );
+    assert_eq!(
+        OllamaReasoningEngine::select_model_from_free_ram_gb(6.0),
+        "qwen2.5:3b"
+    );
 
     // RAM < 6.0 -> qwen2.5:1.5b
-    assert_eq!(OllamaReasoningEngine::select_model_from_free_ram_gb(5.99), "qwen2.5:1.5b");
-    assert_eq!(OllamaReasoningEngine::select_model_from_free_ram_gb(1.0), "qwen2.5:1.5b");
-    assert_eq!(OllamaReasoningEngine::select_model_from_free_ram_gb(0.1), "qwen2.5:1.5b");
+    assert_eq!(
+        OllamaReasoningEngine::select_model_from_free_ram_gb(5.99),
+        "qwen2.5:1.5b"
+    );
+    assert_eq!(
+        OllamaReasoningEngine::select_model_from_free_ram_gb(1.0),
+        "qwen2.5:1.5b"
+    );
+    assert_eq!(
+        OllamaReasoningEngine::select_model_from_free_ram_gb(0.1),
+        "qwen2.5:1.5b"
+    );
 
     // Invariant: Never append -coder
     for ram in [0.5, 3.0, 6.0, 9.0, 12.0, 18.0, 24.0, 36.0, 48.0, 96.0] {
@@ -424,7 +493,9 @@ async fn test_challenge_ollama_offline_and_slow_hang_400ms_timeout() {
 
         let engine = OllamaReasoningEngine::new(&format!("http://127.0.0.1:{}", port));
         let start = Instant::now();
-        let res = engine.evaluate_forensics("Adversarial slow hang test").await;
+        let res = engine
+            .evaluate_forensics("Adversarial slow hang test")
+            .await;
         let elapsed = start.elapsed();
 
         slow_server.abort();

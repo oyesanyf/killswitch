@@ -14,8 +14,8 @@ use killswitch_core::{
     freeze::NativeProcessFreezer,
     killchain::{is_critical_system_pid, KillChainHostManager, SimulatedNetworkIsolator},
     landlock::{
-        parse_linux_ipv4_hex, parse_linux_ipv6_hex, parse_proc_net_content,
-        LinuxNetlinkIsolator, TcpState,
+        parse_linux_ipv4_hex, parse_linux_ipv6_hex, parse_proc_net_content, LinuxNetlinkIsolator,
+        TcpState,
     },
     state_ledger::{StateLedger, GENESIS_HASH},
     tarpit::ActiveProcessTarpit,
@@ -134,13 +134,11 @@ fn test_linux_ipv4_little_endian_parsing() {
 #[test]
 fn test_linux_ipv6_little_endian_parsing() {
     // ::1 in /proc/net/tcp6 is 00000000000000000000000001000000
-    let ip6_loopback =
-        parse_linux_ipv6_hex("00000000000000000000000001000000").expect("Parse ::1");
+    let ip6_loopback = parse_linux_ipv6_hex("00000000000000000000000001000000").expect("Parse ::1");
     assert_eq!(ip6_loopback, Ipv6Addr::LOCALHOST);
 
     // :: (any) is 32 zeros
-    let ip6_any =
-        parse_linux_ipv6_hex("00000000000000000000000000000000").expect("Parse ::");
+    let ip6_any = parse_linux_ipv6_hex("00000000000000000000000000000000").expect("Parse ::");
     assert_eq!(ip6_any, Ipv6Addr::UNSPECIFIED);
 }
 
@@ -157,14 +155,23 @@ fn test_parse_proc_net_tcp_table() {
     assert_eq!(entries.len(), 4);
 
     // Entry 0: 127.0.0.1:3030 (0x0BD6 = 3030), state 0A (Listen)
-    assert_eq!(entries[0].local_addr, IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
+    assert_eq!(
+        entries[0].local_addr,
+        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))
+    );
     assert_eq!(entries[0].local_port, 3030);
     assert_eq!(entries[0].state, TcpState::Listen);
     assert!(entries[0].local_addr.is_loopback());
 
     // Entry 1: 192.168.2.1:49153 -> 8.8.8.8:53, state 01 (Established)
-    assert_eq!(entries[1].local_addr, IpAddr::V4(Ipv4Addr::new(192, 168, 2, 1)));
-    assert_eq!(entries[1].remote_addr, IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)));
+    assert_eq!(
+        entries[1].local_addr,
+        IpAddr::V4(Ipv4Addr::new(192, 168, 2, 1))
+    );
+    assert_eq!(
+        entries[1].remote_addr,
+        IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))
+    );
     assert_eq!(entries[1].remote_port, 53);
     assert_eq!(entries[1].state, TcpState::Established);
     assert!(!entries[1].local_addr.is_loopback());
@@ -180,7 +187,11 @@ fn test_linux_netlink_isolator_lifecycle() {
     let isolator = LinuxNetlinkIsolator::new();
     let preserved = vec![3030, 53, 67, 68];
     let receipt = isolator
-        .engage_quarantine(&preserved, "secops_linux", "Ransomware outbreak containment")
+        .engage_quarantine(
+            &preserved,
+            "secops_linux",
+            "Ransomware outbreak containment",
+        )
         .expect("Engage quarantine receipt");
 
     assert_eq!(receipt.engine, NetworkIsolationEngine::LinuxNetlink);
@@ -302,7 +313,9 @@ fn test_operator_auth_tier1_master_token() {
     let result = auth.authenticate(&creds);
     assert!(result.is_success());
     match result {
-        AuthResult::Success { method, operator, .. } => {
+        AuthResult::Success {
+            method, operator, ..
+        } => {
             assert_eq!(method, AuthMethod::MasterTokenBypass);
             assert_eq!(operator, "master_admin");
         }
@@ -384,7 +397,9 @@ fn test_operator_auth_3_strike_lockout_and_master_bypass() {
     let res1 = auth.authenticate(&wrong_creds);
     assert!(!res1.is_success());
     match res1 {
-        AuthResult::Failed { attempts_remaining, .. } => {
+        AuthResult::Failed {
+            attempts_remaining, ..
+        } => {
             assert_eq!(attempts_remaining, 2);
         }
         _ => panic!("Expected Failed with attempts_remaining = 2"),
@@ -394,7 +409,9 @@ fn test_operator_auth_3_strike_lockout_and_master_bypass() {
     let res2 = auth.authenticate(&wrong_creds);
     assert!(!res2.is_success());
     match res2 {
-        AuthResult::Failed { attempts_remaining, .. } => {
+        AuthResult::Failed {
+            attempts_remaining, ..
+        } => {
             assert_eq!(attempts_remaining, 1);
         }
         _ => panic!("Expected Failed with attempts_remaining = 1"),
@@ -404,7 +421,9 @@ fn test_operator_auth_3_strike_lockout_and_master_bypass() {
     let res3 = auth.authenticate(&wrong_creds);
     assert!(!res3.is_success());
     match res3 {
-        AuthResult::LockedOut { remaining_seconds, .. } => {
+        AuthResult::LockedOut {
+            remaining_seconds, ..
+        } => {
             assert!(remaining_seconds > 0);
         }
         _ => panic!("Expected LockedOut on 3rd failure"),
@@ -414,7 +433,9 @@ fn test_operator_auth_3_strike_lockout_and_master_bypass() {
     let res4 = auth.authenticate(&wrong_creds);
     assert!(!res4.is_success());
     match res4 {
-        AuthResult::LockedOut { remaining_seconds, .. } => {
+        AuthResult::LockedOut {
+            remaining_seconds, ..
+        } => {
             assert!(remaining_seconds > 0);
         }
         _ => panic!("Expected LockedOut result on subsequent attempt"),
@@ -482,8 +503,7 @@ fn test_caller_pid_anti_hijacking_validation() {
 #[test]
 fn test_state_ledger_atomic_persistence_and_blake3_chaining() {
     let temp = tempdir().expect("tempdir");
-    let mut ledger = StateLedger::open_or_init(Some(temp.path()))
-        .expect("Initialize state ledger");
+    let mut ledger = StateLedger::open_or_init(Some(temp.path())).expect("Initialize state ledger");
 
     // 1. Initial State rooted at GENESIS_HASH
     assert_eq!(ledger.snapshot().prev_hash, GENESIS_HASH);
@@ -551,12 +571,15 @@ fn test_state_ledger_atomic_persistence_and_blake3_chaining() {
     assert_eq!(ledger.snapshot().sequence_number, 2);
     assert_eq!(ledger.snapshot().history.len(), 2);
     // Backward hash chain integrity check
-    assert_eq!(ledger.snapshot().history[0].prev_event_hash, prev_event_hash);
+    assert_eq!(
+        ledger.snapshot().history[0].prev_event_hash,
+        prev_event_hash
+    );
     assert!(ledger.verify_integrity().is_ok());
 
     // 4. Persistence Reload & Tamper Detection Check
-    let reloaded = StateLedger::open_or_init(Some(temp.path()))
-        .expect("Reload state ledger from disk");
+    let reloaded =
+        StateLedger::open_or_init(Some(temp.path())).expect("Reload state ledger from disk");
     assert_eq!(reloaded.snapshot().sequence_number, 2);
     assert!(reloaded.verify_integrity().is_ok());
 }
@@ -650,11 +673,7 @@ async fn test_killchain_host_manager_lifecycle_and_probes() {
     };
 
     let disarmed_status = manager
-        .disarm_isolation(
-            "test_operator",
-            "Integration test disarm",
-            Some(&creds),
-        )
+        .disarm_isolation("test_operator", "Integration test disarm", Some(&creds))
         .await
         .expect("Disarm isolation");
 

@@ -1,8 +1,7 @@
 use killswitch_types::{
     adjudication::{
-        calculate_consensus, corroboration_multiplier, AuthenticodeChainStatus,
-        AuthenticodeStatus, BinaryTrustVerdict, ByzantineKillSwitchFraudProof,
-        EvidenceClass, VoteAction, VoteResult,
+        calculate_consensus, corroboration_multiplier, AuthenticodeChainStatus, AuthenticodeStatus,
+        BinaryTrustVerdict, ByzantineKillSwitchFraudProof, EvidenceClass, VoteAction, VoteResult,
     },
     identity::ProcessInstanceIdentity,
     status::constant_time_eq,
@@ -26,7 +25,11 @@ fn test_adversarial_fraud_proof_exhaustive_seal_bitflips() {
     assert!(proof.verify_seal(), "Virgin fraud proof seal must verify");
 
     let seal_bytes = proof.proof_seal.as_bytes();
-    assert_eq!(seal_bytes.len(), 64, "BLAKE3 hex seal must be 64 characters");
+    assert_eq!(
+        seal_bytes.len(),
+        64,
+        "BLAKE3 hex seal must be 64 characters"
+    );
 
     // Exhaustively flip every single bit in every hex character of the seal
     let mut total_bitflips_tested = 0;
@@ -87,9 +90,11 @@ fn test_adversarial_fraud_proof_field_level_mutations() {
     // 3. Mutate target_binary_hash
     {
         let mut p = baseline.clone();
-        p.target_binary_hash = "4b42b102b4d4b1a457c0e5a8f4c2c77f02d0cf3b1b6cf7f8e3f94a5e01b34a13".to_string();
+        p.target_binary_hash =
+            "4b42b102b4d4b1a457c0e5a8f4c2c77f02d0cf3b1b6cf7f8e3f94a5e01b34a13".to_string();
         assert!(!p.verify_seal());
-        p.target_binary_hash = "4B42B102B4D4B1A457C0E5A8F4C2C77F02D0CF3B1B6CF7F8E3F94A5E01B34A12".to_string();
+        p.target_binary_hash =
+            "4B42B102B4D4B1A457C0E5A8F4C2C77F02D0CF3B1B6CF7F8E3F94A5E01B34A12".to_string();
         assert!(!p.verify_seal(), "Case variation must invalidate hash");
     }
 
@@ -208,8 +213,14 @@ fn test_adversarial_single_voter_penalty_exact_math_and_threshold() {
     // Invariant: The killswitch requires >= 0.94 for auto-isolation, and >= 0.82 for manual confirmation.
     // A single voter must NEVER reach either threshold under any circumstances!
     assert!(score < 0.55);
-    assert!(score < 0.82, "Lone voter must NEVER reach manual confirmation threshold (0.82)");
-    assert!(score < 0.94, "Lone voter must NEVER trigger autonomous isolation threshold (0.94)");
+    assert!(
+        score < 0.82,
+        "Lone voter must NEVER reach manual confirmation threshold (0.82)"
+    );
+    assert!(
+        score < 0.94,
+        "Lone voter must NEVER trigger autonomous isolation threshold (0.94)"
+    );
 }
 
 #[test]
@@ -230,7 +241,10 @@ fn test_adversarial_same_class_multi_voter_sybil_attack() {
 
     let (score, class_count) = calculate_consensus(&sybil_votes);
 
-    assert_eq!(class_count, 1, "Even 10 voters in LiveNetwork must count as only 1 distinct class");
+    assert_eq!(
+        class_count, 1,
+        "Even 10 voters in LiveNetwork must count as only 1 distinct class"
+    );
 
     // Even with 10 x 1.0 votes, multiplier is 0.52 -> max score is 0.52
     let expected = 1.0f32 * 0.52f32;
@@ -279,18 +293,56 @@ fn test_adversarial_two_classes_cannot_trigger_auto_isolate() {
     let expected = 0.82f32;
     assert!((score - expected).abs() < 1e-4);
     // 0.82 can trigger AwaitingManualConfirmation (>= 0.82), but NOT autonomous Isolate (>= 0.94)
-    assert!(score < 0.94, "Two evidence classes must never breach auto-isolation threshold (0.94)");
+    assert!(
+        score < 0.94,
+        "Two evidence classes must never breach auto-isolation threshold (0.94)"
+    );
 }
 
 #[test]
 fn test_adversarial_veto_vote_hard_override() {
     // 5 high-confidence isolate votes across 5 orthogonal classes
     let mut votes = vec![
-        VoteResult::new(Some(4), VoteAction::Isolate, 1.0, EvidenceClass::LiveNetwork, "raw socket", "V1"),
-        VoteResult::new(Some(4), VoteAction::Isolate, 1.0, EvidenceClass::Behavior, "code injection", "V2"),
-        VoteResult::new(Some(4), VoteAction::Isolate, 1.0, EvidenceClass::Memory, "reflective dll", "V3"),
-        VoteResult::new(Some(4), VoteAction::Isolate, 1.0, EvidenceClass::StaticArtifact, "yara match", "V4"),
-        VoteResult::new(Some(4), VoteAction::Isolate, 1.0, EvidenceClass::ThreatIntel, "cve match", "V5"),
+        VoteResult::new(
+            Some(4),
+            VoteAction::Isolate,
+            1.0,
+            EvidenceClass::LiveNetwork,
+            "raw socket",
+            "V1",
+        ),
+        VoteResult::new(
+            Some(4),
+            VoteAction::Isolate,
+            1.0,
+            EvidenceClass::Behavior,
+            "code injection",
+            "V2",
+        ),
+        VoteResult::new(
+            Some(4),
+            VoteAction::Isolate,
+            1.0,
+            EvidenceClass::Memory,
+            "reflective dll",
+            "V3",
+        ),
+        VoteResult::new(
+            Some(4),
+            VoteAction::Isolate,
+            1.0,
+            EvidenceClass::StaticArtifact,
+            "yara match",
+            "V4",
+        ),
+        VoteResult::new(
+            Some(4),
+            VoteAction::Isolate,
+            1.0,
+            EvidenceClass::ThreatIntel,
+            "cve match",
+            "V5",
+        ),
     ];
 
     // Single Veto vote injected (negative weight)
@@ -303,7 +355,10 @@ fn test_adversarial_veto_vote_hard_override() {
     votes.push(veto);
 
     let (score, count) = calculate_consensus(&votes);
-    assert_eq!(score, 0.0, "Veto vote must collapse composite score to 0.0 immediately");
+    assert_eq!(
+        score, 0.0,
+        "Veto vote must collapse composite score to 0.0 immediately"
+    );
     assert_eq!(count, 0, "Vetoed consensus must return 0 classes");
 }
 
@@ -323,7 +378,8 @@ fn test_adversarial_binary_trust_verdict_strict_classification() {
             catalog_name: Some("delta.cat".to_string()),
         },
         BinaryTrustVerdict::TrustedProtectedHash {
-            blake3_hash: "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff".to_string(),
+            blake3_hash: "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+                .to_string(),
         },
         BinaryTrustVerdict::TrustedSystemPackage {
             package_name: Some("systemd".to_string()),
@@ -379,7 +435,8 @@ fn test_adversarial_binary_trust_verdict_strict_classification() {
             reason: "World writable temp folder".to_string(),
         },
         BinaryTrustVerdict::UntrustedUnsigned {
-            blake3_hash: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef".to_string(),
+            blake3_hash: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+                .to_string(),
         },
         BinaryTrustVerdict::UntrustedIoError {
             error: "Access is denied (os error 5)".to_string(),
@@ -435,7 +492,8 @@ fn test_adversarial_binary_trust_verdict_serde_roundtrip() {
 
     for v in variants {
         let json = serde_json::to_string(&v).expect("serialization failed");
-        let deserialized: BinaryTrustVerdict = serde_json::from_str(&json).expect("deserialization failed");
+        let deserialized: BinaryTrustVerdict =
+            serde_json::from_str(&json).expect("deserialization failed");
         assert_eq!(v, deserialized);
         assert_eq!(v.is_trusted(), deserialized.is_trusted());
     }

@@ -711,7 +711,9 @@ impl OsoAwsContainmentEngine {
                 doc.allowed_users.contains("*") || doc.allowed_users.contains(&user.user_id);
             let perm_ok = user.permissions.contains(&doc.required_permission)
                 && role_caps.contains(doc.required_permission.as_str())
-                && task_scope.allowed_actions.contains(&doc.required_permission);
+                && task_scope
+                    .allowed_actions
+                    .contains(&doc.required_permission);
             let scope_res_ok = task_scope.allows_resource(&doc.doc_id);
 
             if tenant_ok && clearance_ok && acl_ok && perm_ok && scope_res_ok {
@@ -845,7 +847,7 @@ impl OsoAwsContainmentEngine {
         let all_passed = sg_ok && rt_ok && iam_ok && dns_ok;
         let mut kill_switch_engaged = false;
         if !all_passed {
-            self.execute_kill_switch(& violations.join("; "), now_unix);
+            self.execute_kill_switch(&violations.join("; "), now_unix);
             kill_switch_engaged = true;
         }
 
@@ -909,11 +911,7 @@ impl OsoAwsContainmentEngine {
     /// 1. Sets service `desired_count = 0` and `auto_respawn_disabled = true`.
     /// 2. Terminates all running task IDs immediately.
     /// 3. Monotonically advances the cluster `generation_epoch` (`Gen N -> Gen N + 1`).
-    pub fn execute_kill_switch(
-        &self,
-        reason: &str,
-        now_unix: u64,
-    ) -> KillSwitchTerminationReport {
+    pub fn execute_kill_switch(&self, reason: &str, now_unix: u64) -> KillSwitchTerminationReport {
         let mut state = self.cluster_state.lock();
         let prev_desired = state.desired_count;
         let terminated: Vec<String> = std::mem::take(&mut state.running_task_ids);

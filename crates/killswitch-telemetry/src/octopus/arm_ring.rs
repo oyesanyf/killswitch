@@ -486,8 +486,7 @@ impl ArmContainmentRing {
         let sig_bytes = hex::decode(&token.signature_hex)
             .map_err(|e| KillSwitchError::CryptoError(format!("Invalid hex signature: {}", e)))?;
 
-        if sig_bytes.len() != expected_bytes.len()
-            || bool::from(!expected_bytes.ct_eq(&sig_bytes))
+        if sig_bytes.len() != expected_bytes.len() || bool::from(!expected_bytes.ct_eq(&sig_bytes))
         {
             return Err(KillSwitchError::MeshHmacVerificationFailed {
                 arm_id: self.arm_id,
@@ -552,7 +551,10 @@ impl ArmContainmentRing {
         let trimmed_res = resource.trim();
         if trimmed_res.starts_with("http://") || trimmed_res.starts_with("https://") {
             if let Err(ssrf_err) = crate::octopus::validate_egress_url(trimmed_res, false) {
-                let reason = format!("SSRF guard blocked egress from Arm {}: {}", self.arm_id, ssrf_err);
+                let reason = format!(
+                    "SSRF guard blocked egress from Arm {}: {}",
+                    self.arm_id, ssrf_err
+                );
                 self.sever(&reason).await?;
                 return Err(ssrf_err);
             }
@@ -631,7 +633,11 @@ impl ArmRingRegistry {
         self.rings.read().await.get(&arm_id).cloned()
     }
 
-    pub async fn sever_and_regenerate_arm(&self, arm_id: usize, reason: &str) -> KillSwitchResult<u64> {
+    pub async fn sever_and_regenerate_arm(
+        &self,
+        arm_id: usize,
+        reason: &str,
+    ) -> KillSwitchResult<u64> {
         let ring = self.get_ring(arm_id).await.ok_or_else(|| {
             KillSwitchError::OctopusViolation(format!("Arm ID {} not found in registry", arm_id))
         })?;
@@ -707,7 +713,13 @@ mod tests {
             .await
             .expect("regenerate");
         assert_eq!(new_gen, 2);
-        assert!(arm.validate_epoch(1).await.is_err(), "Stale epoch 1 must remain rejected");
-        assert!(arm.validate_epoch(2).await.is_ok(), "New epoch 2 must be active");
+        assert!(
+            arm.validate_epoch(1).await.is_err(),
+            "Stale epoch 1 must remain rejected"
+        );
+        assert!(
+            arm.validate_epoch(2).await.is_ok(),
+            "New epoch 2 must be active"
+        );
     }
 }

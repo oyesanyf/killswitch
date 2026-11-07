@@ -12,9 +12,7 @@ use chrono::Utc;
 use killswitch_types::{
     constant_time_eq,
     errors::KillSwitchError,
-    status::{
-        AuthMethod, AuthResult, LockoutState, OperatorAuthenticator, OperatorCredentials,
-    },
+    status::{AuthMethod, AuthResult, LockoutState, OperatorAuthenticator, OperatorCredentials},
 };
 use parking_lot::RwLock;
 #[cfg(target_os = "linux")]

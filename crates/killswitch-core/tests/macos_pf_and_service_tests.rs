@@ -4,11 +4,10 @@
 //! - Feature 31: Native OS Service Lifecycle (Win32 SCM, Linux systemd, macOS launchd, zero CLI tools, shutdown auto-disarm)
 
 use killswitch_core::{
-    default_service_manager, execute_host_disarm_unauthenticated,
-    generate_launchd_plist, generate_quarantine_rules, generate_systemd_unit,
-    get_active_darwin_sockets, is_critical_system_pid, LinuxServiceManager,
-    MacOsPfIsolator, MacOsServiceManager, NativeProcessFreezer, NativeServiceManager,
-    PF_DEVICE_PATH,
+    default_service_manager, execute_host_disarm_unauthenticated, generate_launchd_plist,
+    generate_quarantine_rules, generate_systemd_unit, get_active_darwin_sockets,
+    is_critical_system_pid, LinuxServiceManager, MacOsPfIsolator, MacOsServiceManager,
+    NativeProcessFreezer, NativeServiceManager, PF_DEVICE_PATH,
 };
 use killswitch_types::{
     service::{ServiceConfig, ServiceError, ServiceState},
@@ -95,8 +94,12 @@ fn test_f29_macos_pf_isolator_lifecycle_and_contract() {
     assert_eq!(receipt.engine, NetworkIsolationEngine::DarwinPf);
     assert!(receipt.session_id.contains("test_anchor_f29"));
     assert!(receipt.preserved_ports.contains(&DEFAULT_CONTROL_PORT));
-    assert!(receipt.preserved_ips.contains(&IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))));
-    assert!(receipt.preserved_ips.contains(&IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1))));
+    assert!(receipt
+        .preserved_ips
+        .contains(&IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))));
+    assert!(receipt
+        .preserved_ips
+        .contains(&IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1))));
     assert_eq!(receipt.engaged_by, "sec_admin");
 
     // Revert quarantine
@@ -210,19 +213,28 @@ fn test_f31_linux_systemd_unit_generation_and_filesystem_installer() {
     assert!(unit.contains("KillMode=process"));
 
     // 2. Install unit directly to filesystem
-    mgr.install_service(&config).expect("Service installation must succeed");
+    mgr.install_service(&config)
+        .expect("Service installation must succeed");
 
-    let unit_file = temp_dir.path().join("etc/systemd/system/killswitch.service");
+    let unit_file = temp_dir
+        .path()
+        .join("etc/systemd/system/killswitch.service");
     assert!(unit_file.exists(), "Unit file must be created on disk");
 
     // 3. Query status
-    let status = mgr.service_status("killswitch").expect("Query status must succeed");
+    let status = mgr
+        .service_status("killswitch")
+        .expect("Query status must succeed");
     assert!(status.is_installed, "Service must be marked installed");
     assert_eq!(status.name, "killswitch");
 
     // 4. Uninstall
-    mgr.uninstall_service("killswitch").expect("Uninstall must succeed");
-    assert!(!unit_file.exists(), "Unit file must be deleted upon uninstall");
+    mgr.uninstall_service("killswitch")
+        .expect("Uninstall must succeed");
+    assert!(
+        !unit_file.exists(),
+        "Unit file must be deleted upon uninstall"
+    );
 
     // 5. Subsequent uninstall returns NotFound
     let err = mgr.uninstall_service("killswitch");
@@ -259,21 +271,31 @@ fn test_f31_macos_launchd_plist_generation_and_filesystem_installer() {
     assert!(plist.contains("<key>KeepAlive</key>"));
 
     // 2. Install plist directly to filesystem
-    mgr.install_service(&config).expect("Service installation must succeed");
+    mgr.install_service(&config)
+        .expect("Service installation must succeed");
 
     let plist_file = temp_dir
         .path()
         .join("Library/LaunchDaemons/com.oshoosi.killswitch.plist");
-    assert!(plist_file.exists(), "Launchd plist file must be created on disk");
+    assert!(
+        plist_file.exists(),
+        "Launchd plist file must be created on disk"
+    );
 
     // 3. Query status
-    let status = mgr.service_status("killswitch").expect("Query status must succeed");
+    let status = mgr
+        .service_status("killswitch")
+        .expect("Query status must succeed");
     assert!(status.is_installed, "Service must be marked installed");
     assert_eq!(status.name, "killswitch");
 
     // 4. Uninstall
-    mgr.uninstall_service("killswitch").expect("Uninstall must succeed");
-    assert!(!plist_file.exists(), "Plist file must be deleted upon uninstall");
+    mgr.uninstall_service("killswitch")
+        .expect("Uninstall must succeed");
+    assert!(
+        !plist_file.exists(),
+        "Plist file must be deleted upon uninstall"
+    );
 }
 
 #[test]

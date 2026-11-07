@@ -265,9 +265,15 @@ impl ThreatVoter for DataLineageVoter {
         let is_critical = is_critical_system_pid(actor_pid, actor_exe);
 
         // Case 1: Active Egress Block on Quarantined / CrownJewel Data
-        if let EgressVerdict::Block { reason: _, trace_id } = &lineage.egress_verdict {
+        if let EgressVerdict::Block {
+            reason: _,
+            trace_id,
+        } = &lineage.egress_verdict
+        {
             let baggage = lineage.baggage.as_ref();
-            let source_hashes = baggage.map(|b| b.source_sha256.as_str()).unwrap_or("unknown");
+            let source_hashes = baggage
+                .map(|b| b.source_sha256.as_str())
+                .unwrap_or("unknown");
 
             if is_critical {
                 // Critical system process (e.g. powershell.exe) attempting egress of CrownJewel data:
@@ -333,7 +339,11 @@ impl ThreatVoter for DataLineageVoter {
 
         // Case 3: Legitimate Admin Process without Taint or Block
         if is_critical && lineage.egress_verdict == EgressVerdict::Allow {
-            let has_quarantine_taint = lineage.baggage.as_ref().map(|b| b.is_quarantine()).unwrap_or(false);
+            let has_quarantine_taint = lineage
+                .baggage
+                .as_ref()
+                .map(|b| b.is_quarantine())
+                .unwrap_or(false);
             if !has_quarantine_taint {
                 debug!(
                     "🛡️ [LINEAGE-BENIGN-VETO] Critical system process '{}' (PID {}) attested clean with zero quarantined taint",
@@ -485,9 +495,18 @@ impl ThreatVoter for LiveNetworkVoter {
         _context: Option<&AdjudicationContext>,
     ) -> Option<VoteResult> {
         if candidate.evidence_class == EvidenceClass::LiveNetwork
-            || candidate.detection_reason.to_ascii_lowercase().contains("c2")
-            || candidate.detection_reason.to_ascii_lowercase().contains("beacon")
-            || candidate.detection_reason.to_ascii_lowercase().contains("network")
+            || candidate
+                .detection_reason
+                .to_ascii_lowercase()
+                .contains("c2")
+            || candidate
+                .detection_reason
+                .to_ascii_lowercase()
+                .contains("beacon")
+            || candidate
+                .detection_reason
+                .to_ascii_lowercase()
+                .contains("network")
         {
             Some(VoteResult {
                 candidate_pid: candidate.pid,
@@ -630,7 +649,10 @@ impl ThreatVoter for MemoryVoter {
                 action: VoteAction::Isolate,
                 confidence: candidate.initial_confidence.max(0.92),
                 evidence_class: EvidenceClass::Memory,
-                explanation: format!("[Memory] Code injection or memory anomaly: {}", candidate.detection_reason),
+                explanation: format!(
+                    "[Memory] Code injection or memory anomaly: {}",
+                    candidate.detection_reason
+                ),
                 voter_name: self.name().to_string(),
                 weight: 1.0,
                 timestamp: chrono::Utc::now().to_rfc3339(),
@@ -676,14 +698,20 @@ impl ThreatVoter for StaticArtifactVoter {
     ) -> Option<VoteResult> {
         if candidate.evidence_class == EvidenceClass::StaticArtifact
             || candidate.yara_rule.is_some()
-            || candidate.detection_reason.to_ascii_lowercase().contains("yara")
+            || candidate
+                .detection_reason
+                .to_ascii_lowercase()
+                .contains("yara")
         {
             Some(VoteResult {
                 candidate_pid: candidate.pid,
                 action: VoteAction::Alert,
                 confidence: candidate.initial_confidence,
                 evidence_class: EvidenceClass::StaticArtifact,
-                explanation: format!("[StaticArtifact] Rule or signature match: {}", candidate.detection_reason),
+                explanation: format!(
+                    "[StaticArtifact] Rule or signature match: {}",
+                    candidate.detection_reason
+                ),
                 voter_name: self.name().to_string(),
                 weight: 1.0,
                 timestamp: chrono::Utc::now().to_rfc3339(),
@@ -728,16 +756,28 @@ impl ThreatVoter for ThreatIntelVoter {
         _context: Option<&AdjudicationContext>,
     ) -> Option<VoteResult> {
         if candidate.evidence_class == EvidenceClass::ThreatIntel
-            || candidate.detection_reason.to_ascii_lowercase().contains("cve")
-            || candidate.detection_reason.to_ascii_lowercase().contains("ioc")
-            || candidate.detection_reason.to_ascii_lowercase().contains("threat intel")
+            || candidate
+                .detection_reason
+                .to_ascii_lowercase()
+                .contains("cve")
+            || candidate
+                .detection_reason
+                .to_ascii_lowercase()
+                .contains("ioc")
+            || candidate
+                .detection_reason
+                .to_ascii_lowercase()
+                .contains("threat intel")
         {
             Some(VoteResult {
                 candidate_pid: candidate.pid,
                 action: VoteAction::Monitor,
                 confidence: candidate.initial_confidence.min(0.49),
                 evidence_class: EvidenceClass::ThreatIntel,
-                explanation: format!("[ThreatIntel] External feed correlation (capped at <= 0.49): {}", candidate.detection_reason),
+                explanation: format!(
+                    "[ThreatIntel] External feed correlation (capped at <= 0.49): {}",
+                    candidate.detection_reason
+                ),
                 voter_name: self.name().to_string(),
                 weight: 0.8,
                 timestamp: chrono::Utc::now().to_rfc3339(),
@@ -837,11 +877,7 @@ mod tests {
 
     #[test]
     fn test_taint_baggage_merge() {
-        let mut b1 = TaintBaggage::new(
-            DlpClassification::Internal,
-            DlpPolicy::Audit,
-            "hash1",
-        );
+        let mut b1 = TaintBaggage::new(DlpClassification::Internal, DlpPolicy::Audit, "hash1");
         let b2 = TaintBaggage::new(
             DlpClassification::CrownJewel,
             DlpPolicy::Quarantine,

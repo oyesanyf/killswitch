@@ -3,9 +3,8 @@ use std::sync::Arc;
 use std::thread;
 
 use killswitch_core::exec_sensor::{
-    clear_exec_events, default_process_sensor, get_recent_exec_events,
-    simulate_exec_event, ExecEvent, ExecSensorBuffer, NativeProcessSensor,
-    SimulatedProcessSensor,
+    clear_exec_events, default_process_sensor, get_recent_exec_events, simulate_exec_event,
+    ExecEvent, ExecSensorBuffer, NativeProcessSensor, SimulatedProcessSensor,
 };
 
 #[test]

@@ -7,10 +7,10 @@
 //! 3. Process working set memory trimming when memory budgets are exceeded.
 //! 4. System memory pressure monitoring (`sysinfo`).
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 use subtle::ConstantTimeEq;
 use sysinfo::{Pid, System};
 
@@ -32,8 +32,8 @@ pub enum MemoryPressureLevel {
 pub struct WatchdogConfig {
     pub heartbeat_interval: Duration,
     pub heartbeat_timeout: Duration,
-    pub max_daemon_memory_mb: u64, // Default 250 MB
-    pub warning_ram_threshold_mb: u64, // Default 600 MB
+    pub max_daemon_memory_mb: u64,      // Default 250 MB
+    pub warning_ram_threshold_mb: u64,  // Default 600 MB
     pub critical_ram_threshold_mb: u64, // Default 250 MB
 }
 

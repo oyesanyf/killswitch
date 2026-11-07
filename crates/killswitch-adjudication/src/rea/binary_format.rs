@@ -601,16 +601,16 @@ fn parse_elf_binary(bytes: &[u8]) -> Result<BinaryFormatInfo, String> {
                 has_rwx = true;
             }
 
-            let entropy =
-                if let Some(end) = (sh_offset_val as usize).checked_add(sh_size as usize) {
-                    if end <= bytes.len() && sh_size > 0 {
-                        calculate_entropy(&bytes[sh_offset_val as usize..end])
-                    } else {
-                        0.0
-                    }
+            let entropy = if let Some(end) = (sh_offset_val as usize).checked_add(sh_size as usize)
+            {
+                if end <= bytes.len() && sh_size > 0 {
+                    calculate_entropy(&bytes[sh_offset_val as usize..end])
                 } else {
                     0.0
-                };
+                }
+            } else {
+                0.0
+            };
 
             sections.push(SectionInfo {
                 name: format!("elf_sec_{}", i),

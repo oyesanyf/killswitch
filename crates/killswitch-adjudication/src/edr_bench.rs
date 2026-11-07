@@ -36,12 +36,10 @@ pub const MAX_RULE_SOURCE_BYTES: usize = 64 * 1024;
 /// Embedded fallback bytes for the benchmark corpus so `killswitch.exe` works from any CWD.
 const EMBEDDED_THREAT_ELF: &[u8] =
     include_bytes!("../../../benchmarks/artifacts/threats/ebpf_container_escape.elf");
-const EMBEDDED_LS_BENIGN_ELF: &[u8] = include_bytes!(
-    "../../../benchmarks/artifacts/golden_baseline/usr_bin_signed/ls_benign.elf"
-);
-const EMBEDDED_SSH_BENIGN_ELF: &[u8] = include_bytes!(
-    "../../../benchmarks/artifacts/golden_baseline/usr_bin_signed/ssh_benign.elf"
-);
+const EMBEDDED_LS_BENIGN_ELF: &[u8] =
+    include_bytes!("../../../benchmarks/artifacts/golden_baseline/usr_bin_signed/ls_benign.elf");
+const EMBEDDED_SSH_BENIGN_ELF: &[u8] =
+    include_bytes!("../../../benchmarks/artifacts/golden_baseline/usr_bin_signed/ssh_benign.elf");
 const EMBEDDED_TASK_0042_JSON: &str =
     include_str!("../../../benchmarks/tasks/OSHOOSI-BENCH-2026-0042.json");
 const EMBEDDED_TASK_KS_0001_JSON: &str =
@@ -218,13 +216,13 @@ impl CompiledRule {
         }
 
         // Find `rule <name> [: <tags>] {`
-        let rule_idx = trimmed
-            .find("rule ")
-            .ok_or_else(|| "YARA syntax error: missing 'rule <identifier>' declaration".to_string())?;
+        let rule_idx = trimmed.find("rule ").ok_or_else(|| {
+            "YARA syntax error: missing 'rule <identifier>' declaration".to_string()
+        })?;
         let after_rule = &trimmed[rule_idx + 5..];
-        let first_brace = after_rule
-            .find('{')
-            .ok_or_else(|| "YARA syntax error: missing opening '{' after rule header".to_string())?;
+        let first_brace = after_rule.find('{').ok_or_else(|| {
+            "YARA syntax error: missing opening '{' after rule header".to_string()
+        })?;
         let header = after_rule[..first_brace].trim();
         if header.is_empty() {
             return Err("YARA syntax error: missing rule identifier".to_string());
@@ -240,19 +238,33 @@ impl CompiledRule {
                 .collect();
             (name, parsed_tags)
         } else {
-            (header.split_whitespace().next().unwrap_or("unnamed").to_string(), Vec::new())
+            (
+                header
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("unnamed")
+                    .to_string(),
+                Vec::new(),
+            )
         };
 
-        if rule_name.is_empty() || !rule_name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-            return Err(format!("YARA syntax error: invalid rule name '{}'", rule_name));
+        if rule_name.is_empty()
+            || !rule_name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            return Err(format!(
+                "YARA syntax error: invalid rule name '{}'",
+                rule_name
+            ));
         }
 
         let body_end = trimmed.rfind('}').unwrap();
         let body = &after_rule[first_brace + 1..body_end - (rule_idx + 5)];
 
-        let cond_idx = body
-            .find("condition:")
-            .ok_or_else(|| "YARA syntax error: missing mandatory 'condition:' section".to_string())?;
+        let cond_idx = body.find("condition:").ok_or_else(|| {
+            "YARA syntax error: missing mandatory 'condition:' section".to_string()
+        })?;
         let before_cond = &body[..cond_idx];
         let cond_section = body[cond_idx + "condition:".len()..].trim();
         if cond_section.is_empty() {
@@ -270,7 +282,10 @@ impl CompiledRule {
                 }
                 if line.starts_with('$') {
                     let eq_idx = line.find('=').ok_or_else(|| {
-                        format!("YARA syntax error: missing '=' in string definition '{}'", line)
+                        format!(
+                            "YARA syntax error: missing '=' in string definition '{}'",
+                            line
+                        )
                     })?;
                     let id = line[..eq_idx].trim().to_string();
                     let rhs = line[eq_idx + 1..].trim();
@@ -283,7 +298,10 @@ impl CompiledRule {
                         let mut bytes = Vec::new();
                         for token in hex_inner.split_whitespace() {
                             let b = u8::from_str_radix(token, 16).map_err(|_| {
-                                format!("YARA syntax error: invalid hex byte '{}' in '{}'", token, id)
+                                format!(
+                                    "YARA syntax error: invalid hex byte '{}' in '{}'",
+                                    token, id
+                                )
                             })?;
                             bytes.push(b);
                         }
@@ -297,7 +315,10 @@ impl CompiledRule {
                         })?;
                         let literal = &rest[..end_quote];
                         if literal.is_empty() {
-                            return Err(format!("YARA syntax error: empty string literal '{}'", id));
+                            return Err(format!(
+                                "YARA syntax error: empty string literal '{}'",
+                                id
+                            ));
                         }
                         patterns.push(CompiledPattern {
                             id,
@@ -350,22 +371,31 @@ impl CompiledRule {
 
         let condition = if cond_section.contains("all of them") {
             if patterns.is_empty() {
-                return Err("YARA compiler error: 'all of them' requires at least one pattern".to_string());
+                return Err(
+                    "YARA compiler error: 'all of them' requires at least one pattern".to_string(),
+                );
             }
             ConditionExpr::AllOfThem
         } else if cond_section.contains("any of them") {
             if patterns.is_empty() {
-                return Err("YARA compiler error: 'any of them' requires at least one pattern".to_string());
+                return Err(
+                    "YARA compiler error: 'any of them' requires at least one pattern".to_string(),
+                );
             }
             ConditionExpr::AnyOfThem
         } else if cond_section.contains(" or ") && !cond_section.contains(" and ") {
             if referenced_vars.is_empty() {
-                return Err("YARA compiler error: condition has no valid variable identifiers".to_string());
+                return Err(
+                    "YARA compiler error: condition has no valid variable identifiers".to_string(),
+                );
             }
             ConditionExpr::Disjunction(referenced_vars)
         } else {
             if referenced_vars.is_empty() {
-                return Err("YARA compiler error: condition must reference at least one defined pattern".to_string());
+                return Err(
+                    "YARA compiler error: condition must reference at least one defined pattern"
+                        .to_string(),
+                );
             }
             ConditionExpr::Conjunction(referenced_vars)
         };
@@ -517,7 +547,10 @@ fn read_benign_corpus(dir_path: &Path) -> Vec<(String, Vec<u8>)> {
     }
     if out.is_empty() {
         out.push(("ls_benign.elf".to_string(), EMBEDDED_LS_BENIGN_ELF.to_vec()));
-        out.push(("ssh_benign.elf".to_string(), EMBEDDED_SSH_BENIGN_ELF.to_vec()));
+        out.push((
+            "ssh_benign.elf".to_string(),
+            EMBEDDED_SSH_BENIGN_ELF.to_vec(),
+        ));
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));
     out
@@ -684,16 +717,15 @@ impl EdrBenchHarness {
                     }
                 }
                 ExpectedVerdict::BlockSyscall { syscall_nr } => {
-                    let trace_matches = if let Some(trace_path) =
-                        &task.telemetry_context.ebpf_syscall_trace_path
-                    {
-                        let resolved_trace = resolve_fixture_path(trace_path);
-                        let raw_trace = fs::read_to_string(&resolved_trace).unwrap_or_default();
-                        raw_trace.contains(&format!("\"syscall_nr\": {}", syscall_nr))
-                            || raw_trace.contains(&format!("\"syscall_nr\":{}", syscall_nr))
-                    } else {
-                        false
-                    };
+                    let trace_matches =
+                        if let Some(trace_path) = &task.telemetry_context.ebpf_syscall_trace_path {
+                            let resolved_trace = resolve_fixture_path(trace_path);
+                            let raw_trace = fs::read_to_string(&resolved_trace).unwrap_or_default();
+                            raw_trace.contains(&format!("\"syscall_nr\": {}", syscall_nr))
+                                || raw_trace.contains(&format!("\"syscall_nr\":{}", syscall_nr))
+                        } else {
+                            false
+                        };
                     if !rule_matched || !trace_matches {
                         fail_to_pass_ok = false;
                         break;
@@ -840,7 +872,9 @@ impl EdrBenchHarness {
             .fail_to_pass
             .first()
             .and_then(|a| match &a.expected_verdict {
-                ExpectedVerdict::YaraMatch { required_rule_tag } => Some(required_rule_tag.as_str()),
+                ExpectedVerdict::YaraMatch { required_rule_tag } => {
+                    Some(required_rule_tag.as_str())
+                }
                 _ => None,
             })
             .unwrap_or("container_escape");

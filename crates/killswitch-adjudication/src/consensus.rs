@@ -108,7 +108,8 @@ impl MultiVoterConsensusEngine {
                 "🛑 [CONSENSUS-VETO] Voter '{}' issued strict veto on '{}': {}",
                 veto_vote.voter_name, candidate.proc_name, veto_vote.explanation
             );
-            let seal = AdjudicationResult::compute_seal("Vetoed", 0.0, &veto_vote.explanation, &now);
+            let seal =
+                AdjudicationResult::compute_seal("Vetoed", 0.0, &veto_vote.explanation, &now);
             return AdjudicationResult::Vetoed {
                 reason: VetoReason::CriticalSystemPid,
                 explanation: format!(

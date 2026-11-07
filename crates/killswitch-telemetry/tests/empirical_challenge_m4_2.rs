@@ -22,8 +22,8 @@ use killswitch_telemetry::octopus::breakout::{
 };
 use killswitch_telemetry::octopus::mesh_guard::{HomologicalBoundaryAuditor, MeshGuard};
 use killswitch_telemetry::otel_lineage::{
-    DlpClassification, DlpPolicy, EndpointLineageEngine, FileKey, ProcessKey,
-    TaintBaggage, W3cTraceContext,
+    DlpClassification, DlpPolicy, EndpointLineageEngine, FileKey, ProcessKey, TaintBaggage,
+    W3cTraceContext,
 };
 use killswitch_types::{
     ArmMessage, ArmRole, KillSwitchError, MessageKind, TrustTier, MAX_RELAY_HOPS,
@@ -102,7 +102,9 @@ async fn test_c2_arm_autotomy_state_machine_and_quarantine() {
     }
 
     // Attempting to issue capability while severed must fail
-    let cap_res = ring.issue_capability("ledger_writer", "s3://accounting/", 30).await;
+    let cap_res = ring
+        .issue_capability("ledger_writer", "s3://accounting/", 30)
+        .await;
     assert!(cap_res.is_err(), "Should not issue capability when severed");
 }
 
@@ -319,10 +321,7 @@ fn test_c8_proxy_laundering_adversarial_deep_chains() {
     assert!(rep_6hop.reason.contains("LAW1_PROXY_LAUNDERING_VETO"));
 
     // Attack 3: Direct boundary jump Untrusted -> PrivilegedSink
-    let chain_direct = [
-        ArmRole::UntrustedDocIngest,
-        ArmRole::AccountingLedgerWrite,
-    ];
+    let chain_direct = [ArmRole::UntrustedDocIngest, ArmRole::AccountingLedgerWrite];
     let rep_direct = HomologicalBoundaryAuditor::audit_role_chain(&chain_direct);
     assert!(!rep_direct.allowed);
     assert!(rep_direct.reason.contains("LAW1_DIRECT_BOUNDARY_VETO"));
@@ -335,7 +334,11 @@ async fn test_c9_mesh_guard_case_insensitive_normalized_routing() {
 
     // Authorize route with mixed casing and spaces
     guard
-        .allow_route("  Arm-Alpha-0  ", "  ARM-BETA-1  ", Some(MessageKind::Finding))
+        .allow_route(
+            "  Arm-Alpha-0  ",
+            "  ARM-BETA-1  ",
+            Some(MessageKind::Finding),
+        )
         .await;
 
     let mut msg = ArmMessage {
@@ -414,7 +417,11 @@ async fn test_c10_mesh_guard_payload_and_correlation_limits() {
     };
     msg_big_payload.sign(&sender_key).unwrap();
     let res_payload = guard
-        .validate_message(&msg_big_payload, &ArmRole::OutboundNotification, &sender_key)
+        .validate_message(
+            &msg_big_payload,
+            &ArmRole::OutboundNotification,
+            &sender_key,
+        )
         .await;
     assert!(res_payload.is_err());
 }
@@ -576,11 +583,19 @@ fn test_c14_4_category_breakout_defense_coordinator() {
     assert!(!t2.technical.is_clean);
 
     // 2. Operational: API tokens and credentials
-    let o1 = coordinator.evaluate_action("env", "app", "export AWS_SECRET_ACCESS_KEY=AKIAIOSFODNN7EXAMPLE");
+    let o1 = coordinator.evaluate_action(
+        "env",
+        "app",
+        "export AWS_SECRET_ACCESS_KEY=AKIAIOSFODNN7EXAMPLE",
+    );
     assert!(!o1.is_clean);
     assert!(!o1.operational.is_clean);
 
-    let o2 = coordinator.evaluate_action("code", "main.rs", "let token = \"ghp_1234567890abcdefghijklmnopqrstuvwxyz\";");
+    let o2 = coordinator.evaluate_action(
+        "code",
+        "main.rs",
+        "let token = \"ghp_1234567890abcdefghijklmnopqrstuvwxyz\";",
+    );
     assert!(!o2.is_clean);
     assert!(!o2.operational.is_clean);
 
@@ -632,15 +647,30 @@ fn test_c15_composite_key_uniqueness_and_immutability() {
 fn test_c16_lattice_join_properties_and_deduplication() {
     // Verify DlpClassification Meet-Semilattice properties:
     // CrownJewel > Confidential > Internal > Public
-    assert_eq!(DlpClassification::Public.join(DlpClassification::CrownJewel), DlpClassification::CrownJewel);
-    assert_eq!(DlpClassification::Confidential.join(DlpClassification::Internal), DlpClassification::Confidential);
-    assert_eq!(DlpClassification::Internal.join(DlpClassification::Internal), DlpClassification::Internal); // Idempotence
+    assert_eq!(
+        DlpClassification::Public.join(DlpClassification::CrownJewel),
+        DlpClassification::CrownJewel
+    );
+    assert_eq!(
+        DlpClassification::Confidential.join(DlpClassification::Internal),
+        DlpClassification::Confidential
+    );
+    assert_eq!(
+        DlpClassification::Internal.join(DlpClassification::Internal),
+        DlpClassification::Internal
+    ); // Idempotence
 
     // Verify DlpPolicy Meet-Semilattice properties:
     // Quarantine > Block > Audit > Allow
-    assert_eq!(DlpPolicy::Allow.join(DlpPolicy::Quarantine), DlpPolicy::Quarantine);
+    assert_eq!(
+        DlpPolicy::Allow.join(DlpPolicy::Quarantine),
+        DlpPolicy::Quarantine
+    );
     assert_eq!(DlpPolicy::Audit.join(DlpPolicy::Block), DlpPolicy::Block);
-    assert_eq!(DlpPolicy::Quarantine.join(DlpPolicy::Block), DlpPolicy::Quarantine);
+    assert_eq!(
+        DlpPolicy::Quarantine.join(DlpPolicy::Block),
+        DlpPolicy::Quarantine
+    );
 
     // Deduplication across 50 baggage merges
     let mut baggage = TaintBaggage::public_clean();
@@ -737,7 +767,10 @@ async fn test_c19_concurrent_lineage_engine_thread_safety() {
             for step in 0..20 {
                 let pid = (thread_id * 1000 + step) as u32;
                 let proc_key = ProcessKey::new(pid, step as u64, "C:\\App\\proc.exe");
-                let file_key = FileKey::new(&format!("C:\\Docs\\file_{}_{}.txt", thread_id, step), pid as u64);
+                let file_key = FileKey::new(
+                    &format!("C:\\Docs\\file_{}_{}.txt", thread_id, step),
+                    pid as u64,
+                );
 
                 eng.seed_sensitive_file(
                     file_key,
@@ -750,7 +783,10 @@ async fn test_c19_concurrent_lineage_engine_thread_safety() {
                 eng.on_process_create(None, proc_key, "C:\\App\\proc.exe");
                 eng.on_file_read(proc_key, file_key);
 
-                let out_file = FileKey::new(&format!("C:\\Out\\zip_{}_{}.zip", thread_id, step), (pid + 5000) as u64);
+                let out_file = FileKey::new(
+                    &format!("C:\\Out\\zip_{}_{}.zip", thread_id, step),
+                    (pid + 5000) as u64,
+                );
                 eng.on_file_write(
                     proc_key,
                     out_file,

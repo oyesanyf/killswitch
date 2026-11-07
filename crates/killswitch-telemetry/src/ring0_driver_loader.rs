@@ -27,11 +27,11 @@
 //!      `\KillSwitchRing0Port` (Windows `FltSendMessage`) or `BPF_MAP_TYPE_RINGBUF` (Linux) and
 //!      forwards verified events directly into [`global_edr_behavioral_engine`].
 
-use std::path::Path;
-use std::sync::{OnceLock, RwLock};
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::path::Path;
+use std::sync::{OnceLock, RwLock};
 
 use crate::edr_behavioral::{
     global_edr_behavioral_engine, AccountRole, EdrSensorTelemetryEvent, OsSensorMechanism,
@@ -309,7 +309,8 @@ pub fn verify_windows_pe_sys_binary(
         ));
     }
 
-    let e_lfanew = u32::from_le_bytes([bytes[0x3C], bytes[0x3D], bytes[0x3E], bytes[0x3F]]) as usize;
+    let e_lfanew =
+        u32::from_le_bytes([bytes[0x3C], bytes[0x3D], bytes[0x3E], bytes[0x3F]]) as usize;
     if e_lfanew + 24 + 144 > bytes.len() {
         errors.push(format!("Invalid e_lfanew offset: 0x{:X}", e_lfanew));
         return PeSysVerificationReport {
@@ -493,7 +494,10 @@ pub fn verify_linux_ebpf_elf_binary(
         errors.push("Invalid ELF magic header (expected \\x7fELF)".to_string());
     }
     if bytes[4] != ELFCLASS64 {
-        errors.push(format!("Invalid ELF class {} (expected ELFCLASS64 = 2)", bytes[4]));
+        errors.push(format!(
+            "Invalid ELF class {} (expected ELFCLASS64 = 2)",
+            bytes[4]
+        ));
     }
     if bytes[5] != ELFDATA2LSB {
         errors.push(format!(
@@ -631,7 +635,10 @@ pub fn verify_linux_ebpf_elf_binary(
 
                             // Reject backward jumps (BPF_JMP = 0x05, BPF_JMP32 = 0x06) except call/exit
                             let class = code & 0x07;
-                            if (class == 0x05 || class == 0x06) && code != BPF_EXIT_INSN_CODE && off < 0 {
+                            if (class == 0x05 || class == 0x06)
+                                && code != BPF_EXIT_INSN_CODE
+                                && off < 0
+                            {
                                 errors.push(format!(
                                     "Section '{}' insn {}: unbounded backward jump offset {}",
                                     sec_name, i, off
@@ -726,7 +733,8 @@ pub fn build_canonical_signed_pe_sys_image() -> Vec<u8> {
     img[opt + 56..opt + 60].copy_from_slice(&0x2000u32.to_le_bytes()); // SizeOfImage
     img[opt + 60..opt + 64].copy_from_slice(&0x200u32.to_le_bytes()); // SizeOfHeaders
     img[opt + 68..opt + 70].copy_from_slice(&IMAGE_SUBSYSTEM_NATIVE.to_le_bytes()); // Subsystem = 1 (NATIVE)
-    img[opt + 70..opt + 72].copy_from_slice(&IMAGE_DLLCHARACTERISTICS_FORCE_INTEGRITY.to_le_bytes()); // 0x0080 (/INTEGRITYCHECK)
+    img[opt + 70..opt + 72]
+        .copy_from_slice(&IMAGE_DLLCHARACTERISTICS_FORCE_INTEGRITY.to_le_bytes()); // 0x0080 (/INTEGRITYCHECK)
     img[opt + 108..opt + 112].copy_from_slice(&16u32.to_le_bytes()); // NumberOfRvaAndSizes = 16
 
     // 4. DataDirectory[4] (IMAGE_DIRECTORY_ENTRY_SECURITY) at opt + 144
@@ -755,7 +763,7 @@ pub fn build_canonical_signed_pe_sys_image() -> Vec<u8> {
     img[c..c + 4].copy_from_slice(&cert_size.to_le_bytes()); // dwLength
     img[c + 4..c + 6].copy_from_slice(&WIN_CERT_REVISION_2_0.to_le_bytes()); // wRevision = 0x0200
     img[c + 6..c + 8].copy_from_slice(&WIN_CERT_TYPE_PKCS_SIGNED_DATA.to_le_bytes()); // wCertificateType = 0x0002
-    // ASN.1 DER SEQUENCE header + OID 1.2.840.113549.1.7.2 (pkcs7-signedData)
+                                                                                      // ASN.1 DER SEQUENCE header + OID 1.2.840.113549.1.7.2 (pkcs7-signedData)
     let pkcs7_der: [u8; 24] = [
         0x30, 0x76, 0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x07, 0x02, 0xA0, 0x69,
         0x30, 0x67, 0x02, 0x01, 0x01, 0x31, 0x0B, 0x30, 0x09,
@@ -782,10 +790,12 @@ pub fn build_canonical_ebpf_elf_object() -> Vec<u8> {
     // 2 BPF instructions: `mov64 r0, 0` (0xB7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
     // followed by `exit` (0x95, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
     let bpf_prog_insns: [u8; 16] = [
-        0xB7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x95, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0xB7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x95, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00,
     ];
-    let maps_def: [u8; 16] = [0x1B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0, 0, 0, 0, 0, 0, 0, 0];
+    let maps_def: [u8; 16] = [
+        0x1B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0, 0, 0, 0, 0, 0, 0, 0,
+    ];
     let license_bytes: &[u8] = b"Dual BSD/GPL\0";
 
     let mut elf = Vec::with_capacity(1024);
@@ -827,21 +837,17 @@ pub fn build_canonical_ebpf_elf_object() -> Vec<u8> {
     let shoff = elf.len() as u64;
     elf[40..48].copy_from_slice(&shoff.to_le_bytes());
 
-    let push_shdr = |buf: &mut Vec<u8>,
-                     name: u32,
-                     sh_type: u32,
-                     flags: u64,
-                     offset: usize,
-                     size: usize| {
-        let start = buf.len();
-        buf.resize(start + 64, 0);
-        buf[start..start + 4].copy_from_slice(&name.to_le_bytes());
-        buf[start + 4..start + 8].copy_from_slice(&sh_type.to_le_bytes());
-        buf[start + 8..start + 16].copy_from_slice(&flags.to_le_bytes());
-        buf[start + 24..start + 32].copy_from_slice(&(offset as u64).to_le_bytes());
-        buf[start + 32..start + 40].copy_from_slice(&(size as u64).to_le_bytes());
-        buf[start + 48..start + 56].copy_from_slice(&8u64.to_le_bytes());
-    };
+    let push_shdr =
+        |buf: &mut Vec<u8>, name: u32, sh_type: u32, flags: u64, offset: usize, size: usize| {
+            let start = buf.len();
+            buf.resize(start + 64, 0);
+            buf[start..start + 4].copy_from_slice(&name.to_le_bytes());
+            buf[start + 4..start + 8].copy_from_slice(&sh_type.to_le_bytes());
+            buf[start + 8..start + 16].copy_from_slice(&flags.to_le_bytes());
+            buf[start + 24..start + 32].copy_from_slice(&(offset as u64).to_le_bytes());
+            buf[start + 32..start + 40].copy_from_slice(&(size as u64).to_le_bytes());
+            buf[start + 48..start + 56].copy_from_slice(&8u64.to_le_bytes());
+        };
 
     // 0: SHT_NULL
     push_shdr(&mut elf, 0, 0, 0, 0, 0);
@@ -866,7 +872,14 @@ pub fn build_canonical_ebpf_elf_object() -> Vec<u8> {
     // 3: .maps
     push_shdr(&mut elf, 61, SHT_PROGBITS, 0x3, maps_off, maps_def.len());
     // 4: license
-    push_shdr(&mut elf, 67, SHT_PROGBITS, 0x2, lic_off, license_bytes.len());
+    push_shdr(
+        &mut elf,
+        67,
+        SHT_PROGBITS,
+        0x2,
+        lic_off,
+        license_bytes.len(),
+    );
     // 5: .shstrtab (SHT_STRTAB = 3)
     push_shdr(&mut elf, 1, 3, 0, shstr_off, shstrtab.len());
 
@@ -906,7 +919,10 @@ pub fn query_live_host_ring0_inventory() -> HostKernelDriverInventory {
             "storqosflt",
             "KillSwitchMinifilter",
         ] {
-            let sys_path = format!(r"C:\Windows\System32\drivers\{}.sys", candidate.to_ascii_lowercase());
+            let sys_path = format!(
+                r"C:\Windows\System32\drivers\{}.sys",
+                candidate.to_ascii_lowercase()
+            );
             if Path::new(&sys_path).exists() {
                 detected_host_kernel_filters.push(format!("{} ({})", candidate, sys_path));
             }
@@ -977,7 +993,9 @@ impl Ring0DeploymentManager {
             if let Ok(mut rej) = self.frames_rejected_hmac.write() {
                 *rej += 1;
             }
-            return Err("Ring-0 frame rejected: invalid HMAC-SHA256 or magic signature".to_string());
+            return Err(
+                "Ring-0 frame rejected: invalid HMAC-SHA256 or magic signature".to_string(),
+            );
         }
 
         {

@@ -10,7 +10,8 @@ use killswitch_types::telemetry::{SecurityEvent, TelemetryEventKind, ThreatSever
 fn test_t1_f17_01_causal_node_and_edge_provenance() {
     let graph = CausalSecurityGraph::new();
 
-    let parent = ProcessInstanceIdentity::new(1000, 500000, "parent_image_hash", None, None, "Session-1");
+    let parent =
+        ProcessInstanceIdentity::new(1000, 500000, "parent_image_hash", None, None, "Session-1");
     let child = ProcessInstanceIdentity::new(
         2000,
         600000,
@@ -28,7 +29,12 @@ fn test_t1_f17_01_causal_node_and_edge_provenance() {
     assert_eq!(ancestry[0].instance_id, parent.instance_id);
 
     // Record file write and network connect
-    graph.record_file_interaction(&child.instance_id, "C:\\Temp\\script.bat", "hash_script", true);
+    graph.record_file_interaction(
+        &child.instance_id,
+        "C:\\Temp\\script.bat",
+        "hash_script",
+        true,
+    );
     graph.record_network_connect(&child.instance_id, "203.0.113.5", 443);
 
     let taint = graph.get_transitive_taint_forward(&child.instance_id);
@@ -69,7 +75,9 @@ fn test_t1_f17_02_mitre_killchain_sequence_evaluation() {
     assert_eq!(eval.stages_count, 3);
     assert!(eval.has_killchain_progression);
     assert!(eval.multi_stage_multiplier >= 1.7);
-    assert!(eval.matched_patterns.contains(&"Ransomware Destruction Sequence".to_string()));
+    assert!(eval
+        .matched_patterns
+        .contains(&"Ransomware Destruction Sequence".to_string()));
 }
 
 #[test]

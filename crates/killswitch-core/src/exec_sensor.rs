@@ -327,14 +327,8 @@ impl WindowsProcessSensor {
             // Detect new processes (start events)
             for (&pid, (ppid, exe)) in &current {
                 if !known.contains_key(&pid) {
-                    let event = ExecEvent::new_start(
-                        pid,
-                        *ppid,
-                        exe.clone(),
-                        exe.clone(),
-                        None,
-                        None,
-                    );
+                    let event =
+                        ExecEvent::new_start(pid, *ppid, exe.clone(), exe.clone(), None, None);
                     record_exec_event(event);
                 }
             }
@@ -342,13 +336,7 @@ impl WindowsProcessSensor {
             // Detect exited processes (exit events)
             for (&pid, (ppid, exe)) in &known {
                 if !current.contains_key(&pid) {
-                    let event = ExecEvent::new_exit(
-                        pid,
-                        *ppid,
-                        exe.clone(),
-                        exe.clone(),
-                        0,
-                    );
+                    let event = ExecEvent::new_exit(pid, *ppid, exe.clone(), exe.clone(), 0);
                     record_exec_event(event);
                 }
             }
@@ -380,7 +368,9 @@ impl NativeProcessSensor for WindowsProcessSensor {
             .spawn(move || {
                 Self::run_delta_scanner(running_clone);
             })
-            .map_err(|e| KillSwitchError::Other(format!("Failed to spawn Windows exec sensor thread: {e}")))?;
+            .map_err(|e| {
+                KillSwitchError::Other(format!("Failed to spawn Windows exec sensor thread: {e}"))
+            })?;
 
         let mut lock = self.worker_handle.lock();
         *lock = Some(handle);
@@ -450,7 +440,14 @@ impl LinuxProcessSensor {
 
             for (&pid, (ppid, exe)) in &current {
                 if !known.contains_key(&pid) {
-                    record_exec_event(ExecEvent::new_start(pid, *ppid, exe.clone(), exe.clone(), None, None));
+                    record_exec_event(ExecEvent::new_start(
+                        pid,
+                        *ppid,
+                        exe.clone(),
+                        exe.clone(),
+                        None,
+                        None,
+                    ));
                 }
             }
 
@@ -485,7 +482,9 @@ impl NativeProcessSensor for LinuxProcessSensor {
             .spawn(move || {
                 Self::run_proc_scanner(running_clone);
             })
-            .map_err(|e| KillSwitchError::Other(format!("Failed to spawn Linux exec sensor: {e}")))?;
+            .map_err(|e| {
+                KillSwitchError::Other(format!("Failed to spawn Linux exec sensor: {e}"))
+            })?;
 
         let mut lock = self.worker_handle.lock();
         *lock = Some(handle);

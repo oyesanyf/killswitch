@@ -662,7 +662,9 @@ fn test_challenge_poisoned_yara_rule_veto() {
 
     // Targets to test: svchost.exe, explorer.exe, cargo.exe, and variations
     let poisoned_targets = [
-        ("svchost.exe", r#"
+        (
+            "svchost.exe",
+            r#"
             rule PoisonedSvchostFreeze {
                 meta:
                     description = "Attempts to freeze svchost"
@@ -671,8 +673,11 @@ fn test_challenge_poisoned_yara_rule_veto() {
                 condition:
                     $target
             }
-        "#),
-        ("explorer.exe", r#"
+        "#,
+        ),
+        (
+            "explorer.exe",
+            r#"
             rule PoisonedExplorerFreeze {
                 meta:
                     adversary = "apt-rogue"
@@ -681,8 +686,11 @@ fn test_challenge_poisoned_yara_rule_veto() {
                 condition:
                     $proc
             }
-        "#),
-        ("cargo.exe", r#"
+        "#,
+        ),
+        (
+            "cargo.exe",
+            r#"
             rule PoisonedCargoFreeze {
                 meta:
                     target_tool = "rust developer toolchain"
@@ -691,23 +699,30 @@ fn test_challenge_poisoned_yara_rule_veto() {
                 condition:
                     $dev
             }
-        "#),
-        ("SvChOsT.EXE", r#"
+        "#,
+        ),
+        (
+            "SvChOsT.EXE",
+            r#"
             rule PoisonedCaseInsensitive {
                 strings:
                     $s = "SvChOsT.EXE"
                 condition:
                     $s
             }
-        "#),
-        ("rustc.exe", r#"
+        "#,
+        ),
+        (
+            "rustc.exe",
+            r#"
             rule PoisonedRustcRule {
                 strings:
                     $r = "rustc.exe"
                 condition:
                     $r
             }
-        "#),
+        "#,
+        ),
     ];
 
     for (target_name, yara_rule) in poisoned_targets {
@@ -895,12 +910,10 @@ fn test_challenge_counter_ai_prompt_injection_stress() {
     }
 
     // 4. HTML script tag sanitization in reconstructed source code
-    let mut code_with_script = String::from("int main() { /* <script>alert('pwned')</script> */ return 0; }");
-    let (_, script_sanitized_count) = scan_and_sanitize_counter_ai_strings(
-        b"// normal bytes",
-        &mut code_with_script,
-        false,
-    );
+    let mut code_with_script =
+        String::from("int main() { /* <script>alert('pwned')</script> */ return 0; }");
+    let (_, script_sanitized_count) =
+        scan_and_sanitize_counter_ai_strings(b"// normal bytes", &mut code_with_script, false);
     assert!(script_sanitized_count > 0);
     assert!(!code_with_script.contains("<script"));
     assert!(code_with_script.contains("<scr_ipt"));
@@ -1072,25 +1085,12 @@ fn test_challenge_path_traversal_and_device_namespace_stress() {
 
     // 7. Reserved DOS device names
     let dos_device_names = [
-        "con.txt",
-        "CON",
-        "PRN",
-        "aux.exe",
-        "nul",
-        "NUL.txt",
-        "com1",
-        "com9.dat",
-        "lpt1",
-        "lpt9",
+        "con.txt", "CON", "PRN", "aux.exe", "nul", "NUL.txt", "com1", "com9.dat", "lpt1", "lpt9",
     ];
 
     for name in dos_device_names {
         let res = validate_rea_target_path(name);
-        assert!(
-            res.is_err(),
-            "DOS device name was NOT rejected: '{}'",
-            name
-        );
+        assert!(res.is_err(), "DOS device name was NOT rejected: '{}'", name);
     }
 
     // 8. Positive Verification: Legitimate canonical paths must succeed

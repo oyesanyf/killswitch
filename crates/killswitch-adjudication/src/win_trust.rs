@@ -391,9 +391,13 @@ pub fn check_authenticode_status(path: &str) -> AuthenticodeStatus {
     let asc_path = format!("{}.asc", path);
     let sig_path = format!("{}.sig", path);
     if (Path::new(&asc_path).is_file()
-        && std::fs::metadata(&asc_path).map(|m| m.len() > 0).unwrap_or(false))
+        && std::fs::metadata(&asc_path)
+            .map(|m| m.len() > 0)
+            .unwrap_or(false))
         || (Path::new(&sig_path).is_file()
-            && std::fs::metadata(&sig_path).map(|m| m.len() > 0).unwrap_or(false))
+            && std::fs::metadata(&sig_path)
+                .map(|m| m.len() > 0)
+                .unwrap_or(false))
     {
         return AuthenticodeStatus::new_valid("Detached Cryptographic Signature", "", "", "");
     }
@@ -514,9 +518,7 @@ pub fn verify_binary_cryptographic_trust(path: &Path) -> BinaryTrustVerdict {
             metadata.len(),
             crate::rea::MAX_REA_FILE_BYTES
         );
-        return BinaryTrustVerdict::UntrustedIoError {
-            error: err_msg,
-        };
+        return BinaryTrustVerdict::UntrustedIoError { error: err_msg };
     }
 
     // Compute BLAKE3 digest of bounded file on disk
@@ -572,7 +574,8 @@ pub fn verify_binary_cryptographic_trust(path: &Path) -> BinaryTrustVerdict {
                 if is_writable_loc {
                     let verdict = BinaryTrustVerdict::UntrustedWritableLocation {
                         path: path_str.to_string(),
-                        reason: "Binary in user-writable location is signed by unapproved vendor".to_string(),
+                        reason: "Binary in user-writable location is signed by unapproved vendor"
+                            .to_string(),
                     };
                     BINARY_TRUST_CACHE.insert(norm_key, (verdict.clone(), now));
                     return verdict;
@@ -599,7 +602,10 @@ pub fn verify_binary_cryptographic_trust(path: &Path) -> BinaryTrustVerdict {
             | AuthenticodeChainStatus::ExplicitDistrust => {
                 let verdict = BinaryTrustVerdict::UntrustedSignature {
                     status: auth_status.clone(),
-                    reason: format!("Signature verification failed: {:?}", auth_status.chain_status),
+                    reason: format!(
+                        "Signature verification failed: {:?}",
+                        auth_status.chain_status
+                    ),
                 };
                 BINARY_TRUST_CACHE.insert(norm_key, (verdict.clone(), now));
                 return verdict;
@@ -764,7 +770,10 @@ fn extract_signer_subject(path: &Path) -> Option<String> {
     use windows::Win32::Security::Cryptography::*;
 
     let norm_path_str = normalize_path_string(&path.to_string_lossy());
-    let mut wide_path: Vec<u16> = Path::new(&norm_path_str).as_os_str().encode_wide().collect();
+    let mut wide_path: Vec<u16> = Path::new(&norm_path_str)
+        .as_os_str()
+        .encode_wide()
+        .collect();
     wide_path.push(0);
 
     let mut msg: *mut c_void = std::ptr::null_mut();
@@ -804,7 +813,8 @@ fn extract_signer_subject(path: &Path) -> Option<String> {
             return None;
         }
 
-        let name_len = CertGetNameStringW(cert_context, CERT_NAME_SIMPLE_DISPLAY_TYPE, 0, None, None);
+        let name_len =
+            CertGetNameStringW(cert_context, CERT_NAME_SIMPLE_DISPLAY_TYPE, 0, None, None);
         let mut name_buffer = vec![0u16; name_len as usize];
         CertGetNameStringW(
             cert_context,
@@ -839,7 +849,10 @@ fn extract_certificate_thumbprint(path: &str) -> Option<String> {
     use windows::Win32::Security::Cryptography::*;
 
     let norm_path_str = normalize_path_string(path);
-    let mut wide_path: Vec<u16> = Path::new(&norm_path_str).as_os_str().encode_wide().collect();
+    let mut wide_path: Vec<u16> = Path::new(&norm_path_str)
+        .as_os_str()
+        .encode_wide()
+        .collect();
     wide_path.push(0);
 
     let mut msg: *mut c_void = std::ptr::null_mut();
@@ -919,13 +932,23 @@ mod tests {
 
     #[test]
     fn test_untrusted_writable_location() {
-        assert!(is_untrusted_writable_location("C:\\Users\\Alice\\AppData\\Local\\Temp\\malware.exe"));
-        assert!(is_untrusted_writable_location("C:\\Users\\Alice\\Downloads\\tool.exe"));
-        assert!(is_untrusted_writable_location("D:\\workspace\\target\\debug\\test.exe"));
+        assert!(is_untrusted_writable_location(
+            "C:\\Users\\Alice\\AppData\\Local\\Temp\\malware.exe"
+        ));
+        assert!(is_untrusted_writable_location(
+            "C:\\Users\\Alice\\Downloads\\tool.exe"
+        ));
+        assert!(is_untrusted_writable_location(
+            "D:\\workspace\\target\\debug\\test.exe"
+        ));
         assert!(is_untrusted_writable_location("/tmp/malware"));
         assert!(is_untrusted_writable_location("/dev/shm/dropper"));
-        assert!(!is_untrusted_writable_location("C:\\Windows\\System32\\svchost.exe"));
-        assert!(!is_untrusted_writable_location("C:\\Program Files\\Rust\\bin\\rustc.exe"));
+        assert!(!is_untrusted_writable_location(
+            "C:\\Windows\\System32\\svchost.exe"
+        ));
+        assert!(!is_untrusted_writable_location(
+            "C:\\Program Files\\Rust\\bin\\rustc.exe"
+        ));
         assert!(!is_untrusted_writable_location("/usr/bin/ssh"));
     }
 

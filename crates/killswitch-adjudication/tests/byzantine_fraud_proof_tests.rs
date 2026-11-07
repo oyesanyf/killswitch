@@ -48,9 +48,11 @@ fn test_fraud_proof_tamper_detection_on_all_fields() {
     assert!(proof.verify_seal());
 
     // 3. Tamper with target_binary_hash
-    proof.target_binary_hash = "0000000000000000000000000000000000000000000000000000000000000000".to_string();
+    proof.target_binary_hash =
+        "0000000000000000000000000000000000000000000000000000000000000000".to_string();
     assert!(!proof.verify_seal());
-    proof.target_binary_hash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_string();
+    proof.target_binary_hash =
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_string();
     assert!(proof.verify_seal());
 
     // 4. Tamper with proc_name
