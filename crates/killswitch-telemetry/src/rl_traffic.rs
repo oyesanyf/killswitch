@@ -941,7 +941,7 @@ fn query_kernel_tcp_table_by_pid() -> KernelTcpTableByPid {
     }
 
     let mut inode_map: HashMap<u64, (u16, String, u16, String, String)> = HashMap::new();
-    for sock in sockets_v4.into_iter().chain(sockets_v6.into_iter()) {
+    for sock in sockets_v4.into_iter().chain(sockets_v6) {
         let direction = if sock.remote_port > 0
             && !sock.remote_addr.is_unspecified()
             && !sock.remote_addr.is_loopback()
