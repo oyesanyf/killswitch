@@ -32,7 +32,8 @@ fn setup_test_server_state() -> Arc<ServerState> {
         "test_master_token_0123456789abcdef0123456789abcdef",
     );
     let temp_dir = tempfile::tempdir().unwrap();
-    let containment = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
+    let containment =
+        Arc::new(HostContainmentManager::new_simulated(Some(temp_dir.path())).unwrap());
     Arc::new(ServerState::with_defaults(containment))
 }
 
