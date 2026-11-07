@@ -334,8 +334,8 @@ fn test_siquery_query_15s_timeout_mechanism() {
         let app = build_router(state);
         let loopback = SocketAddr::from(([127, 0, 0, 1], 48129));
 
-        // Deep cross-join across process and socket tables guaranteed to exceed 15s across all runners
-        let long_running_sql = "SELECT count(*) FROM processes p1, processes p2, processes p3, processes p4, process_open_sockets s1;";
+        // Deterministic infinite recursive counter guaranteed to exceed 15s across all runners
+        let long_running_sql = "WITH RECURSIVE r(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM r WHERE x < 1000000000000) SELECT count(*) FROM r;";
 
         let body = serde_json::json!({
             "query": long_running_sql
