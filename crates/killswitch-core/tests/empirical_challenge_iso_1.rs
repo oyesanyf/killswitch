@@ -29,11 +29,10 @@ use std::path::Path;
 
 use killswitch_core::wfp::{
     apply_native_bfe_registry_rule, is_current_process_elevated, is_elevated_administrator,
-    remove_all_killswitch_bfe_registry_rules, FwpByteBlob, FwpConditionValue0, FwpValue0,
-    FwpmAction0, FwpmDisplayData0, FwpmFilter0, FwpmFilterCondition0, WfpGuid,
-    FWPM_CONDITION_FLAGS, FWPM_CONDITION_IP_LOCAL_ADDRESS, FWPM_CONDITION_IP_LOCAL_PORT,
-    FWPM_CONDITION_IP_PROTOCOL, FWPM_CONDITION_IP_REMOTE_ADDRESS, FWPM_CONDITION_IP_REMOTE_PORT,
-    FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_CONNECT_V6,
+    FwpByteBlob, FwpConditionValue0, FwpValue0, FwpmAction0, FwpmDisplayData0, FwpmFilter0,
+    FwpmFilterCondition0, WfpGuid, FWPM_CONDITION_FLAGS, FWPM_CONDITION_IP_LOCAL_ADDRESS,
+    FWPM_CONDITION_IP_LOCAL_PORT, FWPM_CONDITION_IP_PROTOCOL, FWPM_CONDITION_IP_REMOTE_ADDRESS,
+    FWPM_CONDITION_IP_REMOTE_PORT, FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_CONNECT_V6,
     FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6,
     FWPM_LAYER_INBOUND_IPPACKET_V4, FWPM_LAYER_INBOUND_IPPACKET_V6,
     FWPM_LAYER_INBOUND_TRANSPORT_V4, FWPM_LAYER_INBOUND_TRANSPORT_V6,
@@ -819,7 +818,7 @@ fn test_adversarial_bfe_registry_rules_strict_loopback_only() {
     #[cfg(windows)]
     {
         if applied {
-            let removed = remove_all_killswitch_bfe_registry_rules();
+            let removed = killswitch_core::wfp::remove_all_killswitch_bfe_registry_rules();
             assert!(removed >= 1, "Must remove at least 1 applied rule");
         }
     }
