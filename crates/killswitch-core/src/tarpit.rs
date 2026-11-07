@@ -262,6 +262,15 @@ impl ActiveProcessTarpit {
         burst_interval: Duration,
         max_duration: Duration,
     ) -> Result<(), KillSwitchError> {
+        let ret = unsafe { libc::kill(pid as i32, 0) };
+        if ret != 0 {
+            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+            return Err(KillSwitchError::ThreadSnapshotFailed {
+                pid,
+                win32_code: errno as u32,
+            });
+        }
+
         let run_flag = Arc::new(AtomicBool::new(true));
         self.active_traps.insert(pid, run_flag.clone());
         let traps = self.active_traps.clone();

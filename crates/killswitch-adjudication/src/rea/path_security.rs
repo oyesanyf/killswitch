@@ -359,10 +359,22 @@ pub fn detect_binary_masquerade_spoof(
                     }
                     if let Ok(file_bytes) = std::fs::read(p) {
                         if !file_bytes.is_empty() {
-                            if !file_bytes.starts_with(b"MZ") && !file_bytes.starts_with(b"\x7fELF")
+                            let is_macho_magic = file_bytes.len() >= 4
+                                && (file_bytes.starts_with(&[0xFE, 0xED, 0xFA, 0xCE])
+                                    || file_bytes.starts_with(&[0xFE, 0xED, 0xFA, 0xCF])
+                                    || file_bytes.starts_with(&[0xCE, 0xFA, 0xED, 0xFE])
+                                    || file_bytes.starts_with(&[0xCF, 0xFA, 0xED, 0xFE])
+                                    || file_bytes.starts_with(&[0xCA, 0xFE, 0xBA, 0xBE])
+                                    || file_bytes.starts_with(&[0xCA, 0xFE, 0xBA, 0xBF])
+                                    || file_bytes.starts_with(&[0xBE, 0xBA, 0xFE, 0xCA])
+                                    || file_bytes.starts_with(&[0xBF, 0xBA, 0xFE, 0xCA]));
+
+                            if !file_bytes.starts_with(b"MZ")
+                                && !file_bytes.starts_with(b"\x7fELF")
+                                && !is_macho_magic
                             {
                                 return Some(format!(
-                                    "REA_MASQUERADE_SPOOF_DETECTED: Protected binary '{}' has non-executable payload header (expected PE 'MZ' or ELF magic)",
+                                    "REA_MASQUERADE_SPOOF_DETECTED: Protected binary '{}' has non-executable payload header (expected PE 'MZ', ELF, or Mach-O magic)",
                                     base_lower
                                 ));
                             }
