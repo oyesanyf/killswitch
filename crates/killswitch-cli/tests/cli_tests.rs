@@ -171,7 +171,7 @@ async fn test_cli_research_approval_gate_offline_fallback() {
 fn test_wfp_kernel_apply_invalid_action_rejected() {
     let res = killswitch_cli::commands::handle_wfp_kernel_apply("invalid_action");
     assert!(res.is_err());
-    let err_msg = res.unwrap_err().to_string();
+    let _err_msg = res.unwrap_err().to_string();
     #[cfg(windows)]
-    assert!(err_msg.contains("Unknown --wfp-kernel-apply action 'invalid_action'"));
+    assert!(_err_msg.contains("Unknown --wfp-kernel-apply action 'invalid_action'"));
 }
