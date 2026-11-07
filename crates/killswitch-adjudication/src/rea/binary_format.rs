@@ -110,9 +110,16 @@ fn inspect_binary_format_internal(bytes: &[u8]) -> Result<BinaryFormatInfo, Stri
         let magic = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
         if matches!(
             magic,
-            0xfeedface | 0xfeedfacf | 0xcefaedfe | 0xcffaedfe | 0xcafebabe
+            0xfeedface
+                | 0xfeedfacf
+                | 0xcefaedfe
+                | 0xcffaedfe
+                | 0xcafebabe
+                | 0xcafebabf
+                | 0xbebafeca
+                | 0xbfbafeca
         ) {
-            let is_64 = matches!(magic, 0xfeedfacf | 0xcffaedfe);
+            let is_64 = matches!(magic, 0xfeedfacf | 0xcffaedfe | 0xcafebabf | 0xbfbafeca);
             return Ok(BinaryFormatInfo {
                 kind: BinaryFormatKind::MachO,
                 architecture: if is_64 {
