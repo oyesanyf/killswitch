@@ -690,6 +690,19 @@ pub fn query_live_os_process_sockets() -> Vec<OsQueryProcessSocketRow> {
                     state: state_str.clone(),
                 });
             }
+        } else {
+            rows.push(OsQueryProcessSocketRow {
+                pid,
+                parent_pid,
+                process_name: process_name.clone(),
+                image_path: image_path.clone(),
+                command_line: cmdline.clone(),
+                local_port: 0,
+                remote_address: String::new(),
+                remote_port: 0,
+                direction: "NONE".to_string(),
+                state: "RUNNING".to_string(),
+            });
         }
     }
     rows
@@ -877,7 +890,102 @@ fn query_kernel_tcp_table_by_pid() -> KernelTcpTableByPid {
     map
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
+fn query_kernel_tcp_table_by_pid() -> KernelTcpTableByPid {
+    let mut map: KernelTcpTableByPid = HashMap::new();
+
+    let sockets_v4 = killswitch_core::landlock::read_and_parse_proc_net_tcp().unwrap_or_default();
+    let sockets_v6 = killswitch_core::landlock::read_and_parse_proc_net_tcp6().unwrap_or_default();
+
+    if sockets_v4.is_empty() && sockets_v6.is_empty() {
+        return map;
+    }
+
+    let mut inode_map: HashMap<u64, (u16, String, u16, String, String)> = HashMap::new();
+    for sock in sockets_v4.into_iter().chain(sockets_v6.into_iter()) {
+        let direction = if sock.remote_port > 0
+            && !sock.remote_addr.is_unspecified()
+            && !sock.remote_addr.is_loopback()
+        {
+            "OUTBOUND".to_string()
+        } else if sock.state == killswitch_core::landlock::TcpState::Listen {
+            "LISTEN".to_string()
+        } else {
+            "INBOUND".to_string()
+        };
+        let state_str = format!("{:?}", sock.state);
+        inode_map.insert(
+            sock.inode,
+            (
+                sock.local_port,
+                sock.remote_addr.to_string(),
+                sock.remote_port,
+                direction,
+                state_str,
+            ),
+        );
+    }
+
+    if let Ok(entries) = std::fs::read_dir("/proc") {
+        for entry in entries.flatten() {
+            let file_name = entry.file_name();
+            let name_str = file_name.to_string_lossy();
+            if let Ok(pid) = name_str.parse::<u32>() {
+                let fd_dir = entry.path().join("fd");
+                if let Ok(fd_entries) = std::fs::read_dir(fd_dir) {
+                    for fd_entry in fd_entries.flatten() {
+                        if let Ok(target) = std::fs::read_link(fd_entry.path()) {
+                            let target_str = target.to_string_lossy();
+                            if target_str.starts_with("socket:[") && target_str.ends_with(']') {
+                                let inode_str = &target_str[8..target_str.len() - 1];
+                                if let Ok(inode) = inode_str.parse::<u64>() {
+                                    if let Some(sock_info) = inode_map.get(&inode) {
+                                        map.entry(pid).or_default().push(sock_info.clone());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    map
+}
+
+#[cfg(target_os = "macos")]
+fn query_kernel_tcp_table_by_pid() -> KernelTcpTableByPid {
+    let mut map: KernelTcpTableByPid = HashMap::new();
+
+    if let Ok(darwin_sockets) = killswitch_core::pf::get_active_darwin_sockets() {
+        for sock in darwin_sockets {
+            if let Some(pid) = sock.pid {
+                let direction = if sock.foreign_port > 0
+                    && !sock.foreign_addr.is_unspecified()
+                    && !sock.is_loopback
+                {
+                    "OUTBOUND".to_string()
+                } else if sock.state_name == "LISTEN" {
+                    "LISTEN".to_string()
+                } else {
+                    "INBOUND".to_string()
+                };
+                map.entry(pid).or_default().push((
+                    sock.local_port,
+                    sock.foreign_addr.to_string(),
+                    sock.foreign_port,
+                    direction,
+                    sock.state_name,
+                ));
+            }
+        }
+    }
+
+    map
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
 fn query_kernel_tcp_table_by_pid() -> KernelTcpTableByPid {
     HashMap::new()
 }

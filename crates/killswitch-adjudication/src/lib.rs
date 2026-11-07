@@ -13,6 +13,7 @@
 //! - Cryptographically Sealed Byzantine Kill-Switch Fraud Proofs (`byzantine`)
 
 pub mod adjudicator;
+pub mod binary_probe;
 pub mod byzantine;
 pub mod conformal;
 pub mod consensus;
@@ -20,11 +21,20 @@ pub mod edr_bench;
 pub mod immunity;
 pub mod inventory;
 pub mod rea;
+pub mod token_delta;
 pub mod voters;
 pub mod win_trust;
 
 // Public re-exports
 pub use adjudicator::ZeroFalsePositiveAdjudicator;
+pub use binary_probe::{
+    inspect_binary_metadata, inspect_binary_metadata_from_bytes, DynamicBinaryMetadata,
+    ElevationRequirement,
+};
+pub use token_delta::{
+    evaluate_security_context_delta, observe_parent_child_token_delta,
+    query_process_security_context, ProcessSecurityContext, SecurityContextDelta,
+};
 pub use conformal::{
     bounds, linalg, project_text_to_feature_vector, CalibratedSource, LayeredGuardrail,
     MultiSourceCalibration, PersistDetector, PersistStepResult, SrDetector,

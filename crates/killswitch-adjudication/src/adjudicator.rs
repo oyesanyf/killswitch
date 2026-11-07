@@ -10,7 +10,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use killswitch_core::killchain::is_critical_system_pid;
+use killswitch_core::killchain::is_immutable_os_kernel_pid;
 use killswitch_types::adjudication::{
     AdjudicationResult, BinaryTrustVerdict, ThreatCandidate, VetoReason,
 };
@@ -115,9 +115,9 @@ impl ZeroFalsePositiveAdjudicator {
                     timestamp,
                 };
             }
-        } else if is_critical_system_pid(0, &candidate.proc_name) {
+        } else if is_immutable_os_kernel_pid(0, &candidate.proc_name) {
             let explanation = format!(
-                "CRITICAL_SYSTEM_PID_VETO: process '{}' matches critical system catalog",
+                "CRITICAL_SYSTEM_PID_VETO: process '{}' matches immutable OS kernel catalog",
                 candidate.proc_name
             );
             let fraud_proof = candidate.peer_id.as_deref().map(|peer| {

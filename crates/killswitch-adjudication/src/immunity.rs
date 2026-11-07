@@ -6,7 +6,9 @@
 //! - Cycles in process parentage are safely terminated via `HashSet<u32>`.
 //! - Emits `VetoReason::CriticalSystemPid` or `VetoReason::ProtectedParentLineage`.
 
-use killswitch_core::killchain::is_critical_system_pid;
+use killswitch_core::killchain::{
+    is_critical_system_pid, is_developer_or_agent_runtime, is_immutable_os_kernel_pid,
+};
 use killswitch_types::adjudication::VetoReason;
 use parking_lot::Mutex;
 use std::collections::HashSet;
@@ -29,11 +31,18 @@ pub const MAX_ANCESTRY_DEPTH: usize = 5;
 /// Verdict returned by process lineage inspection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LineageImmunityVerdict {
-    /// Target itself is a critical system or self PID.
+    /// Target itself is an immutable OS kernel anchor or critical protected binary.
     ImmuneTarget { pid: u32, proc_name: String },
-    /// An ancestor at depth 1..=5 is a critical system or developer process.
+    /// An ancestor at depth 1..=5 is an immutable kernel anchor (PID 0, 1, 4, csrss, smss, wininit, systemd, launchd).
     ImmuneAncestor {
         target_pid: u32,
+        ancestor_pid: u32,
+        ancestor_name: String,
+        depth: usize,
+    },
+    /// Subprocess spawned under an AI coding agent or developer runtime (e.g. cursor, code, node, python, powershell, bash, wsl).
+    /// Crucially: does NOT grant automatic immunity; proceeds to full adjudication.
+    AgentRuntimeChild {
         ancestor_pid: u32,
         ancestor_name: String,
         depth: usize,
@@ -44,16 +53,34 @@ pub enum LineageImmunityVerdict {
 
 impl LineageImmunityVerdict {
     pub fn is_immune(&self) -> bool {
-        !matches!(self, Self::NotImmune)
+        matches!(self, Self::ImmuneTarget { .. } | Self::ImmuneAncestor { .. })
     }
 
     pub fn to_veto_reason(&self) -> Option<VetoReason> {
         match self {
             Self::ImmuneTarget { .. } => Some(VetoReason::CriticalSystemPid),
             Self::ImmuneAncestor { .. } => Some(VetoReason::ProtectedParentLineage),
+            Self::AgentRuntimeChild { .. } => None,
             Self::NotImmune => None,
         }
     }
+}
+
+/// Checks if a binary is strictly denied from receiving blanket direct target immunity.
+fn is_blanket_immunity_denied(name: &str) -> bool {
+    let trimmed = name.trim().trim_matches('"').trim_matches('\'');
+    let base = trimmed.rsplit(['\\', '/']).next().unwrap_or(trimmed);
+    let name_lc = base.to_ascii_lowercase();
+    matches!(
+        name_lc.as_str(),
+        "wsl.exe"
+            | "wslservice.exe"
+            | "wslhost.exe"
+            | "sudo"
+            | "su"
+            | "doas"
+            | "pkexec"
+    )
 }
 
 /// Inspect target PID and traverse its parent ancestry up to depth 5.
@@ -61,7 +88,8 @@ pub fn inspect_process_lineage(target_pid: u32, proc_name: Option<&str>) -> Line
     let p_name = proc_name.unwrap_or("");
 
     // 1. Direct Target Immunity Check
-    if is_critical_system_pid(target_pid, p_name) {
+    // Privilege escalation binaries, shells, and agent interpreters NEVER receive blanket target immunity
+    if !is_blanket_immunity_denied(p_name) && is_critical_system_pid(target_pid, p_name) {
         return LineageImmunityVerdict::ImmuneTarget {
             pid: target_pid,
             proc_name: p_name.to_string(),
@@ -101,8 +129,17 @@ pub fn inspect_process_lineage(target_pid: u32, proc_name: Option<&str>) -> Line
             .map(|p| p.name())
             .unwrap_or("");
 
-        // Root boundaries or critical parent
-        if parent_pid <= 4 || is_critical_system_pid(parent_pid, parent_name) {
+        // Check if ancestor is an agent runtime or developer tool/shell
+        if is_developer_or_agent_runtime(parent_name) {
+            return LineageImmunityVerdict::AgentRuntimeChild {
+                ancestor_pid: parent_pid,
+                ancestor_name: parent_name.to_string(),
+                depth,
+            };
+        }
+
+        // Immutable kernel anchor check
+        if parent_pid <= 4 || is_immutable_os_kernel_pid(parent_pid, parent_name) {
             return LineageImmunityVerdict::ImmuneAncestor {
                 target_pid,
                 ancestor_pid: parent_pid,
@@ -200,5 +237,38 @@ mod tests {
             );
             assert_eq!(verdict.to_veto_reason(), Some(VetoReason::CriticalSystemPid));
         }
+    }
+
+    #[test]
+    fn test_privilege_escalation_and_shells_no_blanket_immunity() {
+        let non_immune = [
+            "sudo",
+            "su",
+            "wsl.exe",
+            "wslservice.exe",
+            "doas",
+            "pkexec",
+        ];
+        for app in non_immune {
+            let verdict = inspect_process_lineage(9876, Some(app));
+            assert!(
+                !verdict.is_immune(),
+                "Critical vulnerability: '{}' must NOT receive blanket target immunity",
+                app
+            );
+            assert_eq!(verdict.to_veto_reason(), None);
+        }
+    }
+
+    #[test]
+    fn test_agent_runtime_child_verdict_behavior() {
+        let child_verdict = LineageImmunityVerdict::AgentRuntimeChild {
+            ancestor_pid: 1000,
+            ancestor_name: "cursor.exe".to_string(),
+            depth: 1,
+        };
+
+        assert!(!child_verdict.is_immune());
+        assert_eq!(child_verdict.to_veto_reason(), None);
     }
 }

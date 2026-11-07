@@ -419,7 +419,7 @@ impl KillSwitchServer {
             let self_pid = std::process::id();
             let mut evaluated_signatures: std::collections::HashSet<(u32, String)> =
                 std::collections::HashSet::new();
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(3));
+            let mut interval = tokio::time::interval(std::time::Duration::from_millis(250));
             loop {
                 interval.tick().await;
                 let rows = sentinel_state
@@ -441,6 +441,24 @@ impl KillSwitchServer {
                         continue;
                     }
 
+                    // Dynamic Binary Metadata Probing & Parent-Child Token Delta Observation
+                    let mut is_priv_binary = false;
+                    if !row.image_path.is_empty() {
+                        let path = std::path::Path::new(&row.image_path);
+                        if let Ok(meta) = killswitch_adjudication::inspect_binary_metadata(path) {
+                            if meta.is_privileged_target() {
+                                is_priv_binary = true;
+                            }
+                        }
+                    }
+
+                    let token_deltas = if row.parent_pid > 0 {
+                        killswitch_adjudication::observe_parent_child_token_delta(row.parent_pid, row.pid)
+                    } else {
+                        Vec::new()
+                    };
+                    let has_priv_escalation = token_deltas.iter().any(|d| d.is_privilege_escalation());
+
                     // Fresh per-candidate breakout evaluation so OS process enumeration does not self-poison rate limits
                     let coord = killswitch_telemetry::BreakoutDefenseCoordinator::new();
                     let eval = coord.evaluate_action(
@@ -448,15 +466,33 @@ impl KillSwitchServer {
                         &row.image_path,
                         &row.command_line,
                     );
-                    if !eval.technical.is_clean || !eval.operational.is_clean || !eval.data.is_clean
+                    if !eval.technical.is_clean
+                        || !eval.operational.is_clean
+                        || !eval.data.is_clean
+                        || is_priv_binary
+                        || has_priv_escalation
                     {
+                        let base_score = eval.breakout_risk_score as f32;
+                        let elevated_score = if has_priv_escalation || is_priv_binary {
+                            f32::max(base_score, 0.95)
+                        } else {
+                            base_score
+                        };
+                        let summary = if has_priv_escalation {
+                            format!("{} [Token Escalation Detected]", eval.summary)
+                        } else if is_priv_binary {
+                            format!("{} [Privileged Binary Metadata Probed]", eval.summary)
+                        } else {
+                            eval.summary.clone()
+                        };
+
                         // Mandatory Decision Model & 5-Layer Zero-False-Positive Adjudication Governance
                         let mut candidate = killswitch_types::adjudication::ThreatCandidate::new(
                             Some(row.pid),
                             &row.process_name,
                             "live_os_ai_breakout_sentinel",
-                            &eval.summary,
-                            eval.breakout_risk_score as f32,
+                            &summary,
+                            elevated_score,
                             killswitch_types::adjudication::EvidenceClass::Behavior,
                         );
                         if !row.image_path.is_empty() {
