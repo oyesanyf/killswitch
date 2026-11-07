@@ -381,17 +381,20 @@ pub fn validate_sandbox_path(
         });
     }
 
-    // 4. Reject NTFS Alternate Data Streams (ADS)
-    for (idx, ch) in trimmed.char_indices() {
-        if ch == ':' {
-            let valid_drive_colon = idx == 1 && trimmed.as_bytes()[0].is_ascii_alphabetic();
-            if !valid_drive_colon {
-                return Err(KillSwitchError::PathTraversalBlocked {
-                    path: requested_path.to_string(),
-                    reason: "NTFS Alternate Data Stream (ADS) colon detected",
-                });
-            }
-        }
+    // 4. Reject drive letters and NTFS Alternate Data Streams (ADS) colons
+    if trimmed.contains(':') {
+        return Err(KillSwitchError::PathTraversalBlocked {
+            path: requested_path.to_string(),
+            reason: "Drive letter or NTFS Alternate Data Stream (ADS) colon detected",
+        });
+    }
+
+    // 5. Reject leading slash or backslash absolute paths
+    if trimmed.starts_with('/') || trimmed.starts_with('\\') {
+        return Err(KillSwitchError::PathTraversalBlocked {
+            path: requested_path.to_string(),
+            reason: "Leading slash or backslash absolute path rejected",
+        });
     }
 
     // 5. Reject parent directory traversal in string segments
