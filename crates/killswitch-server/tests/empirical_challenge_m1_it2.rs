@@ -36,7 +36,8 @@ const ADVERSARIAL_MASTER_TOKEN: &str = "adv_master_secret_key_9876543210_fedcba_
 fn create_test_server_state(bound_port: u16) -> Arc<ServerState> {
     std::env::set_var("KILLSWITCH_MASTER_TOKEN", ADVERSARIAL_MASTER_TOKEN);
     let temp_dir = tempfile::tempdir().unwrap();
-    let containment = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
+    let containment =
+        Arc::new(HostContainmentManager::new_simulated(Some(temp_dir.path())).unwrap());
     let state = Arc::new(ServerState::with_defaults(containment));
     state
         .active_bound_port
