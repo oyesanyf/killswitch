@@ -499,7 +499,7 @@ async fn test_empirical_adversarial_challenge_direct_target_immunity() {
 
     // Challenge B: wsl.exe as ThreatCandidate -> MUST NOT receive CriticalSystemPid veto!
     let wsl_candidate = ThreatCandidate::new(
-        Some(5000),
+        Some(4_000_004),
         "wsl.exe",
         "MeshGuard",
         "Circumvention retry",
@@ -520,7 +520,7 @@ async fn test_empirical_adversarial_challenge_direct_target_immunity() {
         ),
         "wsl.exe must NOT be vetoed under CriticalSystemPid"
     );
-    let wsl_lineage = inspect_process_lineage(5000, Some("wsl.exe"));
+    let wsl_lineage = inspect_process_lineage(4_000_004, Some("wsl.exe"));
     println!("🛡️  Lineage verdict for wsl.exe: {:?}", wsl_lineage);
     assert!(
         !wsl_lineage.is_immune(),
@@ -534,7 +534,7 @@ async fn test_empirical_adversarial_challenge_direct_target_immunity() {
 
     // Challenge C: sudo / su as ThreatCandidate -> MUST NOT receive CriticalSystemPid veto!
     for priv_tool in ["sudo", "su", "doas", "pkexec"] {
-        let lineage = inspect_process_lineage(5001, Some(priv_tool));
+        let lineage = inspect_process_lineage(4_000_005, Some(priv_tool));
         assert!(
             !lineage.is_immune(),
             "{} must NOT receive target immunity",
@@ -551,9 +551,9 @@ async fn test_empirical_adversarial_challenge_direct_target_immunity() {
     // Challenge D: EMPIRICAL AUDIT OF NODE / PYTHON / POWERSHELL / BASH TARGET IMMUNITY
     // R2 states: "Eliminate unconditional process-name immunity (including wsl.exe, sudo, su, bash, powershell.exe, node, python, cursor, code.exe)"
     // Let's test whether inspect_process_lineage grants immunity to node.exe or python.exe:
-    let node_lineage = inspect_process_lineage(5002, Some("node.exe"));
-    let python_lineage = inspect_process_lineage(5003, Some("python.exe"));
-    let ps_lineage = inspect_process_lineage(5004, Some("powershell.exe"));
+    let node_lineage = inspect_process_lineage(4_000_006, Some("node.exe"));
+    let python_lineage = inspect_process_lineage(4_000_007, Some("python.exe"));
+    let ps_lineage = inspect_process_lineage(4_000_008, Some("powershell.exe"));
 
     println!(
         "🔬 [EMPIRICAL FINDING PROBE] node.exe lineage verdict: {:?}",
@@ -569,7 +569,7 @@ async fn test_empirical_adversarial_challenge_direct_target_immunity() {
     );
 
     let node_candidate = ThreatCandidate::new(
-        Some(5002),
+        Some(4_000_006),
         "node.exe",
         "PhaseLock",
         "Reverse shell or malicious payload",

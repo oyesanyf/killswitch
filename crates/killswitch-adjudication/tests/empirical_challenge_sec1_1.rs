@@ -812,7 +812,7 @@ fn test_challenge_privilege_escalation_targets_denied_blanket_immunity() {
     ];
 
     for &target in &priv_escalation_targets {
-        let verdict = inspect_process_lineage(5555, Some(target));
+        let verdict = inspect_process_lineage(4_000_003, Some(target));
         assert!(
             !verdict.is_immune(),
             "CRITICAL: '{}' must NOT receive blanket target immunity",

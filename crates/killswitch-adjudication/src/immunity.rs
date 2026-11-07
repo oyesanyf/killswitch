@@ -69,30 +69,39 @@ impl LineageImmunityVerdict {
     }
 }
 
-/// Checks if a binary or command is strictly denied from receiving blanket direct target immunity.
-fn is_blanket_immunity_denied(name: &str) -> bool {
+/// Extracts the lowercase binary stem: strips quotes, takes first whitespace token,
+/// strips directory path components, converts to ASCII lowercase, and strips trailing `.exe`.
+pub fn extract_proc_stem(name: &str) -> String {
     let trimmed = name.trim().trim_matches('"').trim_matches('\'');
     if trimmed.is_empty() {
-        return false;
+        return String::new();
     }
-
-    // Extract first token (handling command lines such as "sudo -n id" or "wsl -u root")
     let first_token = trimmed.split_whitespace().next().unwrap_or(trimmed);
     let base = first_token
         .rsplit(['\\', '/'])
         .next()
         .unwrap_or(first_token);
     let name_lc = base.to_ascii_lowercase();
-    let name_no_exe = name_lc.trim_end_matches(".exe");
+    name_lc.trim_end_matches(".exe").to_string()
+}
+
+/// Checks if a binary or command is strictly denied from receiving blanket direct target immunity.
+fn is_blanket_immunity_denied(name: &str) -> bool {
+    let name_no_exe = extract_proc_stem(name);
+    if name_no_exe.is_empty() {
+        return false;
+    }
 
     if matches!(
-        name_no_exe,
+        name_no_exe.as_str(),
         "wsl" | "wslservice" | "wslhost" | "sudo" | "su" | "doas" | "pkexec" | "runas"
     ) {
         return true;
     }
 
     // Dynamic binary metadata probe: if path exists on disk, probe for SUID or PE admin manifest
+    let trimmed = name.trim().trim_matches('"').trim_matches('\'');
+    let first_token = trimmed.split_whitespace().next().unwrap_or(trimmed);
     let candidate_path = std::path::Path::new(first_token);
     if candidate_path.exists() {
         if let Ok(meta) = crate::binary_probe::inspect_binary_metadata(candidate_path) {
@@ -108,10 +117,11 @@ fn is_blanket_immunity_denied(name: &str) -> bool {
 /// Inspect target PID and traverse its parent ancestry up to depth 5.
 pub fn inspect_process_lineage(target_pid: u32, proc_name: Option<&str>) -> LineageImmunityVerdict {
     let p_name = proc_name.unwrap_or("");
+    let denied = is_blanket_immunity_denied(p_name);
 
     // 1. Direct Target Immunity Check
     // Privilege escalation binaries, shells, and agent interpreters NEVER receive blanket target immunity
-    if !is_blanket_immunity_denied(p_name) && is_critical_system_pid(target_pid, p_name) {
+    if !denied && is_critical_system_pid(target_pid, p_name) {
         return LineageImmunityVerdict::ImmuneTarget {
             pid: target_pid,
             proc_name: p_name.to_string(),
@@ -121,6 +131,19 @@ pub fn inspect_process_lineage(target_pid: u32, proc_name: Option<&str>) -> Line
     // 2. Ancestry Traversal using reusable process-only scanner
     let mut sys = shared_ancestry_scanner().lock();
     sys.refresh_processes_specifics(ProcessRefreshKind::new());
+
+    // TOCTOU PID-reuse immunity leak & synthetic test PID collision defense:
+    // If a non-empty expected process name was provided for a target PID (> 4 and not self),
+    // verify the live process name stem matches the expected stem.
+    if !p_name.is_empty() && target_pid > 4 && target_pid != std::process::id() {
+        if let Some(live_proc) = sys.process(Pid::from_u32(target_pid)) {
+            let live_stem = extract_proc_stem(live_proc.name());
+            let expected_stem = extract_proc_stem(p_name);
+            if !live_stem.is_empty() && !expected_stem.is_empty() && live_stem != expected_stem {
+                return LineageImmunityVerdict::NotImmune;
+            }
+        }
+    }
 
     let mut current_pid = target_pid;
     let mut visited = HashSet::new();
@@ -158,7 +181,7 @@ pub fn inspect_process_lineage(target_pid: u32, proc_name: Option<&str>) -> Line
         }
 
         // Immutable kernel anchor check
-        if parent_pid <= 4 || is_immutable_os_kernel_pid(parent_pid, parent_name) {
+        if !denied && (parent_pid <= 4 || is_immutable_os_kernel_pid(parent_pid, parent_name)) {
             return LineageImmunityVerdict::ImmuneAncestor {
                 target_pid,
                 ancestor_pid: parent_pid,
@@ -285,7 +308,7 @@ mod tests {
             "runas /user:Administrator cmd.exe",
         ];
         for app in non_immune {
-            let verdict = inspect_process_lineage(9876, Some(app));
+            let verdict = inspect_process_lineage(4_000_001, Some(app));
             assert!(
                 !verdict.is_immune(),
                 "Critical vulnerability: '{}' must NOT receive blanket target immunity",
@@ -312,7 +335,7 @@ mod tests {
         std::fs::write(&bin_path, manifest).unwrap();
 
         let path_str = bin_path.to_str().unwrap();
-        let verdict_dynamic = inspect_process_lineage(8888, Some(path_str));
+        let verdict_dynamic = inspect_process_lineage(4_000_002, Some(path_str));
         assert!(
             !verdict_dynamic.is_immune(),
             "Renamed executable with requireAdministrator manifest must NOT receive blanket immunity"
