@@ -44,40 +44,63 @@ fn test_subsystem_diagnostics_live_binary_verify_and_check() {
         .to_path_buf();
 
     let candidates_killswitch = [
-        workspace_root.join("killswitch.exe"),
-        workspace_root
-            .join("target")
-            .join("debug")
-            .join("killswitch.exe"),
-        workspace_root
-            .join("target")
-            .join("release")
-            .join("killswitch.exe"),
+        option_env!("CARGO_BIN_EXE_killswitch").map(PathBuf::from),
+        Some(
+            workspace_root
+                .join("target")
+                .join("debug")
+                .join("killswitch"),
+        ),
+        Some(
+            workspace_root
+                .join("target")
+                .join("debug")
+                .join("killswitch.exe"),
+        ),
+        Some(
+            workspace_root
+                .join("target")
+                .join("release")
+                .join("killswitch"),
+        ),
+        Some(
+            workspace_root
+                .join("target")
+                .join("release")
+                .join("killswitch.exe"),
+        ),
+        Some(workspace_root.join("killswitch")),
+        Some(workspace_root.join("killswitch.exe")),
     ];
     let killswitch_exe = candidates_killswitch
         .into_iter()
-        .find(|p| p.exists())
-        .unwrap_or_else(|| workspace_root.join("killswitch.exe"));
+        .flatten()
+        .find(|p| p.exists());
 
     let candidates_start = [
-        workspace_root.join("start.exe"),
-        workspace_root
-            .join("target")
-            .join("debug")
-            .join("start.exe"),
-        workspace_root
-            .join("target")
-            .join("release")
-            .join("start.exe"),
+        option_env!("CARGO_BIN_EXE_start").map(PathBuf::from),
+        Some(workspace_root.join("target").join("debug").join("start")),
+        Some(
+            workspace_root
+                .join("target")
+                .join("debug")
+                .join("start.exe"),
+        ),
+        Some(workspace_root.join("target").join("release").join("start")),
+        Some(
+            workspace_root
+                .join("target")
+                .join("release")
+                .join("start.exe"),
+        ),
+        Some(workspace_root.join("start")),
+        Some(workspace_root.join("start.exe")),
     ];
-    let start_exe = candidates_start
-        .into_iter()
-        .find(|p| p.exists())
-        .unwrap_or_else(|| workspace_root.join("start.exe"));
+    let start_exe = candidates_start.into_iter().flatten().find(|p| p.exists());
 
     assert!(
-        killswitch_exe.exists() || start_exe.exists(),
-        "killswitch.exe or start.exe must exist at root workspace or target/debug: {:?}",
+        killswitch_exe.is_some() || start_exe.is_some(),
+        "killswitch or start binary must exist at CARGO_BIN_EXE, root workspace, or target/debug: {:?}",
         workspace_root
     );
 
@@ -93,51 +116,58 @@ fn test_subsystem_diagnostics_live_binary_verify_and_check() {
             .map_err(|e| e.raw_os_error().unwrap_or(-1))
     };
 
-    let (active_exe, output_verify) = if killswitch_exe.exists() {
-        match probe_binary(&killswitch_exe) {
-            Ok(output) => (killswitch_exe, output),
+    let (active_exe, output_verify) = if let Some(ref ks) = killswitch_exe {
+        match probe_binary(ks) {
+            Ok(output) => (ks.clone(), output),
             Err(4551) => {
                 eprintln!(
-                    "[SAC_POLICY_NOTICE] killswitch.exe blocked by Windows Application Control (OS error 4551). Trying start.exe..."
+                    "[SAC_POLICY_NOTICE] killswitch blocked by Windows Application Control (OS error 4551). Trying start..."
                 );
-                if start_exe.exists() {
-                    match probe_binary(&start_exe) {
-                        Ok(output) => (start_exe, output),
+                if let Some(ref st) = start_exe {
+                    match probe_binary(st) {
+                        Ok(output) => (st.clone(), output),
                         Err(4551) => {
                             eprintln!(
-                                "[SAC_POLICY_NOTICE] Both killswitch.exe and start.exe blocked by Windows Application Control (OS error 4551). Skipping live binary test under host SAC restriction."
+                                "[SAC_POLICY_NOTICE] Both killswitch and start blocked by Windows Application Control (OS error 4551). Skipping live binary test under host SAC restriction."
                             );
                             return;
                         }
                         Err(code) => panic!(
-                            "Failed to execute start.exe --verify (OS error {}): {:?}",
-                            code, start_exe
+                            "Failed to execute {:?} --verify (OS error {}): {:?}",
+                            st.file_name().unwrap_or_default(),
+                            code,
+                            st
                         ),
                     }
                 } else {
                     eprintln!(
-                        "[SAC_POLICY_NOTICE] killswitch.exe blocked by SAC (OS error 4551) and start.exe not found. Skipping live binary test."
+                        "[SAC_POLICY_NOTICE] killswitch blocked by SAC (OS error 4551) and start not found. Skipping live binary test."
                     );
                     return;
                 }
             }
             Err(code) => panic!(
-                "Failed to execute killswitch.exe --verify (OS error {}): {:?}",
-                code, killswitch_exe
+                "Failed to execute {:?} --verify (OS error {}): {:?}",
+                ks.file_name().unwrap_or_default(),
+                code,
+                ks
             ),
         }
     } else {
-        match probe_binary(&start_exe) {
-            Ok(output) => (start_exe, output),
+        let st = start_exe.as_ref().unwrap();
+        match probe_binary(st) {
+            Ok(output) => (st.clone(), output),
             Err(4551) => {
                 eprintln!(
-                    "[SAC_POLICY_NOTICE] start.exe blocked by Windows Application Control (OS error 4551). Skipping live binary test."
+                    "[SAC_POLICY_NOTICE] start blocked by Windows Application Control (OS error 4551). Skipping live binary test."
                 );
                 return;
             }
             Err(code) => panic!(
-                "Failed to execute start.exe --verify (OS error {}): {:?}",
-                code, start_exe
+                "Failed to execute {:?} --verify (OS error {}): {:?}",
+                st.file_name().unwrap_or_default(),
+                code,
+                st
             ),
         }
     };
