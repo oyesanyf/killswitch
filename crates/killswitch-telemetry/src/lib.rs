@@ -26,10 +26,15 @@ pub mod phaselock;
 pub mod rate_limit_backoff;
 pub mod ring0_driver_loader;
 pub mod rl_traffic;
+pub mod semantic_command;
 pub mod tamper_and_process_killswitch;
 pub mod watchdog;
 
 // Re-exports for clean ergonomics
+pub use semantic_command::{
+    parse_semantic_command, parse_semantic_command_with_probe, tokenize_command,
+    DynamicBinaryMetadataProbe, ElevationRequirement, PrivilegeEquivalenceClass, SemanticCommand,
+};
 pub use attack::{
     AttackGraphMatcher, AttackPattern, AttackSequenceEvaluation, AttackStage, ProcessTimelineEvent,
 };

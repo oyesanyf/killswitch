@@ -93,7 +93,21 @@ fn intersect_pattern_sets(a: &BTreeSet<String>, b: &BTreeSet<String>) -> BTreeSe
 
 /// Maps a concrete tool/action name to its canonical APC action class for composition checking.
 pub fn classify_action_class(action: &str) -> &'static str {
-    let lower = action.to_ascii_lowercase();
+    let lower = action.trim().to_ascii_lowercase();
+    if lower == "privileged_execution" || lower.starts_with("privileged_execution") {
+        return "PRIVILEGED_EXECUTION";
+    }
+
+    // 1. Structural semantic command evaluation for privilege escalation
+    let sem = crate::semantic_command::parse_semantic_command(action);
+    if sem.privilege_class.is_privileged_execution() {
+        return "PRIVILEGED_EXECUTION";
+    }
+    if sem.privilege_class == crate::semantic_command::PrivilegeEquivalenceClass::PrivilegeQueryOrBenign {
+        return "READ_PUBLIC";
+    }
+
+    // 2. Tool name and action keyword classification
     if lower.contains("read_confidential")
         || lower.contains("secret")
         || lower.contains("credential")
@@ -1181,14 +1195,20 @@ impl ApcPolicyDecisionPoint {
         satisfied.push("C3_CONTEXT".to_string());
 
         // C4: Single-Use Action-Hash Bound Approval Token
-        if req.requires_approval || req.is_irreversible {
+        let action_class = classify_action_class(&req.action);
+        let is_privileged_execution = action_class == "PRIVILEGED_EXECUTION";
+        if req.requires_approval || req.is_irreversible || is_privileged_execution {
             let Some(token) = &req.approval_token else {
                 return self.deny(
                     envelope,
                     req,
                     satisfied,
                     "C4_APPROVAL_MISSING",
-                    "High-consequence or irreversible action requires ApprovalToken",
+                    if is_privileged_execution {
+                        "Privileged execution attempt requires elevation ApprovalToken"
+                    } else {
+                        "High-consequence or irreversible action requires ApprovalToken"
+                    },
                 );
             };
             if req.now_unix > token.expires_at_unix {
@@ -1354,6 +1374,16 @@ when {
     !context.evidence_sink_healthy ||
     context.intent_strict_mismatch
 };
+
+@id("arxiv-2608-15888-apc-c4-privileged-execution-guard")
+forbid (
+    principal,
+    action,
+    resource
+)
+when {
+    context.action_class == "PRIVILEGED_EXECUTION" && !context.approval_token_valid
+};
 "#
 }
 
@@ -1363,11 +1393,23 @@ pub fn default_enterprise_apc_scope() -> ApcScope {
         ["docs/*", "external/email", "internal/*"],
         ["read_confidential", "send_email", "read_public"],
         ["CONFIDENTIAL", "PUBLIC", "INTERNAL"],
-        [PairwiseRestriction::new(
-            "no_confidential_exfil",
-            "READ_CONFIDENTIAL",
-            "EXTERNAL_TRANSMIT",
-        )],
+        [
+            PairwiseRestriction::new(
+                "no_confidential_exfil",
+                "READ_CONFIDENTIAL",
+                "EXTERNAL_TRANSMIT",
+            ),
+            PairwiseRestriction::new(
+                "no_privileged_execution_after_confidential_read",
+                "READ_CONFIDENTIAL",
+                "PRIVILEGED_EXECUTION",
+            ),
+            PairwiseRestriction::new(
+                "no_external_transmit_after_privileged_execution",
+                "PRIVILEGED_EXECUTION",
+                "EXTERNAL_TRANSMIT",
+            ),
+        ],
         [KTupleRestriction::new(
             "ordered_q3_exfil",
             vec![
@@ -1422,7 +1464,7 @@ mod tests {
         assert!(!narrowed.allows_resource("ungranted/secret"));
         assert!(narrowed.allows_action("read_confidential"));
         assert!(!narrowed.allows_action("exec_shell"));
-        assert_eq!(narrowed.pairwise_restrictions.len(), 2);
+        assert_eq!(narrowed.pairwise_restrictions.len(), parent.pairwise_restrictions.len() + 1);
         assert_eq!(narrowed.ktuple_restrictions.len(), 1);
         assert!(narrowed.blast_radius() <= parent.blast_radius());
     }
@@ -1626,5 +1668,218 @@ mod tests {
         let c5_fail = pdp.evaluate(&env, &intent, &req_no_approval);
         assert!(!c5_fail.allowed);
         assert_eq!(c5_fail.failed_condition.as_deref(), Some("C5_EVIDENCE"));
+    }
+
+    #[test]
+    fn test_privileged_execution_action_classification_no_read_public_fallthrough() {
+        let elevation_commands = [
+            "sudo -n id",
+            "sudo id",
+            "wsl -u root id",
+            "wsl -u 0 id",
+            "wsl --user root whoami",
+            "runas /user:Administrator cmd.exe",
+            "runas /user:SYSTEM powershell.exe",
+            "sudo -u www-data cat /var/log/nginx/access.log",
+            "su -",
+            "su root",
+            "su alice",
+            "doas rm /var/log/syslog",
+            "pkexec id",
+            "PRIVILEGED_EXECUTION",
+        ];
+
+        for cmd in elevation_commands {
+            let class = classify_action_class(cmd);
+            assert_eq!(
+                class, "PRIVILEGED_EXECUTION",
+                "Command '{}' must resolve to PRIVILEGED_EXECUTION",
+                cmd
+            );
+            assert_ne!(
+                class, "READ_PUBLIC",
+                "Command '{}' must NEVER fall through to READ_PUBLIC",
+                cmd
+            );
+        }
+
+        let benign_queries = [
+            "sudo -l",
+            "sudo -V",
+            "sudo -h",
+            "wsl -l -v",
+            "wsl --status",
+            "pkexec --version",
+        ];
+
+        for query in benign_queries {
+            let class = classify_action_class(query);
+            assert_eq!(
+                class, "READ_PUBLIC",
+                "Query command '{}' should resolve to READ_PUBLIC",
+                query
+            );
+        }
+    }
+
+    #[test]
+    fn test_c4_privileged_execution_requires_approval_token() {
+        let key = b"killswitch-apc-test-key-32-bytes";
+        let pdp = ApcPolicyDecisionPoint::new(key.to_vec(), "v1.0", true);
+        let mut scope = sample_scope();
+        scope.actions.insert("sudo -n id".to_string());
+        scope.resources.insert("system/kernel".to_string());
+
+        let env = AuthorizationEnvelope::new_root(
+            "env-elevate",
+            "principal-admin",
+            "agent-worker-1",
+            "sess-elevate",
+            "v1.0",
+            scope,
+            DelegationBudgetSpec::default(),
+            1_700_000_000,
+            1_700_003_600,
+            key,
+        );
+
+        let mut action_map = BTreeMap::new();
+        action_map.insert("sudo -n id".to_string(), BTreeSet::from(["system/kernel".to_string()]));
+        let intent = IntentSpec {
+            intent_id: "intent-elevate".to_string(),
+            intended_actions: BTreeSet::new(),
+            intended_resources: BTreeSet::new(),
+            action_resource_map: action_map,
+            mode: IntentEnforcementMode::Strict,
+        };
+
+        // Attempt privileged execution WITHOUT approval token -> DENIED at C4
+        let req_no_tok = ApcActionRequest {
+            actor_id: "agent-worker-1".to_string(),
+            action: "sudo -n id".to_string(),
+            resource: "system/kernel".to_string(),
+            data_classification: "INTERNAL".to_string(),
+            parameters_canonical: "{}".to_string(),
+            task_session_id: "sess-elevate".to_string(),
+            policy_version: "v1.0".to_string(),
+            now_unix: 1_700_000_100,
+            requires_approval: false, // Even if caller claimed false, PDP overrides for PRIVILEGED_EXECUTION!
+            approval_token: None,
+            is_irreversible: false,
+            sensitivity_tier: 1,
+            is_cross_domain: false,
+            cost_delta: 0.1,
+        };
+
+        let dec_denied = pdp.evaluate(&env, &intent, &req_no_tok);
+        assert!(!dec_denied.allowed);
+        assert_eq!(dec_denied.failed_condition.as_deref(), Some("C4_APPROVAL_MISSING"));
+        assert!(dec_denied.reason.contains("Privileged execution attempt requires elevation ApprovalToken"));
+
+        // Present valid elevation ApprovalToken -> ALLOWED
+        let token = ApprovalToken::issue(
+            "tok-elevate-1",
+            "secops-approver",
+            "agent-worker-1",
+            "sudo -n id",
+            "system/kernel",
+            "sess-elevate",
+            "{}",
+            1_700_001_000,
+            key,
+        );
+        let req_with_tok = ApcActionRequest {
+            approval_token: Some(token),
+            ..req_no_tok
+        };
+
+        let dec_allowed = pdp.evaluate(&env, &intent, &req_with_tok);
+        assert!(dec_allowed.allowed, "Privileged execution with valid token must be allowed: {:?}", dec_allowed);
+    }
+
+    #[test]
+    fn test_pairwise_privileged_execution_after_confidential_read_blocked() {
+        let key = b"killswitch-apc-test-key-32-bytes";
+        let pdp = ApcPolicyDecisionPoint::new(key.to_vec(), "v1.0", true);
+        let mut scope = sample_scope();
+        scope.actions.insert("sudo -n id".to_string());
+        scope.resources.insert("system/kernel".to_string());
+
+        let env = AuthorizationEnvelope::new_root(
+            "env-pairwise",
+            "principal-alice",
+            "agent-worker-1",
+            "sess-pw-1",
+            "v1.0",
+            scope,
+            DelegationBudgetSpec::default(),
+            1_700_000_000,
+            1_700_003_600,
+            key,
+        );
+
+        let mut action_map = BTreeMap::new();
+        action_map.insert("read_confidential".to_string(), BTreeSet::from(["docs/*".to_string()]));
+        action_map.insert("sudo -n id".to_string(), BTreeSet::from(["system/kernel".to_string()]));
+        let intent = IntentSpec {
+            intent_id: "intent-pw".to_string(),
+            intended_actions: BTreeSet::new(),
+            intended_resources: BTreeSet::new(),
+            action_resource_map: action_map,
+            mode: IntentEnforcementMode::Strict,
+        };
+
+        // Step 1: Read confidential data -> ALLOWED
+        let req1 = ApcActionRequest {
+            actor_id: "agent-worker-1".to_string(),
+            action: "read_confidential".to_string(),
+            resource: "docs/secret-keys".to_string(),
+            data_classification: "CONFIDENTIAL".to_string(),
+            parameters_canonical: "{}".to_string(),
+            task_session_id: "sess-pw-1".to_string(),
+            policy_version: "v1.0".to_string(),
+            now_unix: 1_700_000_100,
+            requires_approval: false,
+            approval_token: None,
+            is_irreversible: false,
+            sensitivity_tier: 2,
+            is_cross_domain: false,
+            cost_delta: 0.1,
+        };
+        let dec1 = pdp.evaluate(&env, &intent, &req1);
+        assert!(dec1.allowed);
+
+        // Step 2: Attempt privileged execution in same session -> BLOCKED by pairwise rule!
+        let token = ApprovalToken::issue(
+            "tok-pw-1",
+            "approver",
+            "agent-worker-1",
+            "sudo -n id",
+            "system/kernel",
+            "sess-pw-1",
+            "{}",
+            1_700_001_000,
+            key,
+        );
+        let req2 = ApcActionRequest {
+            actor_id: "agent-worker-1".to_string(),
+            action: "sudo -n id".to_string(),
+            resource: "system/kernel".to_string(),
+            data_classification: "INTERNAL".to_string(),
+            parameters_canonical: "{}".to_string(),
+            task_session_id: "sess-pw-1".to_string(),
+            policy_version: "v1.0".to_string(),
+            now_unix: 1_700_000_150,
+            requires_approval: true,
+            approval_token: Some(token),
+            is_irreversible: false,
+            sensitivity_tier: 1,
+            is_cross_domain: false,
+            cost_delta: 0.1,
+        };
+        let dec2 = pdp.evaluate(&env, &intent, &req2);
+        assert!(!dec2.allowed);
+        assert_eq!(dec2.failed_condition.as_deref(), Some("C2_COMPOSITION"));
+        assert!(dec2.reason.contains("no_privileged_execution_after_confidential_read"));
     }
 }
