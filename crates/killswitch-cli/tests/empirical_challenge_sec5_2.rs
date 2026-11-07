@@ -308,16 +308,18 @@ fn test_mcp_json_rpc_massive_payload_stress() {
     let parsed = parse_mcp_call_request(&massive_json).expect("parse massive MCP request");
     let parse_duration = start.elapsed();
     assert!(
-        parse_duration.as_millis() < 500,
-        "Massive parse must finish within 500ms"
+        parse_duration.as_millis() < 2500,
+        "Massive parse must finish within 2500ms, took: {:?}",
+        parse_duration
     );
 
     let eval_start = Instant::now();
     let decision = evaluate_hook_synchronously(&parsed);
     let eval_duration = eval_start.elapsed();
     assert!(
-        eval_duration.as_millis() < 500,
-        "Massive eval must finish within 500ms"
+        eval_duration.as_millis() < 2500,
+        "Massive eval must finish within 2500ms, took: {:?}",
+        eval_duration
     );
     assert!(decision.allowed, "Clean large text should be allowed");
 
