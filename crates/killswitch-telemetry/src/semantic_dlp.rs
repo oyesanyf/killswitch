@@ -765,11 +765,19 @@ impl SemanticDlpEngine {
 
     fn detect_deal_values(&self, payload: &str, lower: &str, matches: &mut Vec<SemanticDlpEntity>) {
         let is_deal_context = lower.contains("deal value")
+            || lower.contains("deal_value")
+            || lower.contains("deal-value")
             || lower.contains("acquisition")
             || lower.contains("valuation")
             || lower.contains("purchase price")
+            || lower.contains("purchase_price")
             || lower.contains("merger")
-            || lower.contains("transaction value");
+            || lower.contains("transaction value")
+            || lower.contains("transaction_value")
+            || lower.contains("оценка")
+            || lower.contains("сделки")
+            || lower.contains("приобретен")
+            || lower.contains("стоимость");
 
         if !is_deal_context {
             return;
@@ -784,9 +792,17 @@ impl SemanticDlpEngine {
 
         while i < tokens.len() {
             let token = tokens[i];
-            let trimmed = token.trim_matches([
+            let mut trimmed = token.trim_matches([
                 ',', ';', ':', '(', ')', '[', ']', '{', '}', '"', '\'', '\\', '=', '&',
             ]);
+            trimmed = trimmed.trim_start_matches(|c: char| {
+                !c.is_ascii_digit() && !CURRENCY_SYMBOLS.contains(&c) && !c.is_ascii_alphabetic()
+            });
+
+            if trimmed.is_empty() {
+                i += 1;
+                continue;
+            }
 
             // 1. Identify currency prefix and extract numeric candidate string
             enum CurrencyMatch<'a> {
@@ -799,7 +815,7 @@ impl SemanticDlpEngine {
             // Check single-char currency symbols
             if let Some(&sym) = CURRENCY_SYMBOLS.iter().find(|&&s| trimmed.starts_with(s)) {
                 let rest = &trimmed[sym.len_utf8()..];
-                let num_part = rest.trim_start_matches([':', '=', '-']);
+                let num_part = rest.trim_start_matches([':', '=', '-', ' ']);
                 if num_part.is_empty() {
                     currency_match = Some(CurrencyMatch::Separated);
                 } else if num_part
@@ -830,6 +846,43 @@ impl SemanticDlpEngine {
                             currency_match = Some(CurrencyMatch::Attached(num_part));
                         }
                     }
+                }
+            }
+
+            // Check digit-first amounts (e.g. "15M USD", "20M EUR", or "1.2B" in deal context)
+            if currency_match.is_none()
+                && trimmed.chars().next().map_or(false, |c| c.is_ascii_digit())
+            {
+                let has_currency_suffix = if i + 1 < tokens.len() {
+                    let next_clean = tokens[i + 1].trim_matches([
+                        ',', ';', ':', '(', ')', '[', ']', '{', '}', '"', '\'', '\\', '=', '&',
+                    ]);
+                    ISO_CURRENCIES
+                        .iter()
+                        .any(|&c| next_clean.eq_ignore_ascii_case(c))
+                        || CURRENCY_SYMBOLS.iter().any(|&s| next_clean.starts_with(s))
+                } else {
+                    false
+                };
+
+                let has_magnitude = trimmed.ends_with('M')
+                    || trimmed.ends_with('m')
+                    || trimmed.ends_with('B')
+                    || trimmed.ends_with('b')
+                    || trimmed.ends_with('K')
+                    || trimmed.ends_with('k')
+                    || (i + 1 < tokens.len() && {
+                        let la = tokens[i + 1]
+                            .trim_matches([',', ';', ':', '(', ')', '[', ']', '"', '\''])
+                            .to_ascii_lowercase();
+                        matches!(
+                            la.as_str(),
+                            "million" | "m" | "billion" | "b" | "thousand" | "k"
+                        )
+                    });
+
+                if has_currency_suffix || has_magnitude {
+                    currency_match = Some(CurrencyMatch::Attached(trimmed));
                 }
             }
 
