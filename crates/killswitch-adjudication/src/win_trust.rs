@@ -78,6 +78,7 @@ pub fn get_cached_authenticode_status(path: &str) -> AuthenticodeStatus {
         return AuthenticodeStatus::not_signed();
     }
 
+    #[allow(unused_mut)]
     let mut status = check_authenticode_status(path);
 
     #[cfg(target_os = "windows")]
