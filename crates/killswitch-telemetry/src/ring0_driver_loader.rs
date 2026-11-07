@@ -8,8 +8,8 @@
 //!    - Transparently states that it should NOT be called a replacement for a Ring-0 kernel EDR
 //!      driver (like CrowdStrike or Microsoft Defender) on general corporate laptops—unless its
 //!      user-space engine is paired with a real Windows ETW kernel provider subscription / Sysmon
-//!      feed, a Linux eBPF ring-buffer loader, or the included EV/WHQL-signed Windows `.sys`
-//!      Minifilter/ELAM driver.
+//!      feed, a Linux eBPF ring-buffer loader, or an enterprise-compiled and EV/WHQL-signed Windows `.sys`
+//!      Minifilter/ELAM driver built from provided reference sources.
 //! 2. **Fail-Closed Windows PE32+ `.sys` Minifilter & ELAM Verifier (`verify_windows_pe_sys_binary`)**:
 //!    - Parses real PE32+ headers (`MZ`, `PE\0\0`, `IMAGE_OPTIONAL_HEADER64`), enforces
 //!      `IMAGE_SUBSYSTEM_NATIVE (1)` and `IMAGE_DLLCHARACTERISTICS_FORCE_INTEGRITY (0x0080)`
@@ -86,7 +86,7 @@ impl Default for EdrArchitectureClassification {
         Self {
             is_traditional_full_kernel_edr: false,
             primary_classification: "Agentic EDR & Runtime Governance Kill-Switch (User-Space Behavioral EDR + CAGE/APC Control Plane)".to_string(),
-            traditional_edr_disclaimer: "KillSwitch is an Agentic EDR & Runtime Governance Kill-Switch (or User-Space Behavioral EDR + CAGE/APC Control Plane): it governs AI agents before tool actuation and monitors/contains the host process lineage and network sockets during execution. Do NOT call it a replacement for a Ring-0 kernel EDR driver (like CrowdStrike or Microsoft Defender) on general corporate laptops—unless you pair its user-space engine with a real Windows ETW kernel provider subscription / Sysmon feed, a Linux eBPF ring-buffer loader, or the included EV/WHQL-signed Ring-0 minifilter driver. If you are running autonomous AI coding agents, computer-use agents, MCP tool servers, or local LLM workflows on a workstation or server and want a deterministic runtime governor + hardware-anchored emergency circuit breaker that can stop data exfiltration or rogue agent actions in milliseconds, it is a very good, uniquely capable tool.".to_string(),
+            traditional_edr_disclaimer: "KillSwitch is an Agentic EDR & Runtime Governance Kill-Switch (or User-Space Behavioral EDR + CAGE/APC Control Plane): it governs AI agents before tool actuation and monitors/contains the host process lineage and network sockets during execution. Do NOT call it a replacement for a Ring-0 kernel EDR driver on general corporate laptops—KillSwitch runs as a 100% native user-mode agent utilizing OS-provided user-mode WFP, Landlock, and /dev/pf APIs. Optional driver source templates in drivers/ can be compiled and enterprise-signed for out-of-tree kernel integration. If you are running autonomous AI coding agents, computer-use agents, MCP tool servers, or local LLM workflows on a workstation or server and want a deterministic runtime governor + hardware-anchored emergency circuit breaker that can stop data exfiltration or rogue agent actions in milliseconds, it is a very good, uniquely capable tool.".to_string(),
             active_standalone_capabilities: vec![
                 "Kernel Network Quarantine (Windows WFP FwpmFilterAdd0, macOS /dev/pf, Linux Netlink/Landlock)".to_string(),
                 "Live User-Mode Process & Socket Lineage Tree (edr_behavioral.rs & rl_traffic.rs)".to_string(),
@@ -259,6 +259,11 @@ pub struct Ring0DriverStatusReport {
     pub ring0_frames_ingested: u64,
     pub ring0_frames_rejected_hmac: u64,
     pub last_verified_frame_seq: u64,
+}
+
+/// Computes lowercase hex-encoded SHA-256 digest of arbitrary byte slices.
+pub fn compute_sha256_hex(bytes: &[u8]) -> String {
+    hex::encode(Sha256::digest(bytes))
 }
 
 /// Verifies a Windows PE32+ `.sys` driver image for Ring-0 `FltRegisterFilter` and `ObRegisterCallbacks` compliance.

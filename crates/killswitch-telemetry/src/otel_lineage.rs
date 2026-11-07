@@ -629,6 +629,38 @@ impl EndpointLineageEngine {
         self.content_catalog.insert(sha256.to_ascii_lowercase(), state);
     }
 
+    /// Dynamically taints an active process from semantic entities identified at runtime,
+    /// eliminating the need for hand-seeded static file hashes.
+    pub fn taint_process_from_semantic_entities(
+        &self,
+        proc_key: ProcessKey,
+        source_label: &str,
+        entities: &[crate::semantic_dlp::SemanticDlpEntity],
+    ) {
+        if entities.is_empty() {
+            return;
+        }
+        let mut highest_class = DlpClassification::Public;
+        let mut highest_policy = DlpPolicy::Allow;
+        for entity in entities {
+            highest_class = highest_class.join(entity.classification);
+            highest_policy = highest_policy.join(entity.policy);
+        }
+        if !highest_policy.is_enforced() {
+            return;
+        }
+        let synthetic_sha = blake3::hash(source_label.as_bytes()).to_hex().to_string();
+        let baggage = TaintBaggage::new(highest_class, highest_policy, synthetic_sha);
+        if let Some(mut proc_entry) = self.process_table.get_mut(&proc_key) {
+            if let Some(existing) = &mut proc_entry.baggage {
+                existing.merge(&baggage);
+            } else {
+                proc_entry.baggage = Some(baggage);
+            }
+            proc_entry.updated_at = Utc::now();
+        }
+    }
+
     /// Handles process execution, propagating parent taint state if parent was tainted.
     pub fn on_process_create(
         &self,

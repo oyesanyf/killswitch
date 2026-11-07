@@ -999,3 +999,30 @@ pub struct CageConformalValidateResponse {
     pub signature: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RlLearnRequest {
+    pub destination_url: String,
+    pub process_name: Option<String>,
+    pub payload_taint_level: Option<f64>,
+    pub ai_breakout_signal: Option<f64>,
+    pub is_legitimate_transaction: bool,
+    #[serde(default)]
+    pub token: Option<String>,
+    #[serde(default)]
+    pub caller_pid: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RateLimitAllowlistRequest {
+    pub destination_host: String,
+    pub protocol: Option<String>,
+    pub pid: Option<u32>,
+    #[serde(default)]
+    pub caller_pid: Option<u32>,
+    pub operator: Option<String>,
+    pub reason: Option<String>,
+    pub clear: Option<bool>,
+    #[serde(default)]
+    pub token: Option<String>,
+}
+

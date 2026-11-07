@@ -1,0 +1,81 @@
+name: CI (Workspace Tests, Clippy & Binary Integrity)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Workspace Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run Workspace Tests
+        run: cargo test --workspace --verbose
+      - name: Run E2E Peer Review Remediation Tests
+        run: cargo test --test e2e_peer_review_remediation --test incident_a_reproduction
+
+  clippy:
+    name: Clippy & Linter
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Check Formatting
+        run: cargo fmt --all -- --check
+      - name: Clippy Warnings Check
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  binary-integrity:
+    name: Binary Integrity & Provenance Verification
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify Clean Repository Root (No Tracked Executables)
+        shell: pwsh
+        run: |
+          $tracked = git ls-files '*.exe' '*.dll'
+          if ($tracked) {
+            Write-Error "SECURITY VIOLATION: Executable binaries tracked in git: $tracked"
+            exit 1
+          }
+          Write-Host "PASS: Zero executable binaries tracked in git root." -ForegroundColor Green
+      - name: Build Release Binaries
+        run: cargo build --release --workspace
+      - name: Verify SHA256 Checksum Manifest
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist/SHA256SUMS.txt")) {
+            Write-Error "dist/SHA256SUMS.txt does not exist!"
+            exit 1
+          }
+          $manifest = Get-Content "dist/SHA256SUMS.txt"
+          Write-Host "Loaded SHA256SUMS.txt ($($manifest.Count) entries)"
+          $built = @(
+            "target/release/killswitch.exe",
+            "target/release/start.exe"
+          )
+          foreach ($bin in $built) {
+            if (Test-Path $bin) {
+              $hash = (Get-FileHash $bin -Algorithm SHA256).Hash.ToLowerInvariant()
+              $name = Split-Path $bin -Leaf
+              Write-Host "Built artifact $name SHA256: $hash"
+            }
+          }

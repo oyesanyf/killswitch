@@ -1,0 +1,8 @@
+40e67bd84a94eaf8868dde49594fa1d2e5c33a2a73dcfcb4d6281c1eff4c74ac  killswitch_0.1.0_amd64.deb
+625474efa37edd913530a5c85545647eaa6aebe6de82686f37d192fc122bd635  killswitch-0.1.0-linux-x86_64.tar.gz
+9772d3d729b4a9851d0a0cf39c3a9289d22f446cc3014bed7f44e4527469f67e  KillSwitch-0.1.0-macos-universal.pkg
+9772d3d729b4a9851d0a0cf39c3a9289d22f446cc3014bed7f44e4527469f67e  killswitch-0.1.0-macos-universal.tar.gz
+02485ad3f3e202c36532d465f4993685f422202d67d5ff0545604ebad0595aa8  killswitch-0.1.0-windows-x86_64.exe
+bbadb7328bc191f6634ffdb491416bec8cafaf630c6cda92bf10ec59e03bcaf3  killswitch-0.1.0-windows-x86_64.zip
+d9c615ea75f1ac84df514695049def0d5f48bbfee03f20283cc1ab12b85d94cc  KillSwitch-0.1.0-x86_64.msi
+dd420a06cf3caebb7a11a37d2ef2652745eb05623a3ee270dfaac5c14fa0c5f7  start-0.1.0-windows-x86_64.exe

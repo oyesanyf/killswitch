@@ -4,6 +4,8 @@ crates/killswitch-core/database/
 active_port.txt
 *.old.exe
 *.log
+/*.exe
+/*.dll
 .agents/
 checkpoint_inc-*.json
 killchain_state.json
@@ -13,4 +15,6 @@ rl_traffic_policy.json
 __pycache__/
 *.pyc
 
-dist/
+dist/*
+!dist/SHA256SUMS.txt
+

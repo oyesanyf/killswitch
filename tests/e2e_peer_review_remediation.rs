@@ -692,49 +692,9 @@ fn test_bounded_agents_apc_privileged_execution_gating() {
 // MODULE 6: CONTROL PLANE MUTUAL AUTHENTICATION & LOOPBACK HARDENING (R4)
 // ============================================================================
 
-pub const TEST_MASTER_TOKEN: &str = "KS-TOKEN-SEC-REM-9999-VERIFIED-AUTH";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AuthVerdict {
-    Authorized,
-    Unauthorized401,
-    Forbidden403CallerQuarantined,
-    Forbidden403PidSpoofing,
-}
-
-pub fn verify_control_plane_request(
-    token_header: Option<&str>,
-    body_token: Option<&str>,
-    claimed_pid: Option<u32>,
-    actual_peer_pid: u32,
-    frozen_pids: &[u32],
-) -> AuthVerdict {
-    // 1. Resolve token from header or body
-    let presented_token = token_header.or(body_token);
-    let token = match presented_token {
-        Some(t) if !t.trim().is_empty() => t.trim(),
-        _ => return AuthVerdict::Unauthorized401,
-    };
-
-    // Constant-time comparison
-    if !constant_time_compare(token.as_bytes(), TEST_MASTER_TOKEN.as_bytes()) {
-        return AuthVerdict::Unauthorized401;
-    }
-
-    // 2. Peer PID verification & Anti-Spoofing
-    if let Some(claimed) = claimed_pid {
-        if claimed != actual_peer_pid {
-            return AuthVerdict::Forbidden403PidSpoofing;
-        }
-    }
-
-    // 3. Quarantined caller check
-    if frozen_pids.contains(&actual_peer_pid) {
-        return AuthVerdict::Forbidden403CallerQuarantined;
-    }
-
-    AuthVerdict::Authorized
-}
+pub use killswitch_server::auth::{
+    verify_control_plane_request, AuthVerdict, TEST_MASTER_TOKEN,
+};
 
 #[test]
 fn test_control_plane_unauthenticated_requests_return_401() {
@@ -797,117 +757,10 @@ fn test_control_plane_quarantined_caller_blocking() {
 // MODULE 7: SEMANTIC DLP ENGINE & DEFAULT-DENY CONTAINMENT (R5)
 // ============================================================================
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SemanticEntityKind {
-    PersonName,
-    DealValue,
-    FinancialAmount,
-    PhiMedicalRecord,
-    UnclassifiedSensitive,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum DlpClassification {
-    Public = 1,
-    Internal = 2,
-    Confidential = 3,
-    CrownJewel = 4,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum DlpPolicy {
-    Allow = 1,
-    Audit = 2,
-    Block = 3,
-    Quarantine = 4,
-}
-
-#[derive(Debug, Clone)]
-pub struct SemanticEntityMatch {
-    pub kind: SemanticEntityKind,
-    pub raw: String,
-    pub classification: DlpClassification,
-    pub policy: DlpPolicy,
-}
-
-pub fn scan_payload_for_semantic_entities(payload: &str) -> Vec<SemanticEntityMatch> {
-    let mut matches = Vec::new();
-    let lower = payload.to_ascii_lowercase();
-
-    // 1. Deal Value & M&A figure parsing
-    if lower.contains("deal value") || lower.contains("acquisition") || lower.contains("valuation") {
-        for token in payload.split_whitespace() {
-            if token.starts_with('$') || token.starts_with('€') || token.starts_with('£') {
-                let num_clean: String = token.chars().filter(|c| c.is_ascii_digit() || *c == '.').collect();
-                if let Ok(val) = num_clean.parse::<f64>() {
-                    let magnitude_mult = if lower.contains("million") || token.ends_with('M') || token.ends_with('m') {
-                        1_000_000.0
-                    } else if lower.contains("billion") || token.ends_with('B') || token.ends_with('b') {
-                        1_000_000_000.0
-                    } else {
-                        1.0
-                    };
-                    let total = val * magnitude_mult;
-                    if total >= 1_000_000.0 {
-                        matches.push(SemanticEntityMatch {
-                            kind: SemanticEntityKind::DealValue,
-                            raw: token.to_string(),
-                            classification: DlpClassification::CrownJewel,
-                            policy: DlpPolicy::Quarantine,
-                        });
-                    } else {
-                        matches.push(SemanticEntityMatch {
-                            kind: SemanticEntityKind::DealValue,
-                            raw: token.to_string(),
-                            classification: DlpClassification::Confidential,
-                            policy: DlpPolicy::Block,
-                        });
-                    }
-                }
-            }
-        }
-    }
-
-    // 2. PHI: SSN pattern \d{3}-\d{2}-\d{4}
-    for word in payload.split_whitespace() {
-        let trimmed = word.trim_matches([',', ';', '.', ':']);
-        let parts: Vec<&str> = trimmed.split('-').collect();
-        if parts.len() == 3
-            && parts[0].len() == 3 && parts[0].chars().all(|c| c.is_ascii_digit())
-            && parts[1].len() == 2 && parts[1].chars().all(|c| c.is_ascii_digit())
-            && parts[2].len() == 4 && parts[2].chars().all(|c| c.is_ascii_digit())
-        {
-            matches.push(SemanticEntityMatch {
-                kind: SemanticEntityKind::PhiMedicalRecord,
-                raw: trimmed.to_string(),
-                classification: DlpClassification::CrownJewel,
-                policy: DlpPolicy::Quarantine,
-            });
-        }
-    }
-
-    // 3. Personal Name in structured context
-    if lower.contains("patient name:") || lower.contains("attending physician:") || lower.contains("executive:") {
-        matches.push(SemanticEntityMatch {
-            kind: SemanticEntityKind::PersonName,
-            raw: payload.to_string(),
-            classification: DlpClassification::Confidential,
-            policy: DlpPolicy::Block,
-        });
-    }
-
-    // 4. Default-Deny rule for unclassified sensitive tokens
-    if lower.contains("confidential") || lower.contains("do not distribute") {
-        matches.push(SemanticEntityMatch {
-            kind: SemanticEntityKind::UnclassifiedSensitive,
-            raw: "Unclassified Sensitive Data".to_string(),
-            classification: DlpClassification::Confidential,
-            policy: DlpPolicy::Block,
-        });
-    }
-
-    matches
-}
+pub use killswitch_telemetry::otel_lineage::{DlpClassification, DlpPolicy};
+pub use killswitch_telemetry::semantic_dlp::{
+    scan_payload_for_semantic_entities, SemanticEntityKind, SemanticEntityMatch,
+};
 
 #[test]
 fn test_semantic_dlp_deal_value_m_and_a_detection() {
@@ -963,18 +816,38 @@ fn test_semantic_dlp_default_deny_unclassified_sensitive() {
 
 #[test]
 fn test_repository_integrity_no_unsigned_root_binaries() {
-    // Asserts that no untracked raw binary executables exist in repository root
-    // without accompanying cryptographic checksums in dist/SHA256SUMS.txt
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    // Correctly resolve repository root (two levels up from crates/killswitch-cli)
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+    let sha_manifest = root.join("dist").join("SHA256SUMS.txt");
+    let manifest_content = if sha_manifest.exists() {
+        std::fs::read_to_string(&sha_manifest).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
     if let Ok(entries) = std::fs::read_dir(root) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_file() {
                 if let Some(ext) = path.extension() {
                     if ext == "exe" || ext == "dll" {
-                        // If root binaries exist, verify dist/SHA256SUMS.txt exists
-                        let sha_file = root.join("dist").join("SHA256SUMS.txt");
-                        assert!(sha_file.exists(), "Binary in root requires dist/SHA256SUMS.txt manifest");
+                        assert!(
+                            sha_manifest.exists(),
+                            "Binary {} in root requires dist/SHA256SUMS.txt manifest",
+                            path.display()
+                        );
+                        let file_bytes = std::fs::read(&path).unwrap();
+                        let file_hash = killswitch_telemetry::ring0_driver_loader::compute_sha256_hex(&file_bytes);
+                        assert!(
+                            manifest_content.contains(&file_hash),
+                            "Binary {} (hash {}) not registered in dist/SHA256SUMS.txt",
+                            path.display(),
+                            file_hash
+                        );
                     }
                 }
             }
@@ -983,12 +856,52 @@ fn test_repository_integrity_no_unsigned_root_binaries() {
 }
 
 #[test]
+fn test_repository_integrity_ci_workflow_present() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+    let ci_path = root.join(".github").join("workflows").join("ci.yml");
+    assert!(ci_path.exists(), ".github/workflows/ci.yml must exist for automated PR verification");
+    let content = std::fs::read_to_string(&ci_path).unwrap_or_default();
+    assert!(content.contains("cargo test --workspace"), "CI must execute workspace test suite");
+    assert!(content.contains("e2e_peer_review_remediation"), "CI must execute E2E remediation suite");
+    assert!(content.contains("pull_request"), "CI must trigger on pull requests");
+}
+
+#[test]
+fn test_repository_integrity_sha256_manifest_format() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+    let sha_manifest = root.join("dist").join("SHA256SUMS.txt");
+    if sha_manifest.exists() {
+        let content = std::fs::read_to_string(&sha_manifest).unwrap_or_default();
+        for line in content.lines().filter(|l| !l.trim().is_empty()) {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            assert_eq!(parts.len(), 2, "SHA256SUMS entry must be: <64-char-hash>  <filename>");
+            assert_eq!(parts[0].len(), 64, "SHA-256 hash must be exactly 64 hexadecimal characters");
+        }
+    }
+}
+
+#[test]
 fn test_repository_integrity_driver_documentation_alignment() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
     let readme_path = root.join("README.md");
     if readme_path.exists() {
         let content = std::fs::read_to_string(&readme_path).unwrap_or_default();
-        // Documentation must describe user-mode native WFP as standard, not falsely claim pre-signed kernel driver binary in git
         assert!(content.contains("Windows Filtering Platform") || content.contains("WFP"));
+        assert!(
+            !content.contains("included EV/WHQL-signed"),
+            "Documentation must not falsely claim pre-signed kernel drivers are included in git"
+        );
     }
 }
