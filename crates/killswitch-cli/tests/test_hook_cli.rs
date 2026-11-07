@@ -184,6 +184,7 @@ fn test_agent_interceptions_ring_buffer() {
             stderr: None,
             cwd: None,
             session_id: Some("session-1".into()),
+            rpc_id: None,
         };
         let _ = evaluate_hook_synchronously(&req);
     }
@@ -224,3 +225,142 @@ fn test_install_agent_hooks() {
     let cursor_content = std::fs::read_to_string(ws.join(".cursor").join("hooks.json")).unwrap();
     assert!(cursor_content.contains("beforeShellExecution"));
 }
+
+#[test]
+fn test_mcp_rpc_id_preservation_string_number_null() {
+    // Case 1: String UUID ID
+    let raw_uuid = r#"{
+        "jsonrpc": "2.0",
+        "id": "c0a80101-1234-5678-9abc-def012345678",
+        "method": "tools/call",
+        "params": {
+            "name": "bash",
+            "arguments": {
+                "command": "sudo rm -rf /"
+            }
+        }
+    }"#;
+    let req = parse_mcp_call_request(raw_uuid).expect("parse uuid mcp");
+    assert_eq!(req.agent, SupportedAgentKind::Mcp);
+    assert_eq!(
+        req.rpc_id,
+        Some(serde_json::json!("c0a80101-1234-5678-9abc-def012345678"))
+    );
+    let decision = evaluate_hook_synchronously(&req);
+    assert!(!decision.allowed);
+    let resp = format_mcp_error_response(
+        req.rpc_id.as_ref().unwrap_or(&serde_json::Value::Null),
+        &decision,
+    );
+    let json: serde_json::Value = serde_json::from_str(&resp).expect("parse json");
+    assert_eq!(json["id"], "c0a80101-1234-5678-9abc-def012345678");
+    assert_eq!(json["result"]["isError"], true);
+
+    // Case 2: Numeric ID
+    let raw_num = r#"{
+        "jsonrpc": "2.0",
+        "id": 987654,
+        "method": "tools/call",
+        "params": {
+            "name": "bash",
+            "arguments": {
+                "command": "sudo cat /etc/shadow"
+            }
+        }
+    }"#;
+    let req_num = parse_mcp_call_request(raw_num).expect("parse num mcp");
+    assert_eq!(req_num.rpc_id, Some(serde_json::json!(987654)));
+    let dec_num = evaluate_hook_synchronously(&req_num);
+    assert!(!dec_num.allowed);
+    let resp_num = format_mcp_error_response(
+        req_num.rpc_id.as_ref().unwrap_or(&serde_json::Value::Null),
+        &dec_num,
+    );
+    let json_num: serde_json::Value = serde_json::from_str(&resp_num).expect("parse json");
+    assert_eq!(json_num["id"], 987654);
+
+    // Case 3: Explicit Null ID
+    let raw_null = r#"{
+        "jsonrpc": "2.0",
+        "id": null,
+        "method": "tools/call",
+        "params": {
+            "name": "bash",
+            "arguments": {
+                "command": "sudo shutdown -h now"
+            }
+        }
+    }"#;
+    let req_null = parse_mcp_call_request(raw_null).expect("parse null mcp");
+    assert_eq!(req_null.rpc_id, Some(serde_json::Value::Null));
+    let dec_null = evaluate_hook_synchronously(&req_null);
+    let resp_null = format_mcp_error_response(
+        req_null.rpc_id.as_ref().unwrap_or(&serde_json::Value::Null),
+        &dec_null,
+    );
+    let json_null: serde_json::Value = serde_json::from_str(&resp_null).expect("parse json");
+    assert!(json_null["id"].is_null());
+
+    // Case 4: Omitted ID (Notification)
+    let raw_omit = r#"{
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "params": {
+            "name": "bash",
+            "arguments": {
+                "command": "sudo reboot"
+            }
+        }
+    }"#;
+    let req_omit = parse_mcp_call_request(raw_omit).expect("parse omit mcp");
+    assert_eq!(req_omit.rpc_id, None);
+    let dec_omit = evaluate_hook_synchronously(&req_omit);
+    let resp_omit = format_mcp_error_response(
+        req_omit.rpc_id.as_ref().unwrap_or(&serde_json::Value::Null),
+        &dec_omit,
+    );
+    let json_omit: serde_json::Value = serde_json::from_str(&resp_omit).expect("parse json");
+    assert!(json_omit["id"].is_null());
+}
+
+#[test]
+fn test_sensitive_root_credential_path_interception_pre_tool() {
+    // 1. Unprivileged tool reading /etc/shadow via cat
+    let claude_payload = r#"{
+        "tool_name": "Bash",
+        "tool_input": {
+            "command": "cat /etc/shadow"
+        }
+    }"#;
+    let req = parse_claude_request(claude_payload, false).expect("parse claude");
+    let decision = evaluate_hook_synchronously(&req);
+    assert!(!decision.allowed);
+    assert!(decision.rationale.contains("sensitive system credential store"));
+
+    // 2. Cursor beforeReadFile on /etc/sudoers
+    let cursor_payload = r#"{
+        "file_path": "/etc/sudoers"
+    }"#;
+    let cursor_req = parse_cursor_request(cursor_payload, "beforeReadFile").expect("parse cursor");
+    let cursor_decision = evaluate_hook_synchronously(&cursor_req);
+    assert!(!cursor_decision.allowed);
+    assert!(cursor_decision.rationale.contains("sensitive system credential store"));
+
+    // 3. MCP read_file tool with SAM registry hive path
+    let mcp_payload = r#"{
+        "jsonrpc": "2.0",
+        "id": "mcp-sam-read",
+        "method": "tools/call",
+        "params": {
+            "name": "read_file",
+            "arguments": {
+                "path": "C:\\Windows\\System32\\config\\SAM"
+            }
+        }
+    }"#;
+    let mcp_req = parse_mcp_call_request(mcp_payload).expect("parse mcp");
+    let mcp_decision = evaluate_hook_synchronously(&mcp_req);
+    assert!(!mcp_decision.allowed);
+    assert!(mcp_decision.rationale.contains("sensitive system credential store"));
+}
+

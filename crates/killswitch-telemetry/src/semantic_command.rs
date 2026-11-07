@@ -958,6 +958,25 @@ pub fn parse_semantic_command_with_probe(
         }
     }
 
+    // 4. Sensitive System Credential Store Path Check
+    // If command or any argument targets a sensitive credential store (e.g. /etc/shadow, SAM, SYSTEM),
+    // escalate to RootOrAdminElevation
+    let mut sensitive_store = None;
+    for arg in &args {
+        if let Some(kind) = crate::sensitive_paths::classify_sensitive_system_path(arg) {
+            sensitive_store = Some(kind);
+            break;
+        }
+    }
+    if sensitive_store.is_none() {
+        if let Some((kind, _)) = crate::sensitive_paths::scan_for_sensitive_system_path(raw) {
+            sensitive_store = Some(kind);
+        }
+    }
+    if sensitive_store.is_some() {
+        privilege_class = PrivilegeEquivalenceClass::RootOrAdminElevation;
+    }
+
     SemanticCommand {
         raw_command: raw.to_string(),
         executable: exe_token,

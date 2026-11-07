@@ -107,6 +107,11 @@ pub fn classify_action_class(action: &str) -> &'static str {
         return "READ_PUBLIC";
     }
 
+    // Direct sensitive credential store check
+    if crate::sensitive_paths::scan_for_sensitive_system_path(action).is_some() {
+        return "PRIVILEGED_EXECUTION";
+    }
+
     // 2. Tool name and action keyword classification
     if lower.contains("read_confidential")
         || lower.contains("secret")

@@ -335,7 +335,7 @@ impl TemporalCircumventionCorrelator {
         guard.retain(|d| {
             now.checked_duration_since(d.timestamp)
                 .map(|dur| dur <= self.sliding_window)
-                .unwrap_or(false)
+                .unwrap_or(true)
         });
         if guard.len() >= 1024 {
             guard.pop_front();
@@ -367,7 +367,7 @@ impl TemporalCircumventionCorrelator {
         guard.retain(|d| {
             now.checked_duration_since(d.timestamp)
                 .map(|dur| dur <= self.sliding_window)
-                .unwrap_or(false)
+                .unwrap_or(true)
         });
 
         // Search for matching denial in same session OR under same parent agent PID

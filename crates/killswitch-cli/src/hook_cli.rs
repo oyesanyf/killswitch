@@ -133,9 +133,9 @@ pub fn handle_hook_evaluate(agent: &str, event: Option<&str>, is_post: bool) -> 
             std::process::exit(exit_code);
         }
         SupportedAgentKind::Mcp => {
-            let dummy_id = serde_json::json!(1);
             if !decision.allowed {
-                println!("{}", format_mcp_error_response(&dummy_id, &decision));
+                let id = req.rpc_id.as_ref().unwrap_or(&serde_json::Value::Null);
+                println!("{}", format_mcp_error_response(id, &decision));
                 std::process::exit(0);
             } else {
                 std::process::exit(0);
@@ -198,7 +198,7 @@ pub fn handle_mcp_proxy(command: String, args: Vec<String>) -> Result<()> {
                     let decision = evaluate_hook_synchronously(&req);
                     if !decision.allowed {
                         should_forward = false;
-                        let id = val.get("id").unwrap_or(&serde_json::Value::Null);
+                        let id = req.rpc_id.as_ref().unwrap_or(&serde_json::Value::Null);
                         let err_resp = format_mcp_error_response(id, &decision);
                         let mut out = io::stdout().lock();
                         let _ = writeln!(out, "{err_resp}");

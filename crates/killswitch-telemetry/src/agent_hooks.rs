@@ -140,6 +140,26 @@ pub struct NormalizedHookRequest {
     pub stderr: Option<String>,
     pub cwd: Option<String>,
     pub session_id: Option<String>,
+    #[serde(default)]
+    pub rpc_id: Option<serde_json::Value>,
+}
+
+impl Default for NormalizedHookRequest {
+    fn default() -> Self {
+        Self {
+            agent: SupportedAgentKind::Claude,
+            event_type: HookEventType::PreToolUse,
+            tool_name: None,
+            command: None,
+            file_path: None,
+            arguments: None,
+            exit_code: None,
+            stderr: None,
+            cwd: None,
+            session_id: None,
+            rpc_id: None,
+        }
+    }
 }
 
 /// Synchronous evaluation decision returned to agent wire format adapters.
@@ -247,10 +267,18 @@ pub fn parse_claude_request(raw_json: &str, is_post: bool) -> Result<NormalizedH
     let mut file_path = None;
 
     if let Some(tool_input) = val.get("tool_input") {
-        if let Some(cmd) = tool_input.get("command").and_then(|v| v.as_str()) {
+        if let Some(cmd) = tool_input
+            .get("command")
+            .or_else(|| tool_input.get("cmd"))
+            .and_then(|v| v.as_str())
+        {
             command = Some(cmd.to_string());
         }
-        if let Some(path) = tool_input.get("file_path").and_then(|v| v.as_str()) {
+        if let Some(path) = tool_input
+            .get("file_path")
+            .or_else(|| tool_input.get("path"))
+            .and_then(|v| v.as_str())
+        {
             file_path = Some(path.to_string());
         }
     }
@@ -276,8 +304,14 @@ pub fn parse_claude_request(raw_json: &str, is_post: bool) -> Result<NormalizedH
         arguments: val.get("tool_input").cloned(),
         exit_code,
         stderr,
-        cwd: None,
-        session_id: val.get("session_id").and_then(|v| v.as_str()).map(String::from),
+        cwd: val.get("cwd").and_then(|v| v.as_str()).map(String::from),
+        session_id: val
+            .get("session_id")
+            .or_else(|| val.get("sessionId"))
+            .or_else(|| val.get("conversation_id"))
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        rpc_id: None,
     })
 }
 
@@ -287,12 +321,31 @@ pub fn parse_cursor_request(raw_json: &str, event_name: &str) -> Result<Normaliz
         .map_err(|e| format!("Invalid Cursor hook JSON: {e}"))?;
 
     let event_type = HookEventType::from_name(event_name);
-    let command = val.get("command").and_then(|v| v.as_str()).map(String::from);
-    let file_path = val.get("file_path").and_then(|v| v.as_str()).map(String::from);
+    let command = val
+        .get("command")
+        .or_else(|| val.get("cmd"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let file_path = val
+        .get("file_path")
+        .or_else(|| val.get("path"))
+        .or_else(|| val.get("filePath"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
     let tool_name = val.get("tool_name").and_then(|v| v.as_str()).map(String::from);
-    let exit_code = val.get("exit_code").and_then(|v| v.as_i64()).map(|i| i as i32);
+    let exit_code = val
+        .get("exit_code")
+        .or_else(|| val.get("exitCode"))
+        .and_then(|v| v.as_i64())
+        .map(|i| i as i32);
     let stderr = val.get("stderr").and_then(|v| v.as_str()).map(String::from);
     let cwd = val.get("cwd").and_then(|v| v.as_str()).map(String::from);
+    let session_id = val
+        .get("session_id")
+        .or_else(|| val.get("sessionId"))
+        .or_else(|| val.get("cursor_trace_id"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
 
     Ok(NormalizedHookRequest {
         agent: SupportedAgentKind::Cursor,
@@ -304,7 +357,8 @@ pub fn parse_cursor_request(raw_json: &str, event_name: &str) -> Result<Normaliz
         exit_code,
         stderr,
         cwd,
-        session_id: val.get("session_id").and_then(|v| v.as_str()).map(String::from),
+        session_id,
+        rpc_id: None,
     })
 }
 
@@ -314,19 +368,40 @@ pub fn parse_copilot_request(raw_json: &str, event_name: &str) -> Result<Normali
         .map_err(|e| format!("Invalid GitHub Copilot hook JSON: {e}"))?;
 
     let event_type = HookEventType::from_name(event_name);
-    let tool_name = val.get("tool").and_then(|v| v.as_str()).map(String::from);
+    let tool_name = val
+        .get("tool")
+        .or_else(|| val.get("tool_name"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
 
     let mut command = None;
+    let mut file_path = None;
     if let Some(params) = val.get("parameters") {
-        if let Some(cmd) = params.get("command").and_then(|v| v.as_str()) {
+        if let Some(cmd) = params
+            .get("command")
+            .or_else(|| params.get("cmd"))
+            .and_then(|v| v.as_str())
+        {
             command = Some(cmd.to_string());
+        }
+        if let Some(path) = params
+            .get("file_path")
+            .or_else(|| params.get("path"))
+            .or_else(|| params.get("filePath"))
+            .and_then(|v| v.as_str())
+        {
+            file_path = Some(path.to_string());
         }
     }
 
     let mut exit_code = None;
     let mut stderr = None;
     if let Some(res) = val.get("result") {
-        exit_code = res.get("exitCode").and_then(|v| v.as_i64()).map(|i| i as i32);
+        exit_code = res
+            .get("exitCode")
+            .or_else(|| res.get("exit_code"))
+            .and_then(|v| v.as_i64())
+            .map(|i| i as i32);
         stderr = res.get("stderr").and_then(|v| v.as_str()).map(String::from);
     }
 
@@ -335,12 +410,17 @@ pub fn parse_copilot_request(raw_json: &str, event_name: &str) -> Result<Normali
         event_type,
         tool_name,
         command,
-        file_path: None,
+        file_path,
         arguments: val.get("parameters").cloned(),
         exit_code,
         stderr,
         cwd: None,
-        session_id: None,
+        session_id: val
+            .get("session_id")
+            .or_else(|| val.get("sessionId"))
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        rpc_id: None,
     })
 }
 
@@ -350,15 +430,32 @@ pub fn parse_opencode_request(raw_json: &str) -> Result<NormalizedHookRequest, S
         .map_err(|e| format!("Invalid OpenCode hook JSON: {e}"))?;
 
     let typ = val.get("type").and_then(|v| v.as_str()).unwrap_or("before");
-    let event_type = if typ == "after" {
+    let event_type = if typ.eq_ignore_ascii_case("after") || typ.eq_ignore_ascii_case("post") {
         HookEventType::PostToolUse
     } else {
         HookEventType::PreToolUse
     };
 
-    let tool_name = val.get("tool").and_then(|v| v.as_str()).map(String::from);
-    let command = val.get("args").and_then(|a| a.get("command")).and_then(|v| v.as_str()).map(String::from);
-    let file_path = val.get("args").and_then(|a| a.get("file_path")).and_then(|v| v.as_str()).map(String::from);
+    let tool_name = val
+        .get("tool")
+        .or_else(|| val.get("tool_name"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let command = val
+        .get("args")
+        .and_then(|a| a.get("command").or_else(|| a.get("cmd")))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let file_path = val
+        .get("args")
+        .and_then(|a| a.get("file_path").or_else(|| a.get("path")).or_else(|| a.get("filePath")))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let exit_code = val
+        .get("exit_code")
+        .or_else(|| val.get("exitCode"))
+        .and_then(|v| v.as_i64())
+        .map(|i| i as i32);
 
     Ok(NormalizedHookRequest {
         agent: SupportedAgentKind::OpenCode,
@@ -367,10 +464,15 @@ pub fn parse_opencode_request(raw_json: &str) -> Result<NormalizedHookRequest, S
         command,
         file_path,
         arguments: val.get("args").cloned(),
-        exit_code: val.get("exit_code").and_then(|v| v.as_i64()).map(|i| i as i32),
+        exit_code,
         stderr: val.get("stderr").and_then(|v| v.as_str()).map(String::from),
         cwd: None,
-        session_id: None,
+        session_id: val
+            .get("session_id")
+            .or_else(|| val.get("sessionId"))
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        rpc_id: None,
     })
 }
 
@@ -384,11 +486,20 @@ pub fn parse_mcp_call_request(raw_json: &str) -> Result<NormalizedHookRequest, S
         return Err("Not a tools/call method".to_string());
     }
 
+    let rpc_id = val.get("id").cloned();
     let params = val.get("params").cloned().unwrap_or(serde_json::Value::Null);
     let tool_name = params.get("name").and_then(|v| v.as_str()).map(String::from);
     let args = params.get("arguments").cloned();
-    let command = args.as_ref().and_then(|a| a.get("command")).and_then(|v| v.as_str()).map(String::from);
-    let file_path = args.as_ref().and_then(|a| a.get("path")).and_then(|v| v.as_str()).map(String::from);
+    let command = args
+        .as_ref()
+        .and_then(|a| a.get("command").or_else(|| a.get("cmd")))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let file_path = args
+        .as_ref()
+        .and_then(|a| a.get("path").or_else(|| a.get("file_path")).or_else(|| a.get("filePath")).or_else(|| a.get("uri")))
+        .and_then(|v| v.as_str())
+        .map(String::from);
 
     Ok(NormalizedHookRequest {
         agent: SupportedAgentKind::Mcp,
@@ -401,6 +512,7 @@ pub fn parse_mcp_call_request(raw_json: &str) -> Result<NormalizedHookRequest, S
         stderr: None,
         cwd: None,
         session_id: None,
+        rpc_id,
     })
 }
 
@@ -538,6 +650,49 @@ pub fn evaluate_hook_synchronously(req: &NormalizedHookRequest) -> HookEvaluatio
     }
 
     // ------------------------------------------------------------------------
+    // PreToolUse Guard: Sensitive System Path & Credential Store Interception
+    // ------------------------------------------------------------------------
+    let mut detected_sensitive_store: Option<(crate::sensitive_paths::SensitiveCredentialStoreKind, String)> = None;
+
+    if let Some(path) = &req.file_path {
+        if let Some(kind) = crate::sensitive_paths::classify_sensitive_system_path(path) {
+            detected_sensitive_store = Some((kind, path.clone()));
+        }
+    }
+
+    if detected_sensitive_store.is_none() {
+        if let Some(args) = &req.arguments {
+            if let Some(found) = crate::sensitive_paths::scan_json_for_sensitive_path(args) {
+                detected_sensitive_store = Some(found);
+            }
+        }
+    }
+
+    if detected_sensitive_store.is_none() {
+        if let Some(cmd) = &req.command {
+            if let Some(found) = crate::sensitive_paths::scan_for_sensitive_system_path(cmd) {
+                detected_sensitive_store = Some(found);
+            }
+        }
+    }
+
+    if let Some((store_kind, matched_path)) = detected_sensitive_store {
+        let duration_us = start_instant.elapsed().as_micros() as u64;
+        let decision = HookEvaluationDecision::deny(
+            format!(
+                "Access to sensitive system credential store blocked: {} ('{}')",
+                store_kind.description(),
+                matched_path
+            ),
+            Some("SensitiveSystemPathGuard"),
+            Some("Access to root credential databases (/etc/shadow, SAM, SYSTEM) is strictly forbidden"),
+            duration_us,
+        );
+        record_decision(req, &decision);
+        return decision;
+    }
+
+    // ------------------------------------------------------------------------
     // Layer 1: SemanticCommandAst (Structural privilege escalation AST parsing)
     // ------------------------------------------------------------------------
     if let Some(cmd) = &req.command {
@@ -595,7 +750,17 @@ pub fn evaluate_hook_synchronously(req: &NormalizedHookRequest) -> HookEvaluatio
         payload_to_inspect.push(' ');
     }
     if let Some(args) = &req.arguments {
-        payload_to_inspect.push_str(&args.to_string());
+        // Expand compact JSON with space boundaries around structural delimiters to prevent tokenization evasion
+        let s = args.to_string();
+        for ch in s.chars() {
+            if ch == '{' || ch == '}' || ch == '[' || ch == ']' || ch == ':' || ch == ',' || ch == '"' {
+                payload_to_inspect.push(' ');
+                payload_to_inspect.push(ch);
+                payload_to_inspect.push(' ');
+            } else {
+                payload_to_inspect.push(ch);
+            }
+        }
     }
 
     if !payload_to_inspect.trim().is_empty() {

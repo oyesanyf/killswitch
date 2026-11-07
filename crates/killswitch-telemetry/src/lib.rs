@@ -30,11 +30,16 @@ pub mod ring0_driver_loader;
 pub mod rl_traffic;
 pub mod semantic_command;
 pub mod semantic_dlp;
+pub mod sensitive_paths;
 pub mod siquery;
 pub mod tamper_and_process_killswitch;
 pub mod watchdog;
 
 // Re-exports for clean ergonomics
+pub use sensitive_paths::{
+    classify_sensitive_system_path, normalize_path_for_inspection, scan_for_sensitive_system_path,
+    scan_json_for_sensitive_path, SensitiveCredentialStoreKind,
+};
 pub use agent_hooks::{
     clear_interceptions, evaluate_hook_synchronously, format_claude_response,
     format_copilot_response, format_cursor_response, format_mcp_error_response,
