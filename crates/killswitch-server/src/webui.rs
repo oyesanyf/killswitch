@@ -484,6 +484,72 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       font-size: 1.05rem;
       padding: 0.25rem 0;
     }
+    .agentsonar-table-wrap {
+      overflow: auto;
+      max-inline-size: 100%;
+      max-block-size: min(440px, 75vh);
+      container-type: inline-size;
+      border: 1px solid var(--border);
+      border-radius: 0.55rem;
+    }
+
+    .agentsonar-table-wrap table {
+      border-collapse: separate;
+      border-spacing: 0;
+      width: 100%;
+      --label-2: "Domain";
+      --label-3: "AI Score";
+      --label-4: "Agent";
+      --label-5: "Traffic (In/Out)";
+      --label-6: "Triage";
+    }
+
+    .agentsonar-table-wrap thead {
+      position: sticky;
+      inset-block-start: 0;
+      z-index: 2;
+      background: var(--surface-alt);
+    }
+
+    .agentsonar-table-wrap tbody th {
+      position: sticky;
+      inset-inline-start: 0;
+      z-index: 1;
+      background: var(--surface);
+    }
+
+    @container (width < 600px) {
+      .agentsonar-table-wrap table,
+      .agentsonar-table-wrap thead,
+      .agentsonar-table-wrap tbody,
+      .agentsonar-table-wrap tr,
+      .agentsonar-table-wrap th,
+      .agentsonar-table-wrap td {
+        display: block;
+      }
+
+      .agentsonar-table-wrap thead {
+        display: none;
+      }
+
+      .agentsonar-table-wrap tr {
+        margin-block-end: 1rem;
+        border: 1px solid var(--border);
+      }
+
+      .agentsonar-table-wrap tbody th {
+        position: sticky;
+        inset-block-start: 0;
+        z-index: 2;
+        background: var(--surface-alt);
+      }
+
+      .agentsonar-table-wrap td:nth-child(2)::before { content: var(--label-2) ": "; font-weight: 700; }
+      .agentsonar-table-wrap td:nth-child(3)::before { content: var(--label-3) ": "; font-weight: 700; }
+      .agentsonar-table-wrap td:nth-child(4)::before { content: var(--label-4) ": "; font-weight: 700; }
+      .agentsonar-table-wrap td:nth-child(5)::before { content: var(--label-5) ": "; font-weight: 700; }
+      .agentsonar-table-wrap td:nth-child(6)::before { content: var(--label-6) ": "; font-weight: 700; }
+    }
   </style>
 </head>
 <body>
@@ -1560,6 +1626,7 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       <!-- Presets & Action Buttons -->
       <div class="btn-row" style="flex-wrap: wrap; gap: 0.5rem; margin-block: 0.6rem;">
         <button type="button" class="primary" onclick="loadSiqueryPreset('ai_sockets')">⚡ AI Agent Sockets</button>
+        <button type="button" class="primary" onclick="loadSiqueryPreset('agentsonar')">📡 Shadow AI (AgentSonar)</button>
         <button type="button" class="primary" onclick="loadSiqueryPreset('processes')">⚙️ Active Processes</button>
         <button type="button" class="primary" onclick="loadSiqueryPreset('coding_tools')">🛠️ Coding Tools &amp; SDKs</button>
         <button type="button" class="primary" onclick="loadSiqueryPreset('circumvention')">🛡️ Incident A Circumventions</button>
@@ -1589,6 +1656,111 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       <!-- Results Container (Strictly Zero unsafe DOM manipulation) -->
       <div id="siquery-results" style="margin-top: 1rem; max-height: 480px; overflow: auto; border: 1px solid var(--border); border-radius: 0.5rem; padding: 0.5rem; background: var(--surface-alt);">
         <p style="color: var(--muted); font-size: 0.85rem;">Query results will appear here.</p>
+      </div>
+    </section>
+    <!-- 11. Dynamic AgentSonar SQLite WAL Network Traffic-Shape & Shadow AI Triage -->
+    <section id="card-agentsonar" class="card" aria-labelledby="card-agentsonar-title">
+      <div class="card-header">
+        <div>
+          <h2 id="card-agentsonar-title" class="card-title">11. Dynamic AgentSonar &amp; Shadow AI Flow Triage (SQLite WAL + Siquery)</h2>
+          <p class="card-desc">
+            Zero-static-list AI agent discovery backed by live SQLite WAL tables (<code>agentsonar_events</code>, <code>agentsonar_known_agents</code>, <code>agentsonar_noise_domains</code>, <code>agentsonar_browser_procs</code>, <code>agentsonar_heuristics</code>) and hot-reloading <code>config/agentsonar.json</code>. Tune SSE traffic-shape heuristics or triage unclassified Shadow AI flows without restarting.
+          </p>
+        </div>
+        <span id="agentsonar-badge" class="badge ok">📡 AgentSonar WAL Active</span>
+      </div>
+
+      <div id="agentsonar-toast" class="toast ok" role="status" aria-live="polite">
+        Dynamic AgentSonar ready. All rule and heuristic updates persist live to SQLite WAL and Siquery.
+      </div>
+
+      <div class="kv-grid">
+        <div class="kv-box">
+          <div class="kv-label">Known Agent Rules</div>
+          <div id="as-kv-agents" class="kv-val">-</div>
+        </div>
+        <div class="kv-box">
+          <div class="kv-label">Noise Domains</div>
+          <div id="as-kv-noise" class="kv-val">-</div>
+        </div>
+        <div class="kv-box">
+          <div class="kv-label">Scored Flow Events</div>
+          <div id="as-kv-events" class="kv-val">-</div>
+        </div>
+        <div class="kv-box">
+          <div class="kv-label">Shadow AI Alerts (&ge; 0.70)</div>
+          <div id="as-kv-shadow" class="kv-val">-</div>
+        </div>
+      </div>
+
+      <div class="btn-row" style="margin-block: 0.6rem;">
+        <button type="button" id="btn-as-refresh" class="primary">🔄 Refresh AgentSonar</button>
+        <button type="button" id="btn-as-sample" class="ok">📡 Sample Host Sockets Now</button>
+      </div>
+
+      <form id="agentsonar-rule-form" action="/api/agentsonar/agents" method="post" style="margin-block-end: 0.9rem;">
+        <fieldset style="border: 1px solid var(--border); border-radius: 0.6rem; padding: 0.85rem;">
+          <legend style="font-weight: 700; font-size: 0.9rem; padding-inline: 0.35rem;">Add Dynamic Known-Agent Wildcard Rule</legend>
+          <div class="form-grid">
+            <div>
+              <label for="as-agent-name">Agent Identifier</label>
+              <input id="as-agent-name" name="agent" type="text" required value="custom-llm-agent" autocorrect="off" autocapitalize="off" spellcheck="false">
+            </div>
+            <div>
+              <label for="as-proc-pattern">Process Glob Pattern</label>
+              <input id="as-proc-pattern" name="proc_pattern" type="text" required value="python*" autocorrect="off" autocapitalize="off" spellcheck="false">
+            </div>
+            <div>
+              <label for="as-domain-pattern">Domain Glob Pattern</label>
+              <input id="as-domain-pattern" name="domain_pattern" type="text" required value="*.anthropic.com" autocorrect="off" autocapitalize="off" spellcheck="false">
+            </div>
+            <div style="display: flex; align-items: flex-end;">
+              <button type="submit" id="btn-as-save-rule" class="primary">💾 Save Agent Rule</button>
+            </div>
+          </div>
+        </fieldset>
+      </form>
+
+      <form id="agentsonar-heuristics-form" action="/api/agentsonar/heuristics" method="post" style="margin-block-end: 0.9rem;">
+        <fieldset style="border: 1px solid var(--border); border-radius: 0.6rem; padding: 0.85rem;">
+          <legend style="font-weight: 700; font-size: 0.9rem; padding-inline: 0.35rem;">Live SSE Traffic-Shape Heuristic Thresholds</legend>
+          <div class="form-grid">
+            <div>
+              <label for="as-min-byte-ratio">Min Byte Ratio (In/Out)</label>
+              <input id="as-min-byte-ratio" name="min_byte_ratio" type="number" step="0.5" min="1" value="4.0">
+            </div>
+            <div>
+              <label for="as-min-pkt-ratio">Min Packet Ratio (In/Out)</label>
+              <input id="as-min-pkt-ratio" name="min_pkt_ratio" type="number" step="0.1" min="1" value="2.5">
+            </div>
+            <div>
+              <label for="as-min-duration">Min Flow Duration (ms)</label>
+              <input id="as-min-duration" name="min_duration_ms" type="number" step="100" min="100" value="1500">
+            </div>
+            <div style="display: flex; align-items: flex-end;">
+              <button type="submit" id="btn-as-save-heuristics" class="ok">⚙️ Update Heuristics</button>
+            </div>
+          </div>
+        </fieldset>
+      </form>
+
+      <div tabindex="0" role="region" aria-labelledby="agentsonar-table-caption" class="agentsonar-table-wrap">
+        <table>
+          <caption id="agentsonar-table-caption" style="font-weight: 700; padding: 0.5rem; text-align: start;">Live AgentSonar Classified &amp; Triageable Network Flows</caption>
+          <thead>
+            <tr>
+              <th scope="col">Process (PID)</th>
+              <th scope="col">Domain / SNI</th>
+              <th scope="col">AI Score</th>
+              <th scope="col">Classified Agent</th>
+              <th scope="col">Traffic (In / Out)</th>
+              <th scope="col">One-Click Triage</th>
+            </tr>
+          </thead>
+          <tbody id="agentsonar-events-tbody">
+            <tr><th scope="row" colspan="6">Loading dynamic AgentSonar SQLite WAL state...</th></tr>
+          </tbody>
+        </table>
       </div>
     </section>
   </main>
@@ -3792,6 +3964,9 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
         case 'tables':
           sqlEl.value = "SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') ORDER BY name;";
           break;
+        case 'agentsonar':
+          sqlEl.value = "SELECT e.pid, e.proc, e.domain, e.remote_ip, e.remote_port, e.ai_score, e.agent, p.parent AS parent_pid FROM agentsonar_events e LEFT JOIN processes p ON e.pid = p.pid WHERE e.is_noise = 0 ORDER BY e.ai_score DESC LIMIT 25;";
+          break;
       }
     }
 
@@ -3944,6 +4119,224 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
     refreshEdrBehavioral();
     refreshCageStatus(false);
     refreshRing0AndConsensus(false);
+    async function refreshAgentSonar(showFeedback) {
+      try {
+        const [stRes, evRes] = await Promise.all([
+          api('/api/agentsonar/status'),
+          api('/api/agentsonar/events?limit=40')
+        ]);
+        const rep = stRes.report || {};
+        const elAgents = document.getElementById('as-kv-agents');
+        const elNoise = document.getElementById('as-kv-noise');
+        const elEvents = document.getElementById('as-kv-events');
+        const elShadow = document.getElementById('as-kv-shadow');
+        if (elAgents) elAgents.textContent = String(rep.known_agents_count ?? 0);
+        if (elNoise) elNoise.textContent = String(rep.noise_domains_count ?? 0);
+        if (elEvents) elEvents.textContent = String(rep.events_count ?? 0);
+        if (elShadow) elShadow.textContent = String(rep.high_score_shadow_count ?? 0);
+
+        if (rep.heuristics) {
+          const bEl = document.getElementById('as-min-byte-ratio');
+          const pEl = document.getElementById('as-min-pkt-ratio');
+          const dEl = document.getElementById('as-min-duration');
+          if (bEl && document.activeElement !== bEl) bEl.value = String(rep.heuristics.min_byte_ratio);
+          if (pEl && document.activeElement !== pEl) pEl.value = String(rep.heuristics.min_pkt_ratio);
+          if (dEl && document.activeElement !== dEl) dEl.value = String(rep.heuristics.min_duration_ms);
+        }
+
+        const tbody = document.getElementById('agentsonar-events-tbody');
+        if (tbody) {
+          tbody.replaceChildren();
+          const events = Array.isArray(evRes.events) ? evRes.events : [];
+          if (events.length === 0) {
+            const tr = document.createElement('tr');
+            const th = document.createElement('th');
+            th.scope = 'row';
+            th.colSpan = 6;
+            th.textContent = 'No non-noise flows recorded yet. Click "Sample Host Sockets Now" to inspect active sockets.';
+            tr.appendChild(th);
+            tbody.appendChild(tr);
+          } else {
+            for (const ev of events) {
+              const tr = document.createElement('tr');
+              const th = document.createElement('th');
+              th.scope = 'row';
+              th.textContent = (ev.proc || 'unknown') + ' (' + (ev.pid ?? 0) + ')';
+
+              const tdDom = document.createElement('td');
+              tdDom.textContent = (ev.domain || ev.remote_ip || '-') + ':' + (ev.remote_port ?? 0);
+
+              const tdScore = document.createElement('td');
+              tdScore.textContent = Number(ev.ai_score || 0).toFixed(2);
+
+              const tdAgent = document.createElement('td');
+              tdAgent.textContent = ev.agent ? ev.agent : (ev.ai_score >= 0.70 ? 'SHADOW_AI' : 'unclassified');
+
+              const tdBytes = document.createElement('td');
+              tdBytes.textContent = (ev.bytes_in ?? 0) + 'B / ' + (ev.bytes_out ?? 0) + 'B';
+
+              const tdAct = document.createElement('td');
+              const btnWrap = document.createElement('div');
+              btnWrap.style.display = 'flex';
+              btnWrap.style.gap = '0.35rem';
+              btnWrap.style.flexWrap = 'wrap';
+
+              const btnPromote = document.createElement('button');
+              btnPromote.type = 'button';
+              btnPromote.className = 'primary';
+              btnPromote.textContent = 'Promote Agent';
+              btnPromote.addEventListener('click', () => triageAgentSonarFlow('known_agent', ev.proc || '*', ev.domain || '*'));
+
+              const btnMute = document.createElement('button');
+              btnMute.type = 'button';
+              btnMute.textContent = 'Mute Domain';
+              btnMute.addEventListener('click', () => triageAgentSonarFlow('ignore_noise', ev.proc || '*', ev.domain || ''));
+
+              btnWrap.append(btnPromote, btnMute);
+              tdAct.appendChild(btnWrap);
+              tr.append(th, tdDom, tdScore, tdAgent, tdBytes, tdAct);
+              tbody.appendChild(tr);
+            }
+          }
+        }
+        if (showFeedback) {
+          setCardStatus('agentsonar-toast', 'AgentSonar refreshed (' + (rep.known_agents_count ?? 0) + ' rules, ' + (rep.events_count ?? 0) + ' events).', 'ok');
+        }
+      } catch (e) {
+        if (showFeedback) {
+          setCardStatus('agentsonar-toast', 'AgentSonar refresh error: ' + e.message, 'warn');
+        }
+      }
+    }
+
+    async function triageAgentSonarFlow(action, procName, domainName) {
+      try {
+        const token = sessionStorage.getItem('ks_control_token') || 'KS-TOKEN-SEC-REM-9999-VERIFIED-AUTH';
+        const body = action === 'known_agent'
+          ? { action: 'known_agent', agent: procName || 'triaged-agent', proc_pattern: procName || '*', domain_pattern: domainName || '*' }
+          : { action: 'ignore_noise', domain: domainName };
+        const res = await fetch('/api/agentsonar/triage', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token,
+            'X-KillSwitch-Token': token
+          },
+          body: JSON.stringify(body)
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.message || res.statusText);
+        }
+        setCardStatus('agentsonar-toast', 'Applied triage (' + action + ') for ' + domainName, 'ok');
+        await refreshAgentSonar(false);
+      } catch (e) {
+        setCardStatus('agentsonar-toast', 'Triage error: ' + e.message, 'danger');
+      }
+    }
+
+    (function wireAgentSonarControls() {
+      const btnRefresh = document.getElementById('btn-as-refresh');
+      if (btnRefresh) {
+        btnRefresh.addEventListener('click', () => refreshAgentSonar(true));
+      }
+      const btnSample = document.getElementById('btn-as-sample');
+      if (btnSample) {
+        btnSample.addEventListener('click', async () => {
+          btnSample.disabled = true;
+          try {
+            const token = sessionStorage.getItem('ks_control_token') || 'KS-TOKEN-SEC-REM-9999-VERIFIED-AUTH';
+            const res = await fetch('/api/agentsonar/sample', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token,
+                'X-KillSwitch-Token': token
+              }
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.message || res.statusText);
+            setCardStatus('agentsonar-toast', 'Sampled live host sockets (' + (data.flows_flushed ?? 0) + ' flows flushed to SQLite WAL).', 'ok');
+            await refreshAgentSonar(false);
+          } catch (e) {
+            setCardStatus('agentsonar-toast', 'Sample error: ' + e.message, 'danger');
+          } finally {
+            btnSample.disabled = false;
+          }
+        });
+      }
+
+      const ruleForm = document.getElementById('agentsonar-rule-form');
+      if (ruleForm) {
+        ruleForm.addEventListener('submit', async (ev) => {
+          ev.preventDefault();
+          const submitBtn = document.getElementById('btn-as-save-rule');
+          if (submitBtn) submitBtn.disabled = true;
+          try {
+            const token = sessionStorage.getItem('ks_control_token') || 'KS-TOKEN-SEC-REM-9999-VERIFIED-AUTH';
+            const payload = {
+              action: 'add',
+              agent: document.getElementById('as-agent-name').value.trim(),
+              proc_pattern: document.getElementById('as-proc-pattern').value.trim(),
+              domain_pattern: document.getElementById('as-domain-pattern').value.trim()
+            };
+            const res = await fetch('/api/agentsonar/agents', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token,
+                'X-KillSwitch-Token': token
+              },
+              body: JSON.stringify(payload)
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.message || res.statusText);
+            setCardStatus('agentsonar-toast', 'Saved dynamic rule for agent "' + payload.agent + '".', 'ok');
+            await refreshAgentSonar(false);
+          } catch (e) {
+            setCardStatus('agentsonar-toast', 'Save rule error: ' + e.message, 'danger');
+          } finally {
+            if (submitBtn) submitBtn.disabled = false;
+          }
+        });
+      }
+
+      const heurForm = document.getElementById('agentsonar-heuristics-form');
+      if (heurForm) {
+        heurForm.addEventListener('submit', async (ev) => {
+          ev.preventDefault();
+          const submitBtn = document.getElementById('btn-as-save-heuristics');
+          if (submitBtn) submitBtn.disabled = true;
+          try {
+            const token = sessionStorage.getItem('ks_control_token') || 'KS-TOKEN-SEC-REM-9999-VERIFIED-AUTH';
+            const payload = {
+              min_byte_ratio: Number(document.getElementById('as-min-byte-ratio').value),
+              min_pkt_ratio: Number(document.getElementById('as-min-pkt-ratio').value),
+              min_duration_ms: Number(document.getElementById('as-min-duration').value)
+            };
+            const res = await fetch('/api/agentsonar/heuristics', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token,
+                'X-KillSwitch-Token': token
+              },
+              body: JSON.stringify(payload)
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.message || res.statusText);
+            setCardStatus('agentsonar-toast', 'Updated live SSE traffic-shape heuristic thresholds in SQLite WAL.', 'ok');
+            await refreshAgentSonar(false);
+          } catch (e) {
+            setCardStatus('agentsonar-toast', 'Heuristic update error: ' + e.message, 'danger');
+          } finally {
+            if (submitBtn) submitBtn.disabled = false;
+          }
+        });
+      }
+    })();
+
+    refreshAgentSonar(false);
     setInterval(() => refreshAll(false), 5000);
   </script>
 </body>

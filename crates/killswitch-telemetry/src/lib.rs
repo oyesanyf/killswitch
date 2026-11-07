@@ -9,6 +9,7 @@
 //! DLP Data Lineage Engine.
 
 pub mod agent_hooks;
+pub mod agentsonar;
 pub mod attack;
 pub mod bounded_agents_apc;
 pub mod cage_governance;
@@ -48,6 +49,14 @@ pub use agent_hooks::{
     snapshot_interceptions, AgentInterceptionRecord, HookEvaluationDecision, HookEventType,
     NormalizedHookRequest, SupportedAgentKind, AGENT_INTERCEPTION_CAPACITY,
     AGENT_INTERCEPTION_EVENTS, GLOBAL_CORRELATOR,
+};
+pub use agentsonar::{
+    default_agentsonar_db_path, domain_matches_pattern, extract_dns_qname, extract_tls_sni,
+    generate_osquery_atc_schema, glob_match_case_insensitive, global_agentsonar_engine,
+    init_agentsonar_db, parse_tcp_packet, resolve_safe_db_path, run_external_classifier,
+    ActiveFlow, AgentRule, AgentSonarEngine, AgentSonarStatusReport, DynamicRuleSet, FlowEvent,
+    FlowKey, HeuristicWeights, HeuristicWeightsPatch, ParsedTcpSegment, ProcSocketResolver,
+    TriageCandidate, TriageDecision, GLOBAL_AGENTSONAR_ENGINE,
 };
 pub use attack::{
     AttackGraphMatcher, AttackPattern, AttackSequenceEvaluation, AttackStage, ProcessTimelineEvent,

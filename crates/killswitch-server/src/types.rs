@@ -1020,3 +1020,100 @@ pub struct RateLimitAllowlistRequest {
     #[serde(default)]
     pub token: Option<String>,
 }
+
+// =============================================================================
+// Dynamic AgentSonar SQLite WAL & Shadow-AI Triage DTOs
+// =============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AgentSonarEventsQuery {
+    #[serde(default)]
+    pub limit: Option<usize>,
+    #[serde(default)]
+    pub min_score: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentSonarAgentMutationRequest {
+    #[serde(default)]
+    pub action: Option<String>,
+    pub agent: String,
+    #[serde(default)]
+    pub proc_pattern: Option<String>,
+    #[serde(default)]
+    pub domain_pattern: Option<String>,
+    #[serde(default)]
+    pub token: Option<String>,
+    #[serde(default)]
+    pub caller_pid: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentSonarIgnoreMutationRequest {
+    #[serde(default)]
+    pub action: Option<String>,
+    pub domain: String,
+    #[serde(default)]
+    pub token: Option<String>,
+    #[serde(default)]
+    pub caller_pid: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentSonarBrowserMutationRequest {
+    #[serde(default)]
+    pub action: Option<String>,
+    pub proc_substring: String,
+    #[serde(default)]
+    pub token: Option<String>,
+    #[serde(default)]
+    pub caller_pid: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentSonarHeuristicsUpdateRequest {
+    #[serde(flatten)]
+    pub patch: killswitch_telemetry::HeuristicWeightsPatch,
+    #[serde(default)]
+    pub token: Option<String>,
+    #[serde(default)]
+    pub caller_pid: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentSonarTriageRequest {
+    pub action: String,
+    #[serde(default)]
+    pub agent: Option<String>,
+    #[serde(default)]
+    pub proc_pattern: Option<String>,
+    #[serde(default)]
+    pub domain_pattern: Option<String>,
+    #[serde(default)]
+    pub domain: Option<String>,
+    #[serde(default)]
+    pub token: Option<String>,
+    #[serde(default)]
+    pub caller_pid: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentSonarClassifyRequest {
+    pub event_jsonl: String,
+    #[serde(default)]
+    pub external_cmd: Option<String>,
+    #[serde(default)]
+    pub token: Option<String>,
+    #[serde(default)]
+    pub caller_pid: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentSonarImportRequest {
+    #[serde(flatten)]
+    pub ruleset: killswitch_telemetry::DynamicRuleSet,
+    #[serde(default)]
+    pub token: Option<String>,
+    #[serde(default)]
+    pub caller_pid: Option<u32>,
+}

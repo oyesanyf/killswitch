@@ -249,6 +249,34 @@ impl EventCorrelator {
         None
     }
 
+    /// Ingests a Dynamic AgentSonar flow event, amplifying unclassified high-score Shadow AI
+    /// streaming flows (`ai_score >= 0.70`, `agent == ""`, `!is_noise`) into correlated threat signals.
+    pub fn ingest_agentsonar_flow(
+        &self,
+        flow: &crate::agentsonar::FlowEvent,
+    ) -> Option<ThreatSignal> {
+        if flow.is_noise || !flow.agent.is_empty() || flow.ai_score < 0.70 || flow.pid == 0 {
+            return None;
+        }
+        let mut ev = SecurityEvent::new(
+            killswitch_types::telemetry::TelemetryEventKind::NetworkConnect,
+            flow.pid,
+            &flow.proc_name,
+            &flow.proc_name,
+            format!(
+                "{} -> {}:{} ({})",
+                flow.cmdline, flow.domain, flow.remote_port, flow.source
+            ),
+        );
+        ev.attributes
+            .insert("agentsonar_domain".to_string(), flow.domain.clone());
+        ev.attributes.insert(
+            "agentsonar_score".to_string(),
+            format!("{:.3}", flow.ai_score),
+        );
+        self.ingest_event(&ev, AttackStage::Exfiltration, flow.ai_score as f32)
+    }
+
     /// Purges a terminated PID's correlation context.
     pub fn purge_pid(&self, pid: u32) {
         self.processes.remove(&pid);

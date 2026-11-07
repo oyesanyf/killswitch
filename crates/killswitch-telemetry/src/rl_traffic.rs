@@ -435,6 +435,49 @@ impl RlTrafficLearner {
         }
     }
 
+    /// Enriches RL traffic evaluation with Dynamic AgentSonar SSE flow-shape telemetry.
+    /// When an unclassified (`agent == ""` and `!is_noise`) high-scoring flow matches the
+    /// destination or process while carrying sensitive DLP taint, boosts `ai_breakout_signal`.
+    pub fn evaluate_traffic_with_agentsonar(
+        &self,
+        destination_url: &str,
+        process_name: Option<&str>,
+        payload_taint_level: f64,
+        base_breakout_signal: f64,
+        agentsonar: &crate::agentsonar::AgentSonarEngine,
+    ) -> RlTrafficDecision {
+        let (host, _, _) = Self::parse_host_and_port(destination_url);
+        let mut boosted_signal = base_breakout_signal;
+        if let Ok(events) = agentsonar.list_events(256) {
+            for ev in events {
+                if ev.is_noise || !ev.agent.is_empty() || ev.ai_score < 0.70 {
+                    continue;
+                }
+                let domain_match = ev.domain.eq_ignore_ascii_case(&host)
+                    || crate::agentsonar::domain_matches_pattern(&host, &ev.domain);
+                let proc_match = process_name
+                    .map(|p| p.eq_ignore_ascii_case(&ev.proc_name))
+                    .unwrap_or(false);
+                if domain_match || (proc_match && payload_taint_level >= 0.50) {
+                    let sonar_signal = if payload_taint_level >= 0.67 {
+                        (ev.ai_score * 0.95).clamp(0.0, 1.0)
+                    } else {
+                        (ev.ai_score * 0.75).clamp(0.0, 1.0)
+                    };
+                    if sonar_signal > boosted_signal {
+                        boosted_signal = sonar_signal;
+                    }
+                }
+            }
+        }
+        self.evaluate_traffic(
+            destination_url,
+            process_name,
+            payload_taint_level,
+            boosted_signal,
+        )
+    }
+
     /// Ultra-fast zero-allocation hot-path check (< 500ns) for inline DLP egress evaluation.
     #[inline]
     pub fn is_fast_learned_legitimate(&self, destination_url: &str) -> bool {
