@@ -162,6 +162,127 @@ impl Default for NormalizedHookRequest {
     }
 }
 
+impl NormalizedHookRequest {
+    /// Ingests and normalizes any agent JSON payload (`val`) into a `NormalizedHookRequest`
+    /// using canonical wire synonym extraction helpers across Claude, Cursor, Copilot, OpenCode, and MCP.
+    pub fn from_json(val: &serde_json::Value) -> Self {
+        let params = val.get("params");
+
+        let tool_name = params
+            .and_then(extract_wire_tool_name)
+            .or_else(|| extract_wire_tool_name(val));
+
+        let arguments = params
+            .and_then(extract_wire_arguments)
+            .or_else(|| extract_wire_arguments(val));
+
+        let command = arguments
+            .as_ref()
+            .and_then(extract_wire_command)
+            .or_else(|| params.and_then(extract_wire_command))
+            .or_else(|| extract_wire_command(val));
+
+        let file_path = arguments
+            .as_ref()
+            .and_then(extract_wire_file_path)
+            .or_else(|| params.and_then(extract_wire_file_path))
+            .or_else(|| extract_wire_file_path(val));
+
+        let tool_resp = params
+            .and_then(extract_wire_tool_response)
+            .or_else(|| extract_wire_tool_response(val));
+
+        let exit_code = tool_resp
+            .and_then(extract_wire_exit_code)
+            .or_else(|| extract_wire_exit_code(val));
+
+        let stderr = tool_resp
+            .and_then(extract_wire_stderr)
+            .or_else(|| extract_wire_stderr(val));
+
+        let cwd = extract_wire_cwd(val)
+            .or_else(|| params.and_then(extract_wire_cwd))
+            .or_else(|| arguments.as_ref().and_then(extract_wire_cwd));
+
+        let session_id = extract_wire_session_id(val)
+            .or_else(|| params.and_then(extract_wire_session_id))
+            .or_else(|| arguments.as_ref().and_then(extract_wire_session_id));
+
+        let agent = if let Some(agent_str) = extract_wire_agent_id(val) {
+            SupportedAgentKind::from_str(&agent_str).unwrap_or_else(|| {
+                if val.get("cursor_command").is_some()
+                    || val.get("cursor_trace_id").is_some()
+                    || val.get("context_paths").is_some()
+                {
+                    SupportedAgentKind::Cursor
+                } else if val.get("copilot_action").is_some() || val.get("editor_context").is_some()
+                {
+                    SupportedAgentKind::Copilot
+                } else if val.get("subcommand").is_some() || val.get("working_file").is_some() {
+                    SupportedAgentKind::OpenCode
+                } else if val.get("jsonrpc").is_some() {
+                    SupportedAgentKind::Mcp
+                } else {
+                    SupportedAgentKind::Claude
+                }
+            })
+        } else if val.get("jsonrpc").is_some()
+            || val.get("method").and_then(|m| m.as_str()) == Some("tools/call")
+        {
+            SupportedAgentKind::Mcp
+        } else if val.get("cursor_command").is_some()
+            || val.get("cursor_trace_id").is_some()
+            || val.get("context_paths").is_some()
+        {
+            SupportedAgentKind::Cursor
+        } else if val.get("copilot_action").is_some() || val.get("editor_context").is_some() {
+            SupportedAgentKind::Copilot
+        } else if val.get("subcommand").is_some() || val.get("working_file").is_some() {
+            SupportedAgentKind::OpenCode
+        } else {
+            SupportedAgentKind::Claude
+        };
+
+        let event_type = if let Some(evt) = val
+            .get("event")
+            .or_else(|| val.get("event_type"))
+            .or_else(|| val.get("type"))
+            .and_then(|e| e.as_str())
+        {
+            HookEventType::from_name(evt)
+        } else if val.get("jsonrpc").is_some() {
+            HookEventType::BeforeMCPExecution
+        } else if exit_code.is_some() || stderr.is_some() || tool_resp.is_some() {
+            HookEventType::PostToolUse
+        } else {
+            HookEventType::PreToolUse
+        };
+
+        let rpc_id = val.get("id").cloned();
+
+        Self {
+            agent,
+            event_type,
+            tool_name,
+            command,
+            file_path,
+            arguments,
+            exit_code,
+            stderr,
+            cwd,
+            session_id,
+            rpc_id,
+        }
+    }
+
+    /// Ingests a raw JSON string into a NormalizedHookRequest using canonical wire synonym normalization.
+    pub fn from_json_str(raw: &str) -> Result<Self, String> {
+        let val: serde_json::Value =
+            serde_json::from_str(raw).map_err(|e| format!("Invalid hook request JSON: {e}"))?;
+        Ok(Self::from_json(&val))
+    }
+}
+
 /// Synchronous evaluation decision returned to agent wire format adapters.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HookEvaluationDecision {
@@ -259,95 +380,208 @@ pub fn clear_interceptions() {
 
 /// Extracts tool name matching canonical synonyms: `tool_name`, `name`, `tool`.
 pub fn extract_wire_tool_name(val: &serde_json::Value) -> Option<String> {
-    val.get("tool_name")
-        .or_else(|| val.get("name"))
-        .or_else(|| val.get("tool"))
-        .and_then(|v| v.as_str())
-        .map(String::from)
-}
-
-/// Extracts tool arguments / parameter object matching canonical synonyms:
-/// `arguments`, `tool_input`, `args`, `parameters`, `input`.
-pub fn extract_wire_arguments(val: &serde_json::Value) -> Option<serde_json::Value> {
-    val.get("arguments")
-        .or_else(|| val.get("tool_input"))
-        .or_else(|| val.get("args"))
-        .or_else(|| val.get("parameters"))
-        .or_else(|| val.get("input"))
-        .cloned()
-}
-
-/// Extracts tool response object matching canonical synonyms:
-/// `tool_response`, `result`, `output`, `content`.
-pub fn extract_wire_tool_response(val: &serde_json::Value) -> Option<&serde_json::Value> {
-    val.get("tool_response")
-        .or_else(|| val.get("result"))
-        .or_else(|| val.get("output"))
-        .or_else(|| val.get("content"))
-}
-
-/// Extracts command string matching canonical synonyms: `command`, `cmd`.
-/// Supports both string literals and token arrays (`["bash", "-c", ...]`).
-pub fn extract_wire_command(val: &serde_json::Value) -> Option<String> {
-    let field = val.get("command").or_else(|| val.get("cmd"));
-    if let Some(f) = field {
-        if let Some(s) = f.as_str() {
-            return Some(s.to_string());
-        }
-        if let Some(arr) = f.as_array() {
-            let parts: Vec<&str> = arr.iter().filter_map(|v| v.as_str()).collect();
-            if !parts.is_empty() {
-                return Some(parts.join(" "));
+    const CANDIDATES: &[&str] = &["tool_name", "name", "tool"];
+    for &key in CANDIDATES {
+        if let Some(v) = val.get(key) {
+            if let Some(s) = v.as_str() {
+                return Some(s.to_string());
             }
         }
     }
     None
 }
 
-/// Extracts file path matching canonical synonyms: `file_path`, `path`, `filePath`, `uri`.
+/// Extracts tool arguments / parameter object matching canonical synonyms:
+/// `arguments`, `tool_input`, `args`, `parameters`, `input`.
+pub fn extract_wire_arguments(val: &serde_json::Value) -> Option<serde_json::Value> {
+    const CANDIDATES: &[&str] = &["arguments", "tool_input", "args", "parameters", "input"];
+    for &key in CANDIDATES {
+        if let Some(v) = val.get(key) {
+            if !v.is_null() {
+                return Some(v.clone());
+            }
+        }
+    }
+    None
+}
+
+/// Extracts tool response object matching canonical synonyms:
+/// `tool_response`, `tool_result` (Model Context Protocol / MCP), `result`, `output`, `content`.
+pub fn extract_wire_tool_response(val: &serde_json::Value) -> Option<&serde_json::Value> {
+    const CANDIDATES: &[&str] = &[
+        "tool_response",
+        "tool_result",
+        "result",
+        "output",
+        "content",
+    ];
+    for &key in CANDIDATES {
+        if let Some(v) = val.get(key) {
+            if !v.is_null() {
+                return Some(v);
+            }
+        }
+    }
+    None
+}
+
+/// Extracts command string matching canonical synonyms:
+/// `command`, `cmd`, `cursor_command` (Cursor), `copilot_action` (GitHub Copilot),
+/// `subcommand` (OpenCode), `action`.
+/// Supports both string literals and token arrays (`["bash", "-c", ...]`).
+pub fn extract_wire_command(val: &serde_json::Value) -> Option<String> {
+    const CANDIDATES: &[&str] = &[
+        "command",
+        "cmd",
+        "cursor_command",
+        "copilot_action",
+        "subcommand",
+        "action",
+    ];
+    for &key in CANDIDATES {
+        if let Some(f) = val.get(key) {
+            if let Some(s) = f.as_str() {
+                return Some(s.to_string());
+            }
+            if let Some(arr) = f.as_array() {
+                let parts: Vec<&str> = arr.iter().filter_map(|v| v.as_str()).collect();
+                if !parts.is_empty() {
+                    return Some(parts.join(" "));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Extracts file path matching canonical synonyms:
+/// `file_path`, `path`, `filePath`, `uri`, `working_file` (OpenCode),
+/// `editor_context` (GitHub Copilot), `file`, `context_paths` (Cursor).
+/// Handles both single strings and arrays of strings (`arr.first()`).
 pub fn extract_wire_file_path(val: &serde_json::Value) -> Option<String> {
-    val.get("file_path")
-        .or_else(|| val.get("path"))
-        .or_else(|| val.get("filePath"))
-        .or_else(|| val.get("uri"))
-        .and_then(|v| v.as_str())
-        .map(String::from)
+    const CANDIDATES: &[&str] = &[
+        "file_path",
+        "path",
+        "filePath",
+        "uri",
+        "working_file",
+        "editor_context",
+        "file",
+        "context_paths",
+    ];
+    for &key in CANDIDATES {
+        if let Some(f) = val.get(key) {
+            if let Some(s) = f.as_str() {
+                return Some(s.to_string());
+            }
+            if let Some(arr) = f.as_array() {
+                if let Some(first) = arr.first().and_then(|v| v.as_str()) {
+                    return Some(first.to_string());
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Extracts session ID matching canonical synonyms:
-/// `session_id`, `sessionId`, `conversation_id`, `cursor_trace_id`.
+/// `session_id`, `sessionId`, `conversation_id`, `cursor_trace_id`, `tool_use_id` (Anthropic Claude Code).
 pub fn extract_wire_session_id(val: &serde_json::Value) -> Option<String> {
-    val.get("session_id")
-        .or_else(|| val.get("sessionId"))
-        .or_else(|| val.get("conversation_id"))
-        .or_else(|| val.get("cursor_trace_id"))
-        .and_then(|v| v.as_str())
-        .map(String::from)
+    const CANDIDATES: &[&str] = &[
+        "session_id",
+        "sessionId",
+        "conversation_id",
+        "cursor_trace_id",
+        "tool_use_id",
+    ];
+    for &key in CANDIDATES {
+        if let Some(v) = val.get(key) {
+            if let Some(s) = v.as_str() {
+                return Some(s.to_string());
+            }
+        }
+    }
+    None
 }
 
 /// Extracts exit code matching canonical synonyms: `exit_code`, `exitCode`.
 pub fn extract_wire_exit_code(val: &serde_json::Value) -> Option<i32> {
-    val.get("exit_code")
-        .or_else(|| val.get("exitCode"))
-        .and_then(|v| v.as_i64())
-        .map(|i| i as i32)
+    const CANDIDATES: &[&str] = &["exit_code", "exitCode"];
+    for &key in CANDIDATES {
+        if let Some(v) = val.get(key) {
+            if let Some(i) = v.as_i64() {
+                return Some(i as i32);
+            }
+        }
+    }
+    None
 }
 
 /// Extracts stderr or error message string matching: `stderr`, `error`.
 pub fn extract_wire_stderr(val: &serde_json::Value) -> Option<String> {
-    val.get("stderr")
-        .or_else(|| val.get("error"))
-        .and_then(|v| v.as_str())
-        .map(String::from)
+    const CANDIDATES: &[&str] = &["stderr", "error"];
+    for &key in CANDIDATES {
+        if let Some(v) = val.get(key) {
+            if let Some(s) = v.as_str() {
+                return Some(s.to_string());
+            }
+        }
+    }
+    None
 }
 
 /// Extracts working directory matching canonical synonyms: `cwd`, `working_dir`, `workingDirectory`.
 pub fn extract_wire_cwd(val: &serde_json::Value) -> Option<String> {
-    val.get("cwd")
-        .or_else(|| val.get("working_dir"))
-        .or_else(|| val.get("workingDirectory"))
-        .and_then(|v| v.as_str())
-        .map(String::from)
+    const CANDIDATES: &[&str] = &["cwd", "working_dir", "workingDirectory"];
+    for &key in CANDIDATES {
+        if let Some(v) = val.get(key) {
+            if let Some(s) = v.as_str() {
+                return Some(s.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Extracts agent identifier matching canonical synonyms: `agent_id`, `agentId`, `agent`.
+pub fn extract_wire_agent_id(val: &serde_json::Value) -> Option<String> {
+    const CANDIDATES: &[&str] = &["agent_id", "agentId", "agent"];
+    for &key in CANDIDATES {
+        if let Some(v) = val.get(key) {
+            if let Some(s) = v.as_str() {
+                return Some(s.to_string());
+            }
+            if let Some(id) = v
+                .get("id")
+                .or_else(|| v.get("name"))
+                .and_then(|x| x.as_str())
+            {
+                return Some(id.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Extracts source agent identifier matching canonical synonyms:
+/// `source_agent_id`, `sourceAgentId`, `caller_agent_id`.
+pub fn extract_wire_source_agent_id(val: &serde_json::Value) -> Option<String> {
+    const CANDIDATES: &[&str] = &["source_agent_id", "sourceAgentId", "caller_agent_id"];
+    for &key in CANDIDATES {
+        if let Some(v) = val.get(key) {
+            if let Some(s) = v.as_str() {
+                return Some(s.to_string());
+            }
+            if let Some(id) = v
+                .get("id")
+                .or_else(|| v.get("name"))
+                .and_then(|x| x.as_str())
+            {
+                return Some(id.to_string());
+            }
+        }
+    }
+    None
 }
 
 /// Parses Claude Code `.claude/settings.json` hook payload from JSON on stdin.
@@ -378,7 +612,8 @@ pub fn parse_claude_request(
         .or_else(|| extract_wire_stderr(&val));
 
     let cwd = extract_wire_cwd(&val).or_else(|| arguments.as_ref().and_then(extract_wire_cwd));
-    let session_id = extract_wire_session_id(&val);
+    let session_id = extract_wire_session_id(&val)
+        .or_else(|| arguments.as_ref().and_then(extract_wire_session_id));
 
     Ok(NormalizedHookRequest {
         agent: SupportedAgentKind::Claude,
@@ -424,7 +659,8 @@ pub fn parse_cursor_request(
         .or_else(|| extract_wire_stderr(&val));
 
     let cwd = extract_wire_cwd(&val).or_else(|| arguments.as_ref().and_then(extract_wire_cwd));
-    let session_id = extract_wire_session_id(&val);
+    let session_id = extract_wire_session_id(&val)
+        .or_else(|| arguments.as_ref().and_then(extract_wire_session_id));
 
     Ok(NormalizedHookRequest {
         agent: SupportedAgentKind::Cursor,
@@ -470,7 +706,8 @@ pub fn parse_copilot_request(
         .or_else(|| extract_wire_stderr(&val));
 
     let cwd = extract_wire_cwd(&val).or_else(|| arguments.as_ref().and_then(extract_wire_cwd));
-    let session_id = extract_wire_session_id(&val);
+    let session_id = extract_wire_session_id(&val)
+        .or_else(|| arguments.as_ref().and_then(extract_wire_session_id));
 
     Ok(NormalizedHookRequest {
         agent: SupportedAgentKind::Copilot,
@@ -519,7 +756,8 @@ pub fn parse_opencode_request(raw_json: &str) -> Result<NormalizedHookRequest, S
         .or_else(|| extract_wire_stderr(&val));
 
     let cwd = extract_wire_cwd(&val).or_else(|| arguments.as_ref().and_then(extract_wire_cwd));
-    let session_id = extract_wire_session_id(&val);
+    let session_id = extract_wire_session_id(&val)
+        .or_else(|| arguments.as_ref().and_then(extract_wire_session_id));
 
     Ok(NormalizedHookRequest {
         agent: SupportedAgentKind::OpenCode,
@@ -566,6 +804,17 @@ pub fn parse_mcp_call_request(raw_json: &str) -> Result<NormalizedHookRequest, S
         .or_else(|| extract_wire_file_path(&params))
         .or_else(|| extract_wire_file_path(&val));
 
+    let tool_resp =
+        extract_wire_tool_response(&params).or_else(|| extract_wire_tool_response(&val));
+    let exit_code = tool_resp
+        .and_then(extract_wire_exit_code)
+        .or_else(|| extract_wire_exit_code(&params))
+        .or_else(|| extract_wire_exit_code(&val));
+    let stderr = tool_resp
+        .and_then(extract_wire_stderr)
+        .or_else(|| extract_wire_stderr(&params))
+        .or_else(|| extract_wire_stderr(&val));
+
     let cwd = extract_wire_cwd(&params)
         .or_else(|| extract_wire_cwd(&val))
         .or_else(|| arguments.as_ref().and_then(extract_wire_cwd));
@@ -578,8 +827,8 @@ pub fn parse_mcp_call_request(raw_json: &str) -> Result<NormalizedHookRequest, S
         command,
         file_path,
         arguments,
-        exit_code: None,
-        stderr: None,
+        exit_code,
+        stderr,
         cwd,
         session_id,
         rpc_id,
@@ -1176,4 +1425,259 @@ module.exports = {{
     }
 
     Ok(installed_paths)
+}
+
+// ============================================================================
+// Unit Tests for Canonical Wire Synonyms and Normalization
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_wire_command_synonyms() {
+        let single_string_variants = [
+            ("command", "sudo rm -rf /"),
+            ("cmd", "sudo rm -rf /"),
+            ("cursor_command", "sudo rm -rf /"),
+            ("copilot_action", "sudo rm -rf /"),
+            ("subcommand", "sudo rm -rf /"),
+            ("action", "sudo rm -rf /"),
+        ];
+
+        for (key, val) in single_string_variants {
+            let json = serde_json::json!({ key: val });
+            assert_eq!(
+                extract_wire_command(&json),
+                Some(val.to_string()),
+                "Failed to extract single string command from '{}'",
+                key
+            );
+        }
+
+        let array_variants = [
+            ("command", vec!["sudo", "rm", "-rf", "/"]),
+            ("cmd", vec!["sudo", "rm", "-rf", "/"]),
+            ("cursor_command", vec!["sudo", "rm", "-rf", "/"]),
+            ("copilot_action", vec!["sudo", "rm", "-rf", "/"]),
+            ("subcommand", vec!["sudo", "rm", "-rf", "/"]),
+            ("action", vec!["sudo", "rm", "-rf", "/"]),
+        ];
+
+        for (key, arr) in array_variants {
+            let json = serde_json::json!({ key: arr });
+            assert_eq!(
+                extract_wire_command(&json),
+                Some("sudo rm -rf /".to_string()),
+                "Failed to extract array command from '{}'",
+                key
+            );
+        }
+    }
+
+    #[test]
+    fn test_extract_wire_file_path_synonyms() {
+        let single_string_variants = [
+            ("file_path", "/etc/shadow"),
+            ("path", "/etc/shadow"),
+            ("filePath", "/etc/shadow"),
+            ("uri", "/etc/shadow"),
+            ("working_file", "/etc/shadow"),
+            ("editor_context", "/etc/shadow"),
+            ("file", "/etc/shadow"),
+            ("context_paths", "/etc/shadow"),
+        ];
+
+        for (key, val) in single_string_variants {
+            let json = serde_json::json!({ key: val });
+            assert_eq!(
+                extract_wire_file_path(&json),
+                Some(val.to_string()),
+                "Failed to extract single string file path from '{}'",
+                key
+            );
+        }
+
+        let array_variants = [
+            ("context_paths", vec!["/etc/shadow", "/etc/passwd"]),
+            ("working_file", vec!["/etc/shadow"]),
+            ("file_path", vec!["/etc/shadow"]),
+        ];
+
+        for (key, arr) in array_variants {
+            let json = serde_json::json!({ key: arr });
+            assert_eq!(
+                extract_wire_file_path(&json),
+                Some("/etc/shadow".to_string()),
+                "Failed to extract array first element file path from '{}'",
+                key
+            );
+        }
+    }
+
+    #[test]
+    fn test_extract_wire_session_id_synonyms() {
+        let variants = [
+            ("session_id", "sess-1"),
+            ("sessionId", "sess-2"),
+            ("conversation_id", "conv-3"),
+            ("cursor_trace_id", "trace-4"),
+            ("tool_use_id", "tool-use-claude-9999"),
+        ];
+
+        for (key, val) in variants {
+            let json = serde_json::json!({ key: val });
+            assert_eq!(
+                extract_wire_session_id(&json),
+                Some(val.to_string()),
+                "Failed to extract session id from '{}'",
+                key
+            );
+        }
+    }
+
+    #[test]
+    fn test_extract_wire_tool_response_synonyms() {
+        let variants = [
+            "tool_response",
+            "tool_result",
+            "result",
+            "output",
+            "content",
+        ];
+
+        for key in variants {
+            let json = serde_json::json!({
+                key: { "exit_code": 1, "stderr": "sudo: a password is required" }
+            });
+            let resp = extract_wire_tool_response(&json);
+            assert!(
+                resp.is_some(),
+                "Failed to extract tool response from '{}'",
+                key
+            );
+            assert_eq!(
+                extract_wire_exit_code(resp.unwrap()),
+                Some(1),
+                "Failed to extract exit code from '{}'",
+                key
+            );
+            assert_eq!(
+                extract_wire_stderr(resp.unwrap()),
+                Some("sudo: a password is required".to_string()),
+                "Failed to extract stderr from '{}'",
+                key
+            );
+        }
+    }
+
+    #[test]
+    fn test_extract_wire_agent_id_and_source_synonyms() {
+        let agent_variants = [
+            ("agent_id", "cursor"),
+            ("agentId", "copilot"),
+            ("agent", "claude"),
+        ];
+
+        for (key, val) in agent_variants {
+            let json = serde_json::json!({ key: val });
+            assert_eq!(
+                extract_wire_agent_id(&json),
+                Some(val.to_string()),
+                "Failed to extract agent id from '{}'",
+                key
+            );
+        }
+
+        let source_variants = [
+            ("source_agent_id", "agent-source-1"),
+            ("sourceAgentId", "agent-source-2"),
+            ("caller_agent_id", "agent-source-3"),
+        ];
+
+        for (key, val) in source_variants {
+            let json = serde_json::json!({ key: val });
+            assert_eq!(
+                extract_wire_source_agent_id(&json),
+                Some(val.to_string()),
+                "Failed to extract source agent id from '{}'",
+                key
+            );
+        }
+    }
+
+    #[test]
+    fn test_normalized_hook_request_from_json() {
+        // 1. Cursor command & context_paths array
+        let cursor_json = serde_json::json!({
+            "cursor_command": ["sudo", "rm", "-rf", "/"],
+            "context_paths": ["/etc/shadow"],
+            "cursor_trace_id": "cursor-trace-101"
+        });
+        let req = NormalizedHookRequest::from_json(&cursor_json);
+        assert_eq!(req.agent, SupportedAgentKind::Cursor);
+        assert_eq!(req.command.as_deref(), Some("sudo rm -rf /"));
+        assert_eq!(req.file_path.as_deref(), Some("/etc/shadow"));
+        assert_eq!(req.session_id.as_deref(), Some("cursor-trace-101"));
+
+        // Evaluates against all 6 security layers: must be denied by SensitiveSystemPathGuard
+        let decision = evaluate_hook_synchronously(&req);
+        assert!(!decision.allowed);
+
+        // 2. OpenCode subcommand & working_file
+        let opencode_json = serde_json::json!({
+            "subcommand": "sudo rm -rf /",
+            "working_file": "/etc/shadow",
+            "type": "before"
+        });
+        let req = NormalizedHookRequest::from_json(&opencode_json);
+        assert_eq!(req.agent, SupportedAgentKind::OpenCode);
+        assert_eq!(req.command.as_deref(), Some("sudo rm -rf /"));
+        assert_eq!(req.file_path.as_deref(), Some("/etc/shadow"));
+        let decision = evaluate_hook_synchronously(&req);
+        assert!(!decision.allowed);
+
+        // 3. Copilot copilot_action & editor_context
+        let copilot_json = serde_json::json!({
+            "copilot_action": "sudo rm -rf /",
+            "editor_context": "/etc/shadow",
+            "event": "preToolUse"
+        });
+        let req = NormalizedHookRequest::from_json(&copilot_json);
+        assert_eq!(req.agent, SupportedAgentKind::Copilot);
+        assert_eq!(req.command.as_deref(), Some("sudo rm -rf /"));
+        assert_eq!(req.file_path.as_deref(), Some("/etc/shadow"));
+        let decision = evaluate_hook_synchronously(&req);
+        assert!(!decision.allowed);
+
+        // 4. Claude Code tool_use_id
+        let claude_json = serde_json::json!({
+            "tool_name": "Bash",
+            "tool_use_id": "tool-use-claude-9999",
+            "tool_input": {
+                "command": "sudo rm -rf /"
+            }
+        });
+        let req = NormalizedHookRequest::from_json(&claude_json);
+        assert_eq!(req.agent, SupportedAgentKind::Claude);
+        assert_eq!(req.command.as_deref(), Some("sudo rm -rf /"));
+        assert_eq!(req.session_id.as_deref(), Some("tool-use-claude-9999"));
+
+        // 5. MCP tool_result in post-execution
+        let mcp_post_json = serde_json::json!({
+            "tool_name": "Bash",
+            "session_id": "session-post-mcp",
+            "tool_result": {
+                "exit_code": 1,
+                "stderr": "sudo: a password is required"
+            }
+        });
+        let req = NormalizedHookRequest::from_json(&mcp_post_json);
+        assert_eq!(req.exit_code, Some(1));
+        assert_eq!(req.stderr.as_deref(), Some("sudo: a password is required"));
+        assert!(req.event_type.is_post());
+        let decision = evaluate_hook_synchronously(&req);
+        assert!(decision.allowed);
+    }
 }

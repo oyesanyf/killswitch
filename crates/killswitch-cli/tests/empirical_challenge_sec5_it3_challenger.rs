@@ -250,6 +250,61 @@ fn test_empirical_multibyte_utf8_deal_context_crash_freedom() {
             true,
             "Emoji 💰 followed by 3-byte Euro sign € and amount in deal value context",
         ),
+        (
+            r#"{"deal_value": "💰 $12,500,000", "counterparty": "Acme Corp"}"#,
+            true,
+            "Snake_case deal_value in compact JSON with emoji 💰 and USD amount",
+        ),
+        (
+            r#"{"deal_size": "🚀 $25,000,000", "counterparty": "Beta LLC"}"#,
+            true,
+            "Snake_case deal_size in compact JSON with emoji 🚀 and USD amount",
+        ),
+        (
+            r#"{"deal size": "🚀 $25,000,000", "counterparty": "Beta LLC"}"#,
+            true,
+            "Space-separated deal size in compact JSON with emoji 🚀 and USD amount",
+        ),
+        (
+            r#"{"transaction_value": "💰 $15M USD", "status": "pending"}"#,
+            true,
+            "Snake_case transaction_value in compact JSON with emoji 💰 and $15M USD",
+        ),
+        (
+            r#"{"deal_amount": "💰 $30,000,000", "counterparty": "Gamma Inc"}"#,
+            true,
+            "Snake_case deal_amount in compact JSON with emoji 💰 and USD amount",
+        ),
+        (
+            r#"{"deal amount": "💰 $30,000,000", "counterparty": "Gamma Inc"}"#,
+            true,
+            "Space-separated deal amount in compact JSON with emoji 💰 and USD amount",
+        ),
+        (
+            r#"{"acquisition_price": "💰 €15,000,000", "target": "Delta SA"}"#,
+            true,
+            "Snake_case acquisition_price in compact JSON with emoji 💰 and Euro amount",
+        ),
+        (
+            r#"{"acquisition price": "💰 €15,000,000", "target": "Delta SA"}"#,
+            true,
+            "Space-separated acquisition price in compact JSON with emoji 💰 and Euro amount",
+        ),
+        (
+            r#"{"m&a": "💰 $50,000,000", "target": "Epsilon Corp"}"#,
+            true,
+            "Compact JSON m&a key with emoji 💰 and USD amount",
+        ),
+        (
+            r#"{"m & a": "💰 $50,000,000", "target": "Epsilon Corp"}"#,
+            true,
+            "Space-separated m & a key with emoji 💰 and USD amount",
+        ),
+        (
+            r#"{"m_and_a": "💰 $50,000,000", "target": "Epsilon Corp"}"#,
+            true,
+            "Snake_case m_and_a key with emoji 💰 and USD amount",
+        ),
         // 2. Cyrillic characters with deal context
         (
             r#"{"deal value": "аб $25,000,000", "notes": "Cyrillic prefix test"}"#,

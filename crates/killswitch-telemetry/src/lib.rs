@@ -37,13 +37,17 @@ pub mod watchdog;
 
 // Re-exports for clean ergonomics
 pub use agent_hooks::{
-    clear_interceptions, evaluate_hook_synchronously, format_claude_response,
-    format_copilot_response, format_cursor_response, format_mcp_error_response,
-    format_opencode_response, get_recent_interceptions, install_agent_hooks, parse_claude_request,
-    parse_copilot_request, parse_cursor_request, parse_mcp_call_request, parse_opencode_request,
-    record_interception_event, snapshot_interceptions, AgentInterceptionRecord,
-    HookEvaluationDecision, HookEventType, NormalizedHookRequest, SupportedAgentKind,
-    AGENT_INTERCEPTION_CAPACITY, AGENT_INTERCEPTION_EVENTS, GLOBAL_CORRELATOR,
+    clear_interceptions, evaluate_hook_synchronously, extract_wire_agent_id,
+    extract_wire_arguments, extract_wire_command, extract_wire_cwd, extract_wire_exit_code,
+    extract_wire_file_path, extract_wire_session_id, extract_wire_source_agent_id,
+    extract_wire_stderr, extract_wire_tool_name, extract_wire_tool_response,
+    format_claude_response, format_copilot_response, format_cursor_response,
+    format_mcp_error_response, format_opencode_response, get_recent_interceptions,
+    install_agent_hooks, parse_claude_request, parse_copilot_request, parse_cursor_request,
+    parse_mcp_call_request, parse_opencode_request, record_interception_event,
+    snapshot_interceptions, AgentInterceptionRecord, HookEvaluationDecision, HookEventType,
+    NormalizedHookRequest, SupportedAgentKind, AGENT_INTERCEPTION_CAPACITY,
+    AGENT_INTERCEPTION_EVENTS, GLOBAL_CORRELATOR,
 };
 pub use attack::{
     AttackGraphMatcher, AttackPattern, AttackSequenceEvaluation, AttackStage, ProcessTimelineEvent,

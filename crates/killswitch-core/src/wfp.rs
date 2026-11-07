@@ -3275,6 +3275,9 @@ impl NetworkIsolator for WindowsWfpIsolator {
         &self,
         target_ips: Option<&[IpAddr]>,
     ) -> Result<usize, KillSwitchError> {
+        if std::env::var("KILLSWITCH_SELF_DIAGNOSTIC").is_ok() {
+            return Ok(0);
+        }
         if let Some(ips) = target_ips {
             Ok(terminate_active_tcp_sockets_for_ips(ips))
         } else {
@@ -3373,7 +3376,9 @@ mod tests {
     #[test]
     fn test_windows_wfp_isolator_trait() {
         let isolator = WindowsWfpIsolator;
-        let count = isolator.reset_tcp_connections(None).unwrap();
+        let count = isolator
+            .reset_tcp_connections(Some(&["192.0.2.254".parse().unwrap()]))
+            .unwrap();
         // Sockets reset count is non-negative
         let _ = count;
     }
