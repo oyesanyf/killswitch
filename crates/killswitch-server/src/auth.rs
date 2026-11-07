@@ -186,7 +186,18 @@ pub fn verify_control_plane_auth(
         .active_bound_port
         .load(std::sync::atomic::Ordering::SeqCst);
     let actual_peer_pid = if let Some(ConnectInfo(addr)) = connect_info {
-        resolve_loopback_peer_pid(*addr, bound_port).ok()
+        match resolve_loopback_peer_pid(*addr, bound_port) {
+            Ok(pid) => Some(pid),
+            Err(e) => {
+                if claimed_pid.is_some() {
+                    return Err(ServerError::AuthenticationFailed(format!(
+                        "Loopback peer PID verification failed on connected socket: {}",
+                        e
+                    )));
+                }
+                None
+            }
+        }
     } else {
         None
     };

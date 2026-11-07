@@ -1,7 +1,7 @@
-//! Adversarial Challenge SEC-5 Iteration 2:
+//! Adversarial Challenge SEC-5 Iteration 2 / Iteration 4:
 //! MCP JSON-RPC ID Preservation, Wire Format Synonyms, and Error Formatting Compliance.
 //!
-//! Evaluates the deliverables of Milestone SEC-5 Iteration 2:
+//! Evaluates the deliverables of Milestone SEC-5:
 //! 1. JSON-RPC ID preservation across diverse types:
 //!    - String IDs (UUIDs, alphanumeric, special characters)
 //!    - Large integer IDs (e.g. 9007199254740991, i64::MAX)
@@ -10,17 +10,26 @@
 //!    - Missing "id" field (JSON-RPC notification behavior)
 //! 2. Wire format synonym variations:
 //!    - Tool name synonyms: `tool_name`, `name`, `tool`
-//!    - Tool argument synonyms: `tool_input`, `arguments`, `args`, `parameters`
-//!    - Tool response synonyms: `tool_response`, `result`, `content`, `output`
+//!    - Tool argument synonyms: `tool_input`, `arguments`, `args`, `parameters`, `input`
+//!    - Tool response synonyms: `tool_response`, `tool_result`, `result`, `content`, `output`
+//!    - Command synonyms: `command`, `cmd`, `cursor_command`, `copilot_action`, `subcommand`, `action`
+//!    - Path synonyms: `file_path`, `path`, `filePath`, `uri`, `working_file`, `editor_context`, `file`, `context_paths`
+//!    - Session / tool ID synonyms: `session_id`, `sessionId`, `conversation_id`, `cursor_trace_id`, `tool_use_id`
+//!    - Agent / source ID helpers: `extract_wire_agent_id`, `extract_wire_source_agent_id`
 //! 3. MCP error response formatting compliance (JSON-RPC 2.0 §5.1):
 //!    - Response structure: `{"jsonrpc": "2.0", "id": <exact_id>, "error": {"code": -32000, "message": "...", "data": ...}}`
 //!    - Verify zero ID clobbering, zero fallback to static 1 or null when an ID was provided.
 
+use std::sync::Mutex;
+
 use killswitch_telemetry::agent_hooks::{
-    clear_interceptions, evaluate_hook_synchronously, format_mcp_error_response,
-    parse_claude_request, parse_copilot_request, parse_cursor_request, parse_mcp_call_request,
-    parse_opencode_request, HookEvaluationDecision, GLOBAL_CORRELATOR,
+    clear_interceptions, evaluate_hook_synchronously, extract_wire_agent_id,
+    extract_wire_source_agent_id, format_mcp_error_response, parse_claude_request,
+    parse_copilot_request, parse_cursor_request, parse_mcp_call_request, parse_opencode_request,
+    HookEvaluationDecision, GLOBAL_CORRELATOR,
 };
+
+static ADVERSARIAL_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 // ============================================================================
 // 1. JSON-RPC ID Preservation Across Diverse Types
@@ -511,12 +520,21 @@ fn test_mcp_wire_format_synonyms() {
     }
 }
 
-/// Tests tool response synonyms: `tool_response`, `result`, `content`, `output`
+/// Tests tool response synonyms: `tool_response`, `tool_result`, `result`, `content`, `output`
 /// in post-tool evaluation to guarantee Incident A dynamic denial recording.
 #[test]
 fn test_tool_response_synonyms_incident_a_correlation() {
+    let _guard = ADVERSARIAL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     clear_interceptions();
-    let response_synonyms = ["tool_response", "result", "content", "output"];
+    let response_synonyms = [
+        "tool_response",
+        "tool_result",
+        "result",
+        "content",
+        "output",
+    ];
 
     for (idx, resp_key) in response_synonyms.iter().enumerate() {
         let session = format!("session-resp-synonym-{idx}");
@@ -569,36 +587,585 @@ fn test_tool_response_synonyms_incident_a_correlation() {
 /// Tests sensitive system path interception under argument synonym variations.
 #[test]
 fn test_sensitive_path_guard_synonym_variations() {
+    let _guard = ADVERSARIAL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    clear_interceptions();
     let arg_keys = ["arguments", "args", "parameters", "tool_input"];
+    let path_keys = [
+        "path",
+        "file_path",
+        "filePath",
+        "uri",
+        "working_file",
+        "editor_context",
+        "file",
+    ];
 
-    for key in arg_keys {
-        // MCP tools/call with sensitive path in synonym key
-        let payload = serde_json::json!({
+    for arg_key in arg_keys {
+        for path_key in path_keys {
+            let payload = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": "test-sens-1",
+                "method": "tools/call",
+                "params": {
+                    "name": "read_file",
+                    arg_key: {
+                        path_key: "/etc/shadow"
+                    }
+                }
+            })
+            .to_string();
+
+            let req = parse_mcp_call_request(&payload).expect("parse mcp");
+            let decision = evaluate_hook_synchronously(&req);
+            assert!(
+                !decision.allowed,
+                "Sensitive path /etc/shadow in arg '{}' and path key '{}' must be denied by SensitiveSystemPathGuard",
+                arg_key, path_key
+            );
+            assert_eq!(
+                decision.denied_by_layer.as_deref(),
+                Some("SensitiveSystemPathGuard"),
+                "Rationale must mention sensitive store for synonym '{}'",
+                arg_key
+            );
+        }
+
+        // Also test context_paths array in arg_key
+        let payload_ctx_arr = serde_json::json!({
             "jsonrpc": "2.0",
-            "id": "test-sens-1",
+            "id": "test-sens-ctx-arr",
             "method": "tools/call",
             "params": {
                 "name": "read_file",
-                key: {
-                    "path": "/etc/shadow"
+                arg_key: {
+                    "context_paths": ["/etc/shadow"]
                 }
             }
         })
         .to_string();
 
-        let req = parse_mcp_call_request(&payload).expect("parse mcp");
-        let decision = evaluate_hook_synchronously(&req);
+        let req_ctx_arr = parse_mcp_call_request(&payload_ctx_arr).expect("parse mcp ctx arr");
+        let decision_ctx_arr = evaluate_hook_synchronously(&req_ctx_arr);
         assert!(
-            !decision.allowed,
-            "Sensitive path /etc/shadow in synonym '{}' must be denied by SensitiveSystemPathGuard",
-            key
+            !decision_ctx_arr.allowed,
+            "context_paths array in '{}' must be denied by SensitiveSystemPathGuard",
+            arg_key
         );
-        assert!(
-            decision
-                .rationale
-                .contains("sensitive system credential store"),
-            "Rationale must mention sensitive store for synonym '{}'",
-            key
+        assert_eq!(
+            decision_ctx_arr.denied_by_layer.as_deref(),
+            Some("SensitiveSystemPathGuard")
         );
     }
+}
+
+// ============================================================================
+// 4. Milestone SEC-5 Iteration 4 Wire Synonyms & Integration Verification
+// ============================================================================
+
+/// 1. Cursor: `cursor_command` attempting `sudo rm -rf /` -> must be denied with `decision.allowed == false`.
+#[test]
+fn test_cursor_cursor_command_synonym() {
+    let _guard = ADVERSARIAL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    clear_interceptions();
+
+    // 1. Single string cursor_command
+    let payload = serde_json::json!({
+        "cursor_command": "sudo rm -rf /"
+    })
+    .to_string();
+
+    let req = parse_cursor_request(&payload, "beforeShellExecution").expect("parse cursor");
+    assert_eq!(
+        req.command.as_deref(),
+        Some("sudo rm -rf /"),
+        "Cursor hook must extract command from 'cursor_command'"
+    );
+
+    let decision = evaluate_hook_synchronously(&req);
+    assert!(
+        !decision.allowed,
+        "Privileged command via 'cursor_command' must be denied with decision.allowed == false"
+    );
+
+    // 2. Token array cursor_command: ["sudo", "rm", "-rf", "/"]
+    let payload_arr = serde_json::json!({
+        "cursor_command": ["sudo", "rm", "-rf", "/"]
+    })
+    .to_string();
+
+    let req_arr =
+        parse_cursor_request(&payload_arr, "beforeShellExecution").expect("parse cursor array");
+    assert_eq!(
+        req_arr.command.as_deref(),
+        Some("sudo rm -rf /"),
+        "Cursor hook must extract token array command from 'cursor_command'"
+    );
+
+    let decision_arr = evaluate_hook_synchronously(&req_arr);
+    assert!(
+        !decision_arr.allowed,
+        "Privileged token array cursor_command must be denied"
+    );
+
+    // 3. Nested in arguments
+    let payload_nested = serde_json::json!({
+        "arguments": {
+            "cursor_command": "sudo rm -rf /"
+        }
+    })
+    .to_string();
+
+    let req_nested =
+        parse_cursor_request(&payload_nested, "beforeShellExecution").expect("parse cursor nested");
+    assert_eq!(
+        req_nested.command.as_deref(),
+        Some("sudo rm -rf /"),
+        "Cursor hook must extract nested 'cursor_command' from arguments"
+    );
+
+    let decision_nested = evaluate_hook_synchronously(&req_nested);
+    assert!(!decision_nested.allowed);
+}
+
+/// 2. Cursor: `context_paths` as array `["/etc/shadow"]` -> must be denied under `SensitiveSystemPathGuard`.
+#[test]
+fn test_cursor_context_paths_synonym() {
+    let _guard = ADVERSARIAL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    clear_interceptions();
+
+    // 1. Array of strings context_paths: ["/etc/shadow"]
+    let payload_arr = serde_json::json!({
+        "context_paths": ["/etc/shadow", "/home/user/code.rs"]
+    })
+    .to_string();
+
+    let req_arr = parse_cursor_request(&payload_arr, "beforeReadFile").expect("parse cursor");
+    assert_eq!(
+        req_arr.file_path.as_deref(),
+        Some("/etc/shadow"),
+        "Cursor hook must extract file_path from array 'context_paths'"
+    );
+
+    let decision_arr = evaluate_hook_synchronously(&req_arr);
+    assert!(
+        !decision_arr.allowed,
+        "Cursor context_paths targeting /etc/shadow must be denied"
+    );
+    assert_eq!(
+        decision_arr.denied_by_layer.as_deref(),
+        Some("SensitiveSystemPathGuard"),
+        "Must be denied under SensitiveSystemPathGuard"
+    );
+
+    // 2. Single string context_paths
+    let payload_str = serde_json::json!({
+        "context_paths": "/etc/shadow"
+    })
+    .to_string();
+
+    let req_str = parse_cursor_request(&payload_str, "beforeReadFile").expect("parse cursor");
+    assert_eq!(
+        req_str.file_path.as_deref(),
+        Some("/etc/shadow"),
+        "Cursor hook must extract file_path from single string 'context_paths'"
+    );
+
+    let decision_str = evaluate_hook_synchronously(&req_str);
+    assert!(
+        !decision_str.allowed,
+        "Cursor string context_paths targeting /etc/shadow must be denied"
+    );
+    assert_eq!(
+        decision_str.denied_by_layer.as_deref(),
+        Some("SensitiveSystemPathGuard")
+    );
+
+    // 3. Nested in arguments
+    let payload_nested = serde_json::json!({
+        "arguments": {
+            "context_paths": ["/etc/shadow"]
+        }
+    })
+    .to_string();
+
+    let req_nested =
+        parse_cursor_request(&payload_nested, "beforeReadFile").expect("parse cursor nested");
+    assert_eq!(req_nested.file_path.as_deref(), Some("/etc/shadow"));
+
+    let decision_nested = evaluate_hook_synchronously(&req_nested);
+    assert!(!decision_nested.allowed);
+    assert_eq!(
+        decision_nested.denied_by_layer.as_deref(),
+        Some("SensitiveSystemPathGuard")
+    );
+}
+
+/// 3. OpenCode: `subcommand` attempting `sudo rm -rf /` and `working_file` targeting `/etc/shadow` -> denied.
+#[test]
+fn test_opencode_subcommand_and_working_file_synonyms() {
+    let _guard = ADVERSARIAL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    clear_interceptions();
+
+    // 1. subcommand attempting privilege escalation
+    let cmd_payload = serde_json::json!({
+        "tool": "bash",
+        "subcommand": "sudo rm -rf /"
+    })
+    .to_string();
+
+    let cmd_req = parse_opencode_request(&cmd_payload).expect("parse opencode subcommand");
+    assert_eq!(
+        cmd_req.command.as_deref(),
+        Some("sudo rm -rf /"),
+        "OpenCode hook must extract command from 'subcommand'"
+    );
+
+    let cmd_decision = evaluate_hook_synchronously(&cmd_req);
+    assert!(
+        !cmd_decision.allowed,
+        "OpenCode privileged subcommand must be denied"
+    );
+
+    // 2. working_file targeting /etc/shadow
+    let file_payload = serde_json::json!({
+        "tool": "read_file",
+        "working_file": "/etc/shadow"
+    })
+    .to_string();
+
+    let file_req = parse_opencode_request(&file_payload).expect("parse opencode working_file");
+    assert_eq!(
+        file_req.file_path.as_deref(),
+        Some("/etc/shadow"),
+        "OpenCode hook must extract file_path from 'working_file'"
+    );
+
+    let file_decision = evaluate_hook_synchronously(&file_req);
+    assert!(
+        !file_decision.allowed,
+        "OpenCode working_file targeting /etc/shadow must be denied"
+    );
+    assert_eq!(
+        file_decision.denied_by_layer.as_deref(),
+        Some("SensitiveSystemPathGuard"),
+        "Must be denied under SensitiveSystemPathGuard"
+    );
+
+    // 3. Both subcommand and working_file nested inside args
+    let combined_payload = serde_json::json!({
+        "tool": "bash",
+        "args": {
+            "subcommand": ["sudo", "cat", "/etc/shadow"],
+            "working_file": "/etc/shadow"
+        }
+    })
+    .to_string();
+
+    let comb_req = parse_opencode_request(&combined_payload).expect("parse opencode combined");
+    assert_eq!(
+        comb_req.command.as_deref(),
+        Some("sudo cat /etc/shadow"),
+        "OpenCode hook must extract array subcommand from args"
+    );
+    assert_eq!(
+        comb_req.file_path.as_deref(),
+        Some("/etc/shadow"),
+        "OpenCode hook must extract working_file from args"
+    );
+
+    let comb_decision = evaluate_hook_synchronously(&comb_req);
+    assert!(!comb_decision.allowed);
+}
+
+/// 4. GitHub Copilot: `copilot_action` attempting `sudo rm -rf /` and `editor_context` targeting `/etc/shadow` -> denied.
+#[test]
+fn test_copilot_action_and_editor_context_synonyms() {
+    let _guard = ADVERSARIAL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    clear_interceptions();
+
+    // 1. copilot_action attempting privilege escalation
+    let action_payload = serde_json::json!({
+        "tool": "terminal.execute",
+        "copilot_action": "sudo rm -rf /"
+    })
+    .to_string();
+
+    let action_req =
+        parse_copilot_request(&action_payload, "preToolUse").expect("parse copilot action");
+    assert_eq!(
+        action_req.command.as_deref(),
+        Some("sudo rm -rf /"),
+        "Copilot hook must extract command from 'copilot_action'"
+    );
+
+    let action_dec = evaluate_hook_synchronously(&action_req);
+    assert!(
+        !action_dec.allowed,
+        "Copilot copilot_action attempting sudo rm -rf / must be denied"
+    );
+
+    // 2. editor_context targeting /etc/shadow
+    let editor_payload = serde_json::json!({
+        "tool": "editor.open",
+        "editor_context": "/etc/shadow"
+    })
+    .to_string();
+
+    let editor_req =
+        parse_copilot_request(&editor_payload, "preToolUse").expect("parse copilot editor");
+    assert_eq!(
+        editor_req.file_path.as_deref(),
+        Some("/etc/shadow"),
+        "Copilot hook must extract file_path from 'editor_context'"
+    );
+
+    let editor_dec = evaluate_hook_synchronously(&editor_req);
+    assert!(
+        !editor_dec.allowed,
+        "Copilot editor_context targeting /etc/shadow must be denied"
+    );
+    assert_eq!(
+        editor_dec.denied_by_layer.as_deref(),
+        Some("SensitiveSystemPathGuard"),
+        "Must be denied under SensitiveSystemPathGuard"
+    );
+
+    // 3. Nested inside parameters object
+    let nested_payload = serde_json::json!({
+        "tool": "terminal.execute",
+        "parameters": {
+            "copilot_action": ["sudo", "rm", "-rf", "/"],
+            "editor_context": "/etc/shadow"
+        }
+    })
+    .to_string();
+
+    let nested_req =
+        parse_copilot_request(&nested_payload, "preToolUse").expect("parse copilot nested");
+    assert_eq!(nested_req.command.as_deref(), Some("sudo rm -rf /"));
+    assert_eq!(nested_req.file_path.as_deref(), Some("/etc/shadow"));
+
+    let nested_dec = evaluate_hook_synchronously(&nested_req);
+    assert!(!nested_dec.allowed);
+}
+
+/// 5. Claude Code: `tool_use_id` extracted into `session_id`.
+#[test]
+fn test_claude_tool_use_id_synonym() {
+    let _guard = ADVERSARIAL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    clear_interceptions();
+
+    // 1. PreToolUse payload with tool_use_id
+    let payload = serde_json::json!({
+        "tool_name": "Bash",
+        "tool_use_id": "tool-use-claude-9999",
+        "tool_input": {
+            "command": "ls -la"
+        }
+    })
+    .to_string();
+
+    let req = parse_claude_request(&payload, false).expect("parse claude tool_use_id");
+    assert_eq!(
+        req.session_id.as_deref(),
+        Some("tool-use-claude-9999"),
+        "Claude Code hook must extract session_id from 'tool_use_id'"
+    );
+
+    // 2. PostToolUse payload with tool_use_id
+    let post_payload = serde_json::json!({
+        "tool_name": "Bash",
+        "tool_use_id": "tool-use-claude-9999",
+        "tool_response": {
+            "exit_code": 0,
+            "output": "total 0"
+        }
+    })
+    .to_string();
+
+    let post_req =
+        parse_claude_request(&post_payload, true).expect("parse claude post tool_use_id");
+    assert_eq!(
+        post_req.session_id.as_deref(),
+        Some("tool-use-claude-9999"),
+        "Claude Code post hook must extract session_id from 'tool_use_id'"
+    );
+}
+
+/// 6. MCP: `tool_result` returning `exit_code: 1` and `stderr: "sudo: a password is required"`.
+///
+/// Post-tool execution extracts denial and records into `GLOBAL_CORRELATOR`.
+#[test]
+fn test_mcp_tool_result_synonym_incident_a_correlation() {
+    let _guard = ADVERSARIAL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    clear_interceptions();
+
+    let initial_count = GLOBAL_CORRELATOR.active_denial_count();
+
+    // MCP post-tool execution payload with tool_result
+    let raw_payload = serde_json::json!({
+        "tool_name": "bash",
+        "tool_use_id": "mcp-call-session-777",
+        "tool_input": {
+            "command": "sudo -n id"
+        },
+        "tool_result": {
+            "exit_code": 1,
+            "stderr": "sudo: a password is required"
+        }
+    })
+    .to_string();
+
+    // 1. Claude hook post parsing with tool_result
+    let claude_req =
+        parse_claude_request(&raw_payload, true).expect("parse claude post tool_result");
+    assert_eq!(
+        claude_req.exit_code,
+        Some(1),
+        "tool_result must extract exit_code"
+    );
+    assert_eq!(
+        claude_req.stderr.as_deref(),
+        Some("sudo: a password is required"),
+        "tool_result must extract stderr"
+    );
+
+    let claude_dec = evaluate_hook_synchronously(&claude_req);
+    assert!(
+        claude_dec.allowed,
+        "PostToolUse hook evaluates to allowed after recording denial"
+    );
+    assert!(
+        GLOBAL_CORRELATOR.active_denial_count() > initial_count,
+        "GLOBAL_CORRELATOR must record dynamic denial from 'tool_result'"
+    );
+
+    // 2. Cursor hook afterShellExecution with tool_result
+    let cursor_payload = serde_json::json!({
+        "cursor_command": "sudo -n id",
+        "cursor_trace_id": "cursor-trace-123",
+        "tool_result": {
+            "exit_code": 1,
+            "stderr": "sudo: a password is required"
+        }
+    })
+    .to_string();
+
+    let cursor_req =
+        parse_cursor_request(&cursor_payload, "afterShellExecution").expect("parse cursor after");
+    assert_eq!(cursor_req.exit_code, Some(1));
+    assert_eq!(
+        cursor_req.stderr.as_deref(),
+        Some("sudo: a password is required")
+    );
+    let cursor_dec = evaluate_hook_synchronously(&cursor_req);
+    assert!(cursor_dec.allowed);
+
+    // 3. OpenCode hook after with tool_result
+    let opencode_payload = serde_json::json!({
+        "type": "after",
+        "subcommand": "sudo -n id",
+        "session_id": "opencode-session-456",
+        "tool_result": {
+            "exitCode": 1,
+            "stderr": "sudo: a password is required"
+        }
+    })
+    .to_string();
+
+    let opencode_req = parse_opencode_request(&opencode_payload).expect("parse opencode after");
+    assert_eq!(opencode_req.exit_code, Some(1));
+    assert_eq!(
+        opencode_req.stderr.as_deref(),
+        Some("sudo: a password is required")
+    );
+    let opencode_dec = evaluate_hook_synchronously(&opencode_req);
+    assert!(opencode_dec.allowed);
+}
+
+/// 7. Helper verification: Direct unit tests confirming `extract_wire_agent_id` and `extract_wire_source_agent_id`.
+#[test]
+fn test_wire_agent_id_and_source_agent_id_helpers() {
+    // 1. extract_wire_agent_id: agent_id, agentId, agent
+    let v1 = serde_json::json!({ "agent_id": "cursor-agent-42" });
+    assert_eq!(
+        extract_wire_agent_id(&v1),
+        Some("cursor-agent-42".to_string()),
+        "Must extract from 'agent_id'"
+    );
+
+    let v2 = serde_json::json!({ "agentId": "copilot-agent-99" });
+    assert_eq!(
+        extract_wire_agent_id(&v2),
+        Some("copilot-agent-99".to_string()),
+        "Must extract from 'agentId'"
+    );
+
+    let v3 = serde_json::json!({ "agent": "claude-code" });
+    assert_eq!(
+        extract_wire_agent_id(&v3),
+        Some("claude-code".to_string()),
+        "Must extract from 'agent'"
+    );
+
+    let v_empty = serde_json::json!({ "other_field": "val" });
+    assert_eq!(extract_wire_agent_id(&v_empty), None);
+
+    // 2. extract_wire_source_agent_id: source_agent_id, sourceAgentId, caller_agent_id
+    let s1 = serde_json::json!({ "source_agent_id": "orchestrator-main" });
+    assert_eq!(
+        extract_wire_source_agent_id(&s1),
+        Some("orchestrator-main".to_string()),
+        "Must extract from 'source_agent_id'"
+    );
+
+    let s2 = serde_json::json!({ "sourceAgentId": "sub-orchestrator-1" });
+    assert_eq!(
+        extract_wire_source_agent_id(&s2),
+        Some("sub-orchestrator-1".to_string()),
+        "Must extract from 'sourceAgentId'"
+    );
+
+    let s3 = serde_json::json!({ "caller_agent_id": "root-caller" });
+    assert_eq!(
+        extract_wire_source_agent_id(&s3),
+        Some("root-caller".to_string()),
+        "Must extract from 'caller_agent_id'"
+    );
+
+    let s_empty = serde_json::json!({ "unrelated": 123 });
+    assert_eq!(extract_wire_source_agent_id(&s_empty), None);
+}
+
+/// Additional verification: `action` command synonym variation across platforms.
+#[test]
+fn test_action_command_synonym_variations() {
+    let _guard = ADVERSARIAL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    clear_interceptions();
+
+    let payload = serde_json::json!({
+        "action": "sudo rm -rf /"
+    })
+    .to_string();
+
+    let req = parse_cursor_request(&payload, "beforeShellExecution").expect("parse cursor action");
+    assert_eq!(req.command.as_deref(), Some("sudo rm -rf /"));
+    let dec = evaluate_hook_synchronously(&req);
+    assert!(!dec.allowed);
 }
