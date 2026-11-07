@@ -120,6 +120,18 @@ impl KillChainHostManager {
         Ok(Self::new(isolator, freezer, auth, ledger))
     }
 
+    /// Constructs a `KillChainHostManager` with simulated network isolation for platform-independent hermetic testing.
+    pub fn new_simulated(custom_dir: Option<&Path>) -> Result<Self> {
+        let isolator = Arc::new(SimulatedNetworkIsolator);
+        let freezer = Arc::new(crate::freeze::NativeProcessFreezer::new());
+        let auth = Arc::new(crate::auth::OperatorAuthManager::new(
+            None,
+            custom_dir.map(PathBuf::from),
+        ));
+        let ledger = Arc::new(RwLock::new(StateLedger::open_or_init(custom_dir)?));
+        Ok(Self::new(isolator, freezer, auth, ledger))
+    }
+
     /// Queries current Kill Chain status.
     pub fn get_status(&self) -> KillChainStatus {
         let ledger = self.ledger.read();
