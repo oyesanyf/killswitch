@@ -13,6 +13,7 @@ use killswitch_types::adjudication::EvidenceClass;
 use killswitch_types::telemetry::{SecurityEvent, ThreatSeverity, ThreatSignal};
 
 use crate::attack::{AttackGraphMatcher, AttackStage, ProcessTimelineEvent};
+use crate::circumvention::{CircumventionAlert, DynamicDenialSignal, TemporalCircumventionCorrelator};
 
 /// Per-process correlation context tracking temporal events, ATT&CK stages, and decayed score.
 #[derive(Debug, Clone)]
@@ -59,6 +60,7 @@ pub struct EventCorrelator {
     tau_decay_secs: f32,
     alert_threshold: f32,
     matcher: AttackGraphMatcher,
+    circumvention_correlator: Arc<TemporalCircumventionCorrelator>,
 }
 
 impl Default for EventCorrelator {
@@ -74,7 +76,33 @@ impl EventCorrelator {
             tau_decay_secs,
             alert_threshold,
             matcher: AttackGraphMatcher::new(),
+            circumvention_correlator: Arc::new(TemporalCircumventionCorrelator::default()),
         }
+    }
+
+    /// Accessor for the temporal circumvention correlator
+    pub fn circumvention(&self) -> &Arc<TemporalCircumventionCorrelator> {
+        &self.circumvention_correlator
+    }
+
+    /// Records an observed dynamic denial into the circumvention correlator
+    pub fn record_denial(&self, signal: DynamicDenialSignal) {
+        self.circumvention_correlator.record_denial(signal);
+    }
+
+    /// Checks if a candidate command line constitutes a circumvention retry
+    pub fn check_circumvention(
+        &self,
+        session_id: &str,
+        parent_pid: Option<u32>,
+        command_line: &str,
+    ) -> Option<CircumventionAlert> {
+        self.circumvention_correlator.check_candidate(
+            session_id,
+            parent_pid,
+            command_line,
+            std::time::Instant::now(),
+        )
     }
 
     /// Ingests a security event into the correlator, updates decayed score, and returns
@@ -87,6 +115,41 @@ impl EventCorrelator {
     ) -> Option<ThreatSignal> {
         let now = Utc::now();
         let pid = event.pid;
+
+        // Incident A Circumvention Check on Process Creation
+        if event.event_kind == killswitch_types::telemetry::TelemetryEventKind::ProcessCreate {
+            let session_id = event
+                .attributes
+                .get("session_id")
+                .map(|s| s.as_str())
+                .unwrap_or("");
+            if let Some(circ) = self.circumvention_correlator.check_candidate(
+                session_id,
+                event.parent_pid,
+                &event.command_line,
+                std::time::Instant::now(),
+            ) {
+                let mut threat = ThreatSignal::new(
+                    "circumvention_correlator",
+                    pid,
+                    &event.process_name,
+                    circ.confidence,
+                    ThreatSeverity::Critical,
+                    EvidenceClass::Behavior,
+                    circ.summary.clone(),
+                );
+                threat.raw_evidence = serde_json::json!({
+                    "alert_id": circ.alert_id,
+                    "session_id": circ.session_id,
+                    "initial_blocked_command": circ.initial_blocked_command,
+                    "retry_command": circ.retry_command,
+                    "elapsed_millis": circ.elapsed_millis,
+                    "crossed_wsl_boundary": circ.crossed_wsl_boundary,
+                    "incident": "Incident A Circumvention",
+                });
+                return Some(threat);
+            }
+        }
 
         let mut entry = self.processes.entry(pid).or_insert_with(|| {
             ProcessCorrelationContext::new(

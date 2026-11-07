@@ -633,6 +633,38 @@ pub const FWPM_LAYER_OUTBOUND_MAC_FRAME_ETHERNET: WfpGuid = WfpGuid {
     data4: [0xad, 0xee, 0x0a, 0xcd, 0xbd, 0xb7, 0xf4, 0xb2],
 };
 
+// 444543b6-9046-4246-ab81-9b06227e243d (Milestone SEC-3 / Incident A WSL2 NAT Interception)
+pub const FWPM_LAYER_IPFORWARD_V4: WfpGuid = WfpGuid {
+    data1: 0x444543b6,
+    data2: 0x9046,
+    data3: 0x4246,
+    data4: [0xab, 0x81, 0x9b, 0x06, 0x22, 0x7e, 0x24, 0x3d],
+};
+
+// 12fe69b5-485a-40e7-912a-82b818121294 (Milestone SEC-3 / Incident A WSL2 NAT Interception)
+pub const FWPM_LAYER_IPFORWARD_V6: WfpGuid = WfpGuid {
+    data1: 0x12fe69b5,
+    data2: 0x485a,
+    data3: 0x40e7,
+    data4: [0x91, 0x2a, 0x82, 0xb8, 0x18, 0x12, 0x12, 0x94],
+};
+
+// a82acc24-4ee1-4ee1-b465-fd1d25cb10a4 (Official Windows SDK fwpmu.h)
+pub const FWPM_LAYER_IPFORWARD_V4_SDK: WfpGuid = WfpGuid {
+    data1: 0xa82acc24,
+    data2: 0x4ee1,
+    data3: 0x4ee1,
+    data4: [0xb4, 0x65, 0xfd, 0x1d, 0x25, 0xcb, 0x10, 0xa4],
+};
+
+// 7b964818-19c7-493a-b71f-832c3684d28c (Official Windows SDK fwpmu.h)
+pub const FWPM_LAYER_IPFORWARD_V6_SDK: WfpGuid = WfpGuid {
+    data1: 0x7b964818,
+    data2: 0x19c7,
+    data3: 0x493a,
+    data4: [0xb7, 0x1f, 0x83, 0x2c, 0x36, 0x84, 0xd2, 0x8c],
+};
+
 // fd08948d-a219-4d52-bb98-1a5540ee7b4e
 pub const FWPM_CONDITION_ETHER_TYPE: WfpGuid = WfpGuid {
     data1: 0xfd08948d,
@@ -1987,6 +2019,26 @@ impl WfpDynamicSession {
                     FWPM_LAYER_INBOUND_MAC_FRAME_ETHERNET,
                     "INBOUND_MAC_FRAME_ETHERNET",
                     "Block-All-MAC-In-Ethernet",
+                ),
+                (
+                    FWPM_LAYER_IPFORWARD_V4,
+                    "IPFORWARD_V4",
+                    "Block-All-IPForward-v4",
+                ),
+                (
+                    FWPM_LAYER_IPFORWARD_V6,
+                    "IPFORWARD_V6",
+                    "Block-All-IPForward-v6",
+                ),
+                (
+                    FWPM_LAYER_IPFORWARD_V4_SDK,
+                    "IPFORWARD_V4_SDK",
+                    "Block-All-IPForward-v4-SDK",
+                ),
+                (
+                    FWPM_LAYER_IPFORWARD_V6_SDK,
+                    "IPFORWARD_V6_SDK",
+                    "Block-All-IPForward-v6-SDK",
                 ),
             ];
 
@@ -3377,8 +3429,8 @@ mod tests {
     }
 
     #[test]
-    fn test_all_22_layer_guids_integrity() {
-        let all_22_layers = [
+    fn test_all_24_layer_guids_integrity() {
+        let all_24_layers = [
             FWPM_LAYER_ALE_AUTH_CONNECT_V4,
             FWPM_LAYER_ALE_AUTH_CONNECT_V6,
             FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4,
@@ -3401,18 +3453,20 @@ mod tests {
             FWPM_LAYER_INBOUND_MAC_FRAME_NATIVE,
             FWPM_LAYER_OUTBOUND_MAC_FRAME_ETHERNET,
             FWPM_LAYER_INBOUND_MAC_FRAME_ETHERNET,
+            FWPM_LAYER_IPFORWARD_V4,
+            FWPM_LAYER_IPFORWARD_V6,
         ];
 
-        // All 22 layers must be distinct and non-zero
-        for i in 0..all_22_layers.len() {
+        // All 24 layers must be distinct and non-zero
+        for i in 0..all_24_layers.len() {
             assert_ne!(
-                all_22_layers[i],
+                all_24_layers[i],
                 WfpGuid::default(),
                 "Layer {i} must not be zeroed GUID"
             );
-            for j in (i + 1)..all_22_layers.len() {
+            for j in (i + 1)..all_24_layers.len() {
                 assert_ne!(
-                    all_22_layers[i], all_22_layers[j],
+                    all_24_layers[i], all_24_layers[j],
                     "Layers {i} and {j} must be distinct GUIDs"
                 );
             }
@@ -3423,6 +3477,44 @@ mod tests {
         assert_ne!(FWPM_CONDITION_IP_PROTOCOL, WfpGuid::default());
         assert_ne!(FWPM_CONDITION_IP_REMOTE_ADDRESS, WfpGuid::default());
         assert_ne!(FWPM_CONDITION_IP_LOCAL_ADDRESS, WfpGuid::default());
+    }
+
+    #[test]
+    fn test_wfp_forward_layer_guid_definitions() {
+        assert_eq!(
+            format!(
+                "{:08x}-{:04x}-{:04x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+                FWPM_LAYER_IPFORWARD_V4.data1,
+                FWPM_LAYER_IPFORWARD_V4.data2,
+                FWPM_LAYER_IPFORWARD_V4.data3,
+                FWPM_LAYER_IPFORWARD_V4.data4[0],
+                FWPM_LAYER_IPFORWARD_V4.data4[1],
+                FWPM_LAYER_IPFORWARD_V4.data4[2],
+                FWPM_LAYER_IPFORWARD_V4.data4[3],
+                FWPM_LAYER_IPFORWARD_V4.data4[4],
+                FWPM_LAYER_IPFORWARD_V4.data4[5],
+                FWPM_LAYER_IPFORWARD_V4.data4[6],
+                FWPM_LAYER_IPFORWARD_V4.data4[7],
+            ),
+            "444543b6-9046-4246-ab81-9b06227e243d"
+        );
+        assert_eq!(
+            format!(
+                "{:08x}-{:04x}-{:04x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+                FWPM_LAYER_IPFORWARD_V6.data1,
+                FWPM_LAYER_IPFORWARD_V6.data2,
+                FWPM_LAYER_IPFORWARD_V6.data3,
+                FWPM_LAYER_IPFORWARD_V6.data4[0],
+                FWPM_LAYER_IPFORWARD_V6.data4[1],
+                FWPM_LAYER_IPFORWARD_V6.data4[2],
+                FWPM_LAYER_IPFORWARD_V6.data4[3],
+                FWPM_LAYER_IPFORWARD_V6.data4[4],
+                FWPM_LAYER_IPFORWARD_V6.data4[5],
+                FWPM_LAYER_IPFORWARD_V6.data4[6],
+                FWPM_LAYER_IPFORWARD_V6.data4[7],
+            ),
+            "12fe69b5-485a-40e7-912a-82b818121294"
+        );
     }
 
     #[test]

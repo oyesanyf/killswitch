@@ -597,3 +597,124 @@ fn test_parent_child_agent_ancestry_link() {
     assert_eq!(alert.initial_blocked_command, "sudo -n id");
     assert_eq!(alert.retry_command, "wsl -u root id");
 }
+
+#[test]
+fn test_production_telemetry_circumvention_correlator_incident_a() {
+    use killswitch_telemetry::circumvention::{observe_denial, TemporalCircumventionCorrelator};
+
+    let correlator = TemporalCircumventionCorrelator::new(Duration::from_secs(60));
+    let session = "prod-session-inc-a";
+    let t0 = Instant::now();
+
+    // Step 1: sudo -n id fails with code 1
+    let signal = observe_denial(
+        session,
+        Some(4000),
+        5001,
+        "sudo -n id",
+        Some(1),
+        "sudo: a password is required",
+        t0,
+    ).expect("Denial signal must be generated");
+    correlator.record_denial(signal);
+
+    // Step 2: Immediate retry with wsl -u root id
+    let t1 = t0 + Duration::from_millis(1500);
+    let alert = correlator.check_candidate(session, Some(4000), "wsl -u root id", t1);
+
+    assert!(alert.is_some(), "Production correlator must detect Incident A circumvention");
+    let a = alert.unwrap();
+    assert_eq!(a.session_id, session);
+    assert_eq!(a.initial_blocked_command, "sudo -n id");
+    assert_eq!(a.retry_command, "wsl -u root id");
+    assert!(a.crossed_wsl_boundary);
+    assert!(a.confidence >= 0.95);
+    assert_eq!(a.severity, "CRITICAL");
+    assert_eq!(a.elapsed_millis, 1500);
+}
+
+#[test]
+fn test_production_circumvention_with_env_and_compound_shell() {
+    use killswitch_telemetry::circumvention::{observe_denial, TemporalCircumventionCorrelator};
+
+    let correlator = TemporalCircumventionCorrelator::new(Duration::from_secs(60));
+    let session = "prod-session-obfuscated";
+    let t0 = Instant::now();
+
+    // Step 1: env sudo -n id fails
+    let signal = observe_denial(
+        session,
+        Some(4000),
+        5001,
+        "env sudo -n id",
+        Some(1),
+        "sudo: a password is required",
+        t0,
+    ).expect("Denial signal must be generated");
+    correlator.record_denial(signal);
+
+    // Step 2: Retry with compound shell: bash -lc "wsl -u root id"
+    let t1 = t0 + Duration::from_millis(1000);
+    let alert = correlator.check_candidate(session, Some(4000), "bash -lc 'wsl -u root id'", t1);
+
+    assert!(alert.is_some(), "Compound shell wrapped retry must be detected as circumvention");
+    let a = alert.unwrap();
+    assert!(a.crossed_wsl_boundary);
+    assert_eq!(a.severity, "CRITICAL");
+
+    // Step 3: Retry with env: env wsl -u root id
+    let alert2 = correlator.check_candidate(session, Some(4000), "env wsl -u root id", t1);
+    assert!(alert2.is_some(), "Env prefixed retry must be detected as circumvention");
+}
+
+#[test]
+fn test_production_correlator_process_create_ingestion() {
+    use killswitch_telemetry::attack::AttackStage;
+    use killswitch_telemetry::circumvention::DynamicDenialSignal;
+    use killswitch_telemetry::correlator::EventCorrelator;
+    use killswitch_telemetry::semantic_command::PrivilegeEquivalenceClass as ProdPrivClass;
+    use killswitch_types::adjudication::EvidenceClass;
+    use killswitch_types::telemetry::{SecurityEvent, TelemetryEventKind, ThreatSeverity};
+
+    let event_correlator = EventCorrelator::new(300.0, 0.75);
+    let session = "session-edr-circ";
+    let parent_agent_pid = 7777;
+    let t0 = Instant::now();
+
+    // Record initial blocked command
+    let denial = DynamicDenialSignal::new(
+        "sig-edr-01",
+        session,
+        Some(parent_agent_pid),
+        8888,
+        "sudo -n id",
+        ProdPrivClass::RootOrAdminElevation,
+        Some(1),
+        true,
+        Some("sudo: a password is required".to_string()),
+        t0,
+    );
+    event_correlator.record_denial(denial);
+
+    // Ingest SecurityEvent for ProcessCreate of wsl -u root id
+    let mut ev = SecurityEvent::new(
+        TelemetryEventKind::ProcessCreate,
+        8889,
+        "wsl.exe",
+        "C:\\Windows\\System32\\wsl.exe",
+        "wsl -u root id",
+    );
+    ev.parent_pid = Some(parent_agent_pid);
+    ev.attributes.insert("session_id".to_string(), session.to_string());
+
+    let signal = event_correlator.ingest_event(&ev, AttackStage::DefenseEvasion, 0.50);
+    assert!(signal.is_some(), "ProcessCreate of circumvention command must emit ThreatSignal");
+
+    let sig = signal.unwrap();
+    assert_eq!(sig.target_pid, 8889);
+    assert_eq!(sig.severity, ThreatSeverity::Critical);
+    assert_eq!(sig.indicator_class, EvidenceClass::Behavior);
+    assert_eq!(sig.source_detector, "circumvention_correlator");
+    assert!(sig.confidence >= 0.95);
+}
+

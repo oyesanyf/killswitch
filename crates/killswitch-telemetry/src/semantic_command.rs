@@ -90,7 +90,7 @@ impl Default for DynamicBinaryMetadataProbe {
 impl DynamicBinaryMetadataProbe {
     /// Returns true if binary exhibits privileged execution or elevation traits on disk.
     pub fn is_privileged_target(&self) -> bool {
-        (self.is_suid && self.file_uid == 0)
+        self.is_suid
             || self.has_linux_capabilities
             || matches!(
                 self.elevation_requirement,
@@ -323,10 +323,28 @@ pub fn tokenize_command(cmd: &str) -> Vec<String> {
 
     while let Some(c) = chars.next() {
         match c {
-            '\\' if !in_single => {
+            '\\' if in_double => {
+                // Inside double quotes: only escape \" or \\ (Windows path safe)
                 if let Some(&next) = chars.peek() {
-                    chars.next();
-                    current.push(next);
+                    if next == '"' || next == '\\' {
+                        chars.next();
+                        current.push(next);
+                    } else {
+                        current.push('\\');
+                    }
+                } else {
+                    current.push('\\');
+                }
+            }
+            '\\' if !in_single => {
+                // Outside quotes: escape spaces, tabs, quotes, or backslashes
+                if let Some(&next) = chars.peek() {
+                    if next == ' ' || next == '\t' || next == '"' || next == '\'' || next == '\\' {
+                        chars.next();
+                        current.push(next);
+                    } else {
+                        current.push('\\');
+                    }
                 } else {
                     current.push('\\');
                 }
@@ -356,7 +374,7 @@ pub fn tokenize_command(cmd: &str) -> Vec<String> {
     tokens
 }
 
-/// Attempts to unwrap shell command wrappers (`sh -c "..."`, `bash -c "..."`, `cmd.exe /c "..."`, `powershell.exe -Command "..."`).
+/// Attempts to unwrap shell command wrappers (`sh -c "..."`, `bash -lc "..."`, `cmd.exe /c "..."`, `powershell.exe -Command "..."`).
 fn unwrap_shell_invocation(tokens: &[String]) -> Option<String> {
     if tokens.is_empty() {
         return None;
@@ -371,9 +389,14 @@ fn unwrap_shell_invocation(tokens: &[String]) -> Option<String> {
 
     match base {
         "sh" | "bash" | "zsh" | "dash" | "ksh" => {
-            // Find -c flag
+            // Find -c flag or compound flags containing 'c' (e.g. -lc, -ec, -xec, --command)
             for i in 1..tokens.len() {
-                if tokens[i] == "-c" && i + 1 < tokens.len() {
+                let tok = &tokens[i];
+                let is_c_flag = tok == "-c"
+                    || (tok.starts_with('-') && !tok.starts_with("--") && tok.ends_with('c'))
+                    || tok == "--command";
+
+                if is_c_flag && i + 1 < tokens.len() {
                     return Some(tokens[i + 1..].join(" "));
                 }
             }
@@ -400,6 +423,81 @@ fn unwrap_shell_invocation(tokens: &[String]) -> Option<String> {
     }
 
     None
+}
+
+pub type EnvUnwrapResult = (Vec<String>, Vec<(String, String)>);
+
+/// Attempts to unwrap `env` or `/usr/bin/env` command wrappers.
+fn unwrap_env_invocation(tokens: &[String]) -> Option<EnvUnwrapResult> {
+    if tokens.is_empty() {
+        return None;
+    }
+
+    let exe_lc = tokens[0].to_ascii_lowercase();
+    let base = exe_lc
+        .rsplit(['\\', '/'])
+        .next()
+        .unwrap_or(&exe_lc)
+        .trim_end_matches(".exe");
+
+    if base != "env" {
+        return None;
+    }
+
+    let mut env_vars = Vec::new();
+    let mut i = 1;
+    while i < tokens.len() {
+        let tok = &tokens[i];
+        if tok == "--" {
+            i += 1;
+            break;
+        } else if tok == "-i"
+            || tok == "--ignore-environment"
+            || tok == "-0"
+            || tok == "--null"
+            || tok == "-v"
+            || tok == "--verbose"
+        {
+            i += 1;
+        } else if (tok == "-u" || tok == "--unset" || tok == "-C" || tok == "--chdir")
+            && i + 1 < tokens.len()
+        {
+            i += 2;
+        } else if tok.starts_with("--unset=") || tok.starts_with("--chdir=") {
+            i += 1;
+        } else if tok == "-S" || tok == "--split-string" {
+            if i + 1 < tokens.len() {
+                let split_tokens = tokenize_command(&tokens[i + 1]);
+                let mut combined = split_tokens;
+                combined.extend_from_slice(&tokens[i + 2..]);
+                if let Some(res) = unwrap_env_invocation(&combined) {
+                    return Some(res);
+                }
+                return if !combined.is_empty() {
+                    Some((combined, env_vars))
+                } else {
+                    None
+                };
+            } else {
+                i += 1;
+            }
+        } else if tok.starts_with('-') {
+            i += 1;
+        } else if is_env_var_assignment(tok) {
+            if let Some(eq) = tok.find('=') {
+                env_vars.push((tok[..eq].to_string(), tok[eq + 1..].to_string()));
+            }
+            i += 1;
+        } else {
+            break;
+        }
+    }
+
+    if i < tokens.len() {
+        Some((tokens[i..].to_vec(), env_vars))
+    } else {
+        None
+    }
 }
 
 /// Checks if a token matches environment variable assignment syntax `NAME=VAL`.
@@ -470,7 +568,17 @@ pub fn parse_semantic_command_with_probe(
 
     let remaining_tokens = &tokens[cmd_idx..];
 
-    // 2. Shell unwrapping check
+    // 2. env / /usr/bin/env unwrapping check
+    if let Some((unwrapped_tokens, unwrapped_envs)) = unwrap_env_invocation(remaining_tokens) {
+        let unwrapped_cmd = unwrapped_tokens.join(" ");
+        let mut inner = parse_semantic_command_with_probe(&unwrapped_cmd, external_probe);
+        inner.raw_command = raw.to_string();
+        inner.env_vars.extend(env_vars);
+        inner.env_vars.extend(unwrapped_envs);
+        return inner;
+    }
+
+    // 3. Shell unwrapping check
     if let Some(unwrapped) = unwrap_shell_invocation(remaining_tokens) {
         let mut inner = parse_semantic_command_with_probe(&unwrapped, external_probe);
         inner.raw_command = raw.to_string();
@@ -497,8 +605,63 @@ pub fn parse_semantic_command_with_probe(
 
     match exe_base {
         "sudo" => {
-            // Check benign query flags: -l, -V, -h, --help, --version
-            if args.iter().any(|a| {
+            // Determine if there is a subcommand being executed:
+            let mut subcommand_idx = None;
+            let mut i = 0;
+            while i < args.len() {
+                let arg = &args[i];
+                if arg == "--" {
+                    if i + 1 < args.len() {
+                        subcommand_idx = Some(i + 1);
+                    }
+                    break;
+                }
+                if !arg.starts_with('-') {
+                    subcommand_idx = Some(i);
+                    break;
+                }
+                // Options taking an argument:
+                if (arg == "-u" || arg == "--user" || arg == "-g" || arg == "--group"
+                    || arg == "-p" || arg == "--prompt" || arg == "-C" || arg == "--close-from"
+                    || arg == "-r" || arg == "--role" || arg == "-t" || arg == "--type"
+                    || arg == "-T" || arg == "--command-timeout" || arg == "-D" || arg == "--chdir")
+                    && i + 1 < args.len()
+                {
+                    i += 2;
+                    continue;
+                }
+                i += 1;
+            }
+
+            // Check non-interactive flag -n
+            if args.iter().any(|a| a == "-n") {
+                is_non_interactive = true;
+            }
+
+            // Parse target user from -u / --user
+            for j in 0..args.len() {
+                if args[j] == "-u" && j + 1 < args.len() {
+                    target_user = Some(args[j + 1].trim_matches(['"', '\'']).to_string());
+                    break;
+                } else if args[j].starts_with("-u") && args[j].len() > 2 {
+                    target_user = Some(args[j][2..].trim_matches(['"', '\'']).to_string());
+                    break;
+                } else if args[j].starts_with("--user=") {
+                    target_user = Some(
+                        args[j]
+                            .trim_start_matches("--user=")
+                            .trim_matches(['"', '\''])
+                            .to_string(),
+                    );
+                    break;
+                } else if args[j] == "--user" && j + 1 < args.len() {
+                    target_user = Some(args[j + 1].trim_matches(['"', '\'']).to_string());
+                    break;
+                }
+            }
+
+            // Check benign query flags ONLY if NO subcommand is being executed
+            if subcommand_idx.is_none() && args.iter().any(|a| {
                 matches!(
                     a.as_str(),
                     "-l" | "-v" | "-V" | "-h" | "--help" | "--version"
@@ -506,33 +669,6 @@ pub fn parse_semantic_command_with_probe(
             }) {
                 privilege_class = PrivilegeEquivalenceClass::PrivilegeQueryOrBenign;
             } else {
-                // Check non-interactive flag -n
-                if args.iter().any(|a| a == "-n") {
-                    is_non_interactive = true;
-                }
-
-                // Parse target user from -u / --user
-                for i in 0..args.len() {
-                    if args[i] == "-u" && i + 1 < args.len() {
-                        target_user = Some(args[i + 1].trim_matches(['"', '\'']).to_string());
-                        break;
-                    } else if args[i].starts_with("-u") && args[i].len() > 2 {
-                        target_user = Some(args[i][2..].trim_matches(['"', '\'']).to_string());
-                        break;
-                    } else if args[i].starts_with("--user=") {
-                        target_user = Some(
-                            args[i]
-                                .trim_start_matches("--user=")
-                                .trim_matches(['"', '\''])
-                                .to_string(),
-                        );
-                        break;
-                    } else if args[i] == "--user" && i + 1 < args.len() {
-                        target_user = Some(args[i + 1].trim_matches(['"', '\'']).to_string());
-                        break;
-                    }
-                }
-
                 if let Some(ref u) = target_user {
                     let u_lc = u.to_ascii_lowercase();
                     if u_lc == "root" || u_lc == "0" {
@@ -670,8 +806,64 @@ pub fn parse_semantic_command_with_probe(
         }
         "wsl" => {
             is_cross_boundary = true;
-            // Check query flags: -l, --list, --status, -h, --help, --version, -v
-            if args.iter().any(|a| {
+
+            // Determine if there is a subcommand being executed:
+            let mut subcommand_idx = None;
+            let mut i = 0;
+            while i < args.len() {
+                let arg = &args[i];
+                if arg == "--" || arg == "-e" || arg == "--exec" {
+                    if i + 1 < args.len() {
+                        subcommand_idx = Some(i + 1);
+                    }
+                    break;
+                }
+                if !arg.starts_with('-') {
+                    subcommand_idx = Some(i);
+                    break;
+                }
+                if (arg == "-u" || arg == "--user" || arg == "-d" || arg == "--distribution") && i + 1 < args.len() {
+                    i += 2;
+                    continue;
+                }
+                i += 1;
+            }
+
+            let mut matched_root = false;
+            for j in 0..args.len() {
+                let arg = &args[j];
+                if (arg == "-u" || arg == "--user") && j + 1 < args.len() {
+                    let u = args[j + 1].trim_matches(['"', '\'']).to_string();
+                    let u_lc = u.to_ascii_lowercase();
+                    if u_lc == "root" || u_lc == "0" {
+                        matched_root = true;
+                    }
+                    target_user = Some(u);
+                    break;
+                } else if arg.starts_with("--user=") {
+                    let u = arg
+                        .trim_start_matches("--user=")
+                        .trim_matches(['"', '\''])
+                        .to_string();
+                    let u_lc = u.to_ascii_lowercase();
+                    if u_lc == "root" || u_lc == "0" {
+                        matched_root = true;
+                    }
+                    target_user = Some(u);
+                    break;
+                } else if arg.starts_with("-u") && arg.len() > 2 {
+                    let u = arg[2..].trim_matches(['"', '\'']).to_string();
+                    let u_lc = u.to_ascii_lowercase();
+                    if u_lc == "root" || u_lc == "0" {
+                        matched_root = true;
+                    }
+                    target_user = Some(u);
+                    break;
+                }
+            }
+
+            // Check query flags ONLY if NO subcommand is specified
+            if subcommand_idx.is_none() && args.iter().any(|a| {
                 matches!(
                     a.as_str(),
                     "-l" | "--list" | "--status" | "-h" | "--help" | "--version" | "-v"
@@ -680,39 +872,6 @@ pub fn parse_semantic_command_with_probe(
             {
                 privilege_class = PrivilegeEquivalenceClass::PrivilegeQueryOrBenign;
             } else {
-                let mut matched_root = false;
-                for i in 0..args.len() {
-                    let arg = &args[i];
-                    if (arg == "-u" || arg == "--user") && i + 1 < args.len() {
-                        let u = args[i + 1].trim_matches(['"', '\'']).to_string();
-                        let u_lc = u.to_ascii_lowercase();
-                        if u_lc == "root" || u_lc == "0" {
-                            matched_root = true;
-                        }
-                        target_user = Some(u);
-                        break;
-                    } else if arg.starts_with("--user=") {
-                        let u = arg
-                            .trim_start_matches("--user=")
-                            .trim_matches(['"', '\''])
-                            .to_string();
-                        let u_lc = u.to_ascii_lowercase();
-                        if u_lc == "root" || u_lc == "0" {
-                            matched_root = true;
-                        }
-                        target_user = Some(u);
-                        break;
-                    } else if arg.starts_with("-u") && arg.len() > 2 {
-                        let u = arg[2..].trim_matches(['"', '\'']).to_string();
-                        let u_lc = u.to_ascii_lowercase();
-                        if u_lc == "root" || u_lc == "0" {
-                            matched_root = true;
-                        }
-                        target_user = Some(u);
-                        break;
-                    }
-                }
-
                 if matched_root {
                     privilege_class = PrivilegeEquivalenceClass::RootOrAdminElevation;
                 } else if target_user.is_some() {
@@ -742,14 +901,13 @@ pub fn parse_semantic_command_with_probe(
 
     if let Some(ref probe) = resolved_probe {
         if probe.is_privileged_target() {
-            if probe.is_suid && probe.file_uid == 0 {
-                privilege_class = PrivilegeEquivalenceClass::RootOrAdminElevation;
-            } else if probe.has_linux_capabilities {
-                privilege_class = PrivilegeEquivalenceClass::RootOrAdminElevation;
-            } else if matches!(
-                probe.elevation_requirement,
-                ElevationRequirement::RequireAdministrator | ElevationRequirement::HighestAvailable
-            ) {
+            if (probe.is_suid && probe.file_uid == 0)
+                || probe.has_linux_capabilities
+                || matches!(
+                    probe.elevation_requirement,
+                    ElevationRequirement::RequireAdministrator | ElevationRequirement::HighestAvailable
+                )
+            {
                 privilege_class = PrivilegeEquivalenceClass::RootOrAdminElevation;
             } else if probe.invokes_wsl_subsystem {
                 privilege_class = PrivilegeEquivalenceClass::RootOrAdminElevation;
