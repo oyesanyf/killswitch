@@ -334,14 +334,21 @@ fn test_external_classifier_ast_guard_and_execution() {
     assert!(run_external_classifier("wsl -u root classifier", "{}").is_err());
 
     // 2. Execute a real safe OS command returning valid JSON score
-    #[cfg(target_os = "windows")]
-    let safe_cmd = "powershell -NoProfile -Command \"Write-Output '{\\\"score\\\":0.91}'\"";
-    #[cfg(not(target_os = "windows"))]
-    let safe_cmd = "echo '{\"score\":0.91}'";
 
-    let score = run_external_classifier(safe_cmd, "{\"proc\":\"test\",\"domain\":\"example.com\"}")
-        .expect("safe external classifier should execute");
+    let ext_dir = unique_temp_dir("agentsonar_ext_cls");
+    let out_file = ext_dir.join("classifier_score.json");
+    fs::write(&out_file, "{\"score\":0.91}\n").unwrap();
+    let safe_cmd = if cfg!(target_os = "windows") {
+        format!("cmd /c type \"{}\"", out_file.display())
+    } else {
+        format!("cat \"{}\"", out_file.display())
+    };
+
+    let score =
+        run_external_classifier(&safe_cmd, "{\"proc\":\"test\",\"domain\":\"example.com\"}")
+            .expect("safe external classifier should execute");
     assert_eq!(score, Some(0.91));
+    let _ = fs::remove_dir_all(&ext_dir);
 }
 
 #[test]

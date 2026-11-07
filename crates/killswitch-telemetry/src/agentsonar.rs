@@ -749,7 +749,7 @@ pub fn parse_tcp_packet(frame: &[u8], has_ethernet_header: bool) -> Option<Parse
 // ============================================================================
 
 /// Executes an external JSONL classifier command with AST privilege/injection validation,
-/// a hard 2,000 ms execution timeout, and a 64 KB stdout bound.
+/// a hard 5,000 ms execution timeout, and a 64 KB stdout bound.
 pub fn run_external_classifier(cmd_str: &str, event_json: &str) -> Result<Option<f64>, String> {
     let trimmed = cmd_str.trim();
     if trimmed.is_empty() {
@@ -806,7 +806,7 @@ pub fn run_external_classifier(cmd_str: &str, event_json: &str) -> Result<Option
         let _ = writeln!(stdin, "{}", event_json);
     }
 
-    let deadline = Instant::now() + Duration::from_millis(2_000);
+    let deadline = Instant::now() + Duration::from_millis(5_000);
     loop {
         match child.try_wait() {
             Ok(Some(_status)) => break,
@@ -814,7 +814,7 @@ pub fn run_external_classifier(cmd_str: &str, event_json: &str) -> Result<Option
                 if Instant::now() >= deadline {
                     let _ = child.kill();
                     let _ = child.wait();
-                    return Err("External classifier timed out after 2000ms".to_string());
+                    return Err("External classifier timed out after 5000ms".to_string());
                 }
                 thread::sleep(Duration::from_millis(15));
             }
