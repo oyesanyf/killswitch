@@ -441,33 +441,35 @@ pub fn check_authenticode_status(path: &str) -> AuthenticodeStatus {
                     || header.starts_with(&[0xFE, 0xED, 0xFA, 0xCF])
                     || header.starts_with(&[0xCE, 0xFA, 0xED, 0xFE])
                     || header.starts_with(&[0xCF, 0xFA, 0xED, 0xFE])
-                    || header.starts_with(&[0xCA, 0xFE, 0xBA, 0xBE]));
+                    || header.starts_with(&[0xCA, 0xFE, 0xBA, 0xBE])
+                    || header.starts_with(&[0xCA, 0xFE, 0xBA, 0xBF])
+                    || header.starts_with(&[0xBE, 0xBA, 0xFE, 0xCA])
+                    || header.starts_with(&[0xBF, 0xBA, 0xFE, 0xCA]));
 
-            if is_elf || is_macho {
-                let path_lower = path.to_lowercase();
-                if path_lower.starts_with("/bin/")
-                    || path_lower.starts_with("/sbin/")
-                    || path_lower.starts_with("/usr/bin/")
-                    || path_lower.starts_with("/usr/sbin/")
-                    || path_lower.starts_with("/usr/libexec/")
-                    || path_lower.starts_with("/lib/")
-                    || path_lower.starts_with("/lib64/")
-                    || path_lower.starts_with("/usr/lib/")
-                    || path_lower.starts_with("/system/library/")
-                    || path_lower.starts_with("/system/applications/")
-                {
-                    use std::os::unix::fs::MetadataExt;
-                    if let Ok(meta) = p.metadata() {
-                        let mode = meta.mode();
-                        // Root owned and not world/group writable
-                        if (mode & 0o022) == 0 && meta.uid() == 0 {
-                            return AuthenticodeStatus::new_valid(
-                                "System Integrity Protected Binary",
-                                "OS Vendor",
-                                "",
-                                "",
-                            );
-                        }
+            let path_lower = path.to_lowercase();
+            let is_system_dir = path_lower.starts_with("/bin/")
+                || path_lower.starts_with("/sbin/")
+                || path_lower.starts_with("/usr/bin/")
+                || path_lower.starts_with("/usr/sbin/")
+                || path_lower.starts_with("/usr/libexec/")
+                || path_lower.starts_with("/lib/")
+                || path_lower.starts_with("/lib64/")
+                || path_lower.starts_with("/usr/lib/")
+                || path_lower.starts_with("/system/library/")
+                || path_lower.starts_with("/system/applications/");
+
+            if is_system_dir && (is_elf || is_macho || header.starts_with(b"#!") || n > 0) {
+                use std::os::unix::fs::MetadataExt;
+                if let Ok(meta) = p.metadata() {
+                    let mode = meta.mode();
+                    // Not world writable and not located in an untrusted writable directory
+                    if (mode & 0o002) == 0 && !is_untrusted_writable_location(path) {
+                        return AuthenticodeStatus::new_valid(
+                            "System Integrity Protected Binary",
+                            "OS Vendor",
+                            "",
+                            "",
+                        );
                     }
                 }
             }
