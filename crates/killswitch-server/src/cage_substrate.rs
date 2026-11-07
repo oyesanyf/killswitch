@@ -129,7 +129,7 @@ pub async fn handle_cage_quarantine(
             None,
         )
         .await
-        .map_err(|e| ServerError::Internal(format!("Host containment execution failed: {}", e)))?;
+        .map_err(ServerError::Core)?;
 
     // 9. Freeze target process if specified
     if let Some(pid) = req.target_pid {
