@@ -448,6 +448,28 @@ fn unwrap_env_invocation(tokens: &[String]) -> Option<EnvUnwrapResult> {
     let mut i = 1;
     while i < tokens.len() {
         let tok = &tokens[i];
+
+        // Split-string option handling:
+        // GNU env supports:
+        // 1. Separate argument: `-S "cmd"` or `--split-string "cmd"`
+        // 2. Equals argument: `--split-string="cmd"`
+        // 3. Concatenated short option: `-S"cmd"` or `-S="cmd"`
+        let split_opt = if tok == "-S" || tok == "--split-string" {
+            if i + 1 < tokens.len() {
+                Some((tokens[i + 1].as_str(), i + 2))
+            } else {
+                None
+            }
+        } else if let Some(stripped) = tok.strip_prefix("--split-string=") {
+            Some((stripped, i + 1))
+        } else if tok.starts_with("-S") && tok.len() > 2 {
+            let raw = &tok[2..];
+            let payload = raw.strip_prefix('=').unwrap_or(raw);
+            Some((payload, i + 1))
+        } else {
+            None
+        };
+
         if tok == "--" {
             i += 1;
             break;
@@ -465,22 +487,30 @@ fn unwrap_env_invocation(tokens: &[String]) -> Option<EnvUnwrapResult> {
             i += 2;
         } else if tok.starts_with("--unset=") || tok.starts_with("--chdir=") {
             i += 1;
-        } else if tok == "-S" || tok == "--split-string" {
-            if i + 1 < tokens.len() {
-                let split_tokens = tokenize_command(&tokens[i + 1]);
-                let mut combined = split_tokens;
-                combined.extend_from_slice(&tokens[i + 2..]);
-                if let Some(res) = unwrap_env_invocation(&combined) {
-                    return Some(res);
-                }
-                return if !combined.is_empty() {
-                    Some((combined, env_vars))
-                } else {
-                    None
-                };
-            } else {
-                i += 1;
+        } else if let Some((split_payload, next_idx)) = split_opt {
+            let split_tokens = tokenize_command(split_payload);
+            let mut combined = split_tokens;
+            combined.extend_from_slice(&tokens[next_idx..]);
+
+            // Construct synthetic env invocation with combined tokens to recursively unwrap
+            // any env options or variable assignments contained within split-string.
+            let mut synthetic_env = vec![tokens[0].clone()];
+            synthetic_env.extend(combined.clone());
+
+            if let Some((unwrapped, inner_envs)) = unwrap_env_invocation(&synthetic_env) {
+                let mut all_envs = env_vars;
+                all_envs.extend(inner_envs);
+                return Some((unwrapped, all_envs));
             }
+
+            return if !combined.is_empty() {
+                Some((combined, env_vars))
+            } else {
+                None
+            };
+        } else if tok == "-S" || tok == "--split-string" {
+            // Missing argument for -S or --split-string at end of tokens
+            i += 1;
         } else if tok.starts_with('-') {
             i += 1;
         } else if is_env_var_assignment(tok) {
@@ -570,7 +600,17 @@ pub fn parse_semantic_command_with_probe(
 
     // 2. env / /usr/bin/env unwrapping check
     if let Some((unwrapped_tokens, unwrapped_envs)) = unwrap_env_invocation(remaining_tokens) {
-        let unwrapped_cmd = unwrapped_tokens.join(" ");
+        let unwrapped_cmd = unwrapped_tokens
+            .iter()
+            .map(|t| {
+                if t.contains(' ') || t.contains('\t') {
+                    format!("\"{}\"", t)
+                } else {
+                    t.clone()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
         let mut inner = parse_semantic_command_with_probe(&unwrapped_cmd, external_probe);
         inner.raw_command = raw.to_string();
         inner.env_vars.extend(env_vars);
