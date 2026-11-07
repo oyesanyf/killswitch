@@ -241,15 +241,27 @@ async fn test_adversarial_disarm_caller_pid_spoofing_mismatch_fails_401() {
         .as_str()
         .unwrap_or_else(|| body_json["message"].as_str().unwrap_or(""));
 
-    assert!(
-        err_msg.contains("Caller PID spoofing detected"),
-        "Error message must flag caller PID spoofing, got: {}",
-        err_msg
-    );
-    assert!(
-        err_msg.contains(&format!("claimed PID {}", spoofed_pid)),
-        "Error message must specify claimed PID"
-    );
+    #[cfg(any(windows, target_os = "linux"))]
+    {
+        assert!(
+            err_msg.contains("Caller PID spoofing detected"),
+            "Error message must flag caller PID spoofing, got: {}",
+            err_msg
+        );
+        assert!(
+            err_msg.contains(&format!("claimed PID {}", spoofed_pid)),
+            "Error message must specify claimed PID"
+        );
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        assert!(
+            err_msg.contains("Loopback peer PID verification failed")
+                || err_msg.contains("not supported on this platform"),
+            "Error message must flag fail-closed peer PID resolution on macOS, got: {}",
+            err_msg
+        );
+    }
 
     drop(client);
     drop(server_stream);
