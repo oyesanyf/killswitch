@@ -216,7 +216,8 @@ fn test_journal_lease_expiration_filtering() {
 
 fn setup_cage_server_state() -> (Arc<ServerState>, Arc<SigningKey>, String) {
     let temp_dir = tempdir().unwrap();
-    let containment = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
+    let containment =
+        Arc::new(HostContainmentManager::new_simulated(Some(temp_dir.path())).unwrap());
     let state = Arc::new(ServerState::with_defaults(containment));
 
     // Register a valid test signing key into CAGE key manifest

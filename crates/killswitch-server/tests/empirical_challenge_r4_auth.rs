@@ -26,7 +26,8 @@ fn setup_challenge_state() -> (Arc<ServerState>, Arc<HostContainmentManager>) {
     std::env::set_var("KILLSWITCH_MASTER_TOKEN", CHALLENGE_MASTER_TOKEN);
     std::env::set_var("KILLSWITCH_CONTROL_TOKEN", CHALLENGE_MASTER_TOKEN);
     let temp_dir = tempfile::tempdir().unwrap();
-    let containment = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
+    let containment =
+        Arc::new(HostContainmentManager::new_simulated(Some(temp_dir.path())).unwrap());
     let state = Arc::new(ServerState::with_defaults(containment.clone()));
     (state, containment)
 }
@@ -902,33 +903,43 @@ async fn test_live_tcp_loopback_caller_pid_spoofing_detection() {
 
     let resp = client.post(&url).json(&spoof_body).send().await.unwrap();
 
-    assert_eq!(
-        resp.status(),
-        reqwest::StatusCode::FORBIDDEN,
-        "Spoofed caller PID over real loopback TCP socket MUST return 403 Forbidden"
-    );
+    #[cfg(any(windows, target_os = "linux"))]
+    {
+        assert_eq!(
+            resp.status(),
+            reqwest::StatusCode::FORBIDDEN,
+            "Spoofed caller PID over real loopback TCP socket MUST return 403 Forbidden"
+        );
 
-    let err_json: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(
-        err_json["error"]["code"], "CALLER_PID_SPOOFED",
-        "Error code must be CALLER_PID_SPOOFED"
-    );
+        let err_json: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(
+            err_json["error"]["code"], "CALLER_PID_SPOOFED",
+            "Error code must be CALLER_PID_SPOOFED"
+        );
 
-    // 2. Legitimate PID: Claim actual PID std::process::id() over real TCP socket
-    let legit_body = serde_json::json!({
-        "operator": "legit_agent",
-        "reason": "Legit PID test",
-        "token": CHALLENGE_MASTER_TOKEN,
-        "caller_pid": my_pid
-    });
+        // 2. Legitimate PID: Claim actual PID std::process::id() over real TCP socket
+        let legit_body = serde_json::json!({
+            "operator": "legit_agent",
+            "reason": "Legit PID test",
+            "token": CHALLENGE_MASTER_TOKEN,
+            "caller_pid": my_pid
+        });
 
-    let resp_legit = client.post(&url).json(&legit_body).send().await.unwrap();
+        let resp_legit = client.post(&url).json(&legit_body).send().await.unwrap();
 
-    assert_eq!(
-        resp_legit.status(),
-        reqwest::StatusCode::OK,
-        "Matching caller PID over real loopback TCP socket MUST succeed with 200 OK"
-    );
+        assert_eq!(
+            resp_legit.status(),
+            reqwest::StatusCode::OK,
+            "Matching caller PID over real loopback TCP socket MUST succeed with 200 OK"
+        );
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        // On unsupported platforms (macOS), loopback peer PID fails closed with 401
+        assert_eq!(resp.status(), reqwest::StatusCode::UNAUTHORIZED);
+        let err_json: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(err_json["error"]["code"], "AUTHENTICATION_FAILED");
+    }
 
     server_handle.abort();
 }

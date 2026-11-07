@@ -31,7 +31,8 @@ fn setup_challenge_server_state() -> (Arc<ServerState>, Arc<HostContainmentManag
     std::env::set_var("KILLSWITCH_MASTER_TOKEN", CHALLENGE_MASTER_TOKEN);
     std::env::set_var("KILLSWITCH_CONTROL_TOKEN", CHALLENGE_MASTER_TOKEN);
     let temp_dir = tempfile::tempdir().unwrap();
-    let containment = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
+    let containment =
+        Arc::new(HostContainmentManager::new_simulated(Some(temp_dir.path())).unwrap());
     let state = Arc::new(ServerState::with_defaults(containment.clone()));
     (state, containment)
 }
