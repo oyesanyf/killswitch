@@ -10,6 +10,7 @@ description = "EDR Telemetry, Nonlinear Phase-Lock Lyapunov Monitor, Causal/Atta
 
 [dependencies]
 killswitch-types = { workspace = true }
+killswitch-core = { workspace = true }
 killswitch-conformal = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
@@ -45,5 +46,10 @@ libc = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
-killswitch-core = { workspace = true }
 killswitch-adjudication = { workspace = true }
+
+[lints.clippy]
+match_like_matches_macro = "allow"
+collapsible_if = "allow"
+manual_ignore_case_cmp = "allow"
+unnecessary_map_or = "allow"

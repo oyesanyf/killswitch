@@ -340,36 +340,63 @@ fn test_challenge_env_unnesting() {
 
 #[test]
 fn test_challenge_env_unnesting_split_string_equals_defect() {
-    // DEFECT REPRODUCTION: `/usr/bin/env --split-string="sudo id"`
-    // When --split-string is passed with '=' (GNU env standard syntax),
-    // tokenize_command parses it as a single token `--split-string=sudo id`.
-    // In unwrap_env_invocation, only `tok == "-S" || tok == "--split-string"` is checked,
-    // causing `--split-string=...` to be treated as an unknown option and skipped.
-    // Consequently, the inner command is never extracted and falls through to `UnprivilegedStandard`.
     let cmd = parse_semantic_command(r#"/usr/bin/env --split-string="sudo id""#);
-    
-    // Demonstrate empirical defect:
-    let is_defect_present = cmd.privilege_class == PrivilegeEquivalenceClass::UnprivilegedStandard;
-    assert!(
-        is_defect_present,
-        "Confirmed defect: /usr/bin/env --split-string=\"sudo id\" fails to unwrap and evaluates to {:?}",
-        cmd.privilege_class
+    assert_eq!(
+        cmd.privilege_class,
+        PrivilegeEquivalenceClass::RootOrAdminElevation,
+        "/usr/bin/env --split-string=\"sudo id\" must unwrap to RootOrAdminElevation"
     );
+    assert_eq!(cmd.executable, "sudo");
+    assert_eq!(cmd.args, vec!["id"]);
+    assert!(cmd.privilege_class.is_privileged_execution());
 }
 
 #[test]
 fn test_challenge_env_unnesting_dash_s_concatenated_defect() {
-    // DEFECT REPRODUCTION: `env -S"sudo id"`
-    // When -S is concatenated with the command string (common in shebangs and CLI: `env -S"sudo id"`),
-    // tokenize_command parses it as a single token `-Ssudo id`.
-    // In unwrap_env_invocation, `tok == "-S"` is false, causing it to be skipped and fall through.
     let cmd = parse_semantic_command(r#"env -S"sudo id""#);
-    let is_defect_present = cmd.privilege_class == PrivilegeEquivalenceClass::UnprivilegedStandard;
-    assert!(
-        is_defect_present,
-        "Confirmed defect: env -S\"sudo id\" fails to unwrap and evaluates to {:?}",
-        cmd.privilege_class
+    assert_eq!(
+        cmd.privilege_class,
+        PrivilegeEquivalenceClass::RootOrAdminElevation,
+        "env -S\"sudo id\" must unwrap to RootOrAdminElevation"
     );
+    assert_eq!(cmd.executable, "sudo");
+    assert_eq!(cmd.args, vec!["id"]);
+    assert!(cmd.privilege_class.is_privileged_execution());
+}
+
+#[test]
+fn test_challenge_env_unnesting_comprehensive_split_string_variants() {
+    // 1. --split-string with equals and trailing outer args
+    let cmd1 = parse_semantic_command(r#"/usr/bin/env --split-string="sudo id" -a -b"#);
+    assert_eq!(cmd1.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+    assert_eq!(cmd1.executable, "sudo");
+    assert_eq!(cmd1.args, vec!["id", "-a", "-b"]);
+
+    // 2. -S with equals sign: env -S="sudo id"
+    let cmd2 = parse_semantic_command(r#"env -S="sudo id""#);
+    assert_eq!(cmd2.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+    assert_eq!(cmd2.executable, "sudo");
+    assert_eq!(cmd2.args, vec!["id"]);
+
+    // 3. -S with nested env options: env -S "-i sudo id"
+    let cmd3 = parse_semantic_command(r#"env -S "-i sudo id""#);
+    assert_eq!(cmd3.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+    assert_eq!(cmd3.executable, "sudo");
+    assert_eq!(cmd3.args, vec!["id"]);
+
+    // 4. --split-string with nested env vars: env --split-string="VAR=1 sudo id"
+    let cmd4 = parse_semantic_command(r#"env --split-string="VAR=1 sudo id""#);
+    assert_eq!(cmd4.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+    assert_eq!(cmd4.executable, "sudo");
+    assert_eq!(cmd4.args, vec!["id"]);
+    assert!(cmd4.env_vars.iter().any(|(k, v)| k == "VAR" && v == "1"));
+
+    // 5. Cross-boundary elevation via split-string: env --split-string="wsl -u root id"
+    let cmd5 = parse_semantic_command(r#"env --split-string="wsl -u root id""#);
+    assert_eq!(cmd5.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+    assert_eq!(cmd5.executable, "wsl");
+    assert_eq!(cmd5.target_user.as_deref(), Some("root"));
+    assert!(cmd5.is_cross_boundary);
 }
 
 #[test]
