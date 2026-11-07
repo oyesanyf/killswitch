@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Mutex;
 use tempfile::tempdir;
 
 use killswitch_telemetry::agent_hooks::{
@@ -9,8 +10,11 @@ use killswitch_telemetry::agent_hooks::{
     HookEventType, NormalizedHookRequest, SupportedAgentKind, GLOBAL_CORRELATOR,
 };
 
+static HOOK_TEST_LOCK: Mutex<()> = Mutex::new(());
+
 #[test]
 fn test_claude_code_pre_and_post_parsers_and_formatters() {
+    let _guard = HOOK_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let pre_payload = r#"{
         "tool_name": "Bash",
         "tool_input": {
@@ -47,6 +51,7 @@ fn test_claude_code_pre_and_post_parsers_and_formatters() {
 
 #[test]
 fn test_cursor_wire_format_and_dlp_rejection() {
+    let _guard = HOOK_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let before_shell = r#"{
         "command": "echo 'CONFIDENTIAL patient clinical record: SSN 123-45-6789 with severe diagnosis'",
         "cwd": "/workspace"
@@ -76,6 +81,7 @@ fn test_cursor_wire_format_and_dlp_rejection() {
 
 #[test]
 fn test_copilot_and_opencode_parsers() {
+    let _guard = HOOK_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let copilot_payload = r#"{
         "tool": "terminal.execute",
         "parameters": {
@@ -111,6 +117,7 @@ fn test_copilot_and_opencode_parsers() {
 
 #[test]
 fn test_mcp_tools_call_interception() {
+    let _guard = HOOK_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mcp_call = r#"{
         "jsonrpc": "2.0",
         "id": 42,
@@ -140,6 +147,7 @@ fn test_mcp_tools_call_interception() {
 
 #[test]
 fn test_incident_a_post_tool_denial_correlation() {
+    let _guard = HOOK_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let session_id = "test-session-incident-a";
 
     // Step 1: Simulate PostToolUse where an agent ran `sudo -n id` and was denied
@@ -183,6 +191,7 @@ fn test_incident_a_post_tool_denial_correlation() {
 
 #[test]
 fn test_agent_interceptions_ring_buffer() {
+    let _guard = HOOK_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     clear_interceptions();
 
     for i in 0..15 {
@@ -210,6 +219,7 @@ fn test_agent_interceptions_ring_buffer() {
 
 #[test]
 fn test_install_agent_hooks() {
+    let _guard = HOOK_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = tempdir().expect("tempdir");
     let ws = tmp.path();
     let bin_path = PathBuf::from("d:\\harfile\\killswitch\\target\\debug\\killswitch.exe");
@@ -249,6 +259,7 @@ fn test_install_agent_hooks() {
 
 #[test]
 fn test_mcp_rpc_id_preservation_string_number_null() {
+    let _guard = HOOK_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     // Case 1: String UUID ID
     let raw_uuid = r#"{
         "jsonrpc": "2.0",
@@ -346,6 +357,7 @@ fn test_mcp_rpc_id_preservation_string_number_null() {
 
 #[test]
 fn test_sensitive_root_credential_path_interception_pre_tool() {
+    let _guard = HOOK_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     // 1. Unprivileged tool reading /etc/shadow via cat
     let claude_payload = r#"{
         "tool_name": "Bash",
