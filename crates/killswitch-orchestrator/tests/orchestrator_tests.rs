@@ -455,7 +455,8 @@ async fn test_cage_pep_clears_containment_and_records_receipt_in_state() {
     let temp_dir = tempfile::tempdir().unwrap();
     let lineage = Arc::new(EndpointLineageEngine::new_in_memory());
     let adjudicator = Arc::new(ZeroFalsePositiveAdjudicator::new());
-    let containment = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
+    let containment =
+        Arc::new(HostContainmentManager::new_simulated(Some(temp_dir.path())).unwrap());
 
     let config = OrchestratorConfig {
         mode: OrchestratorMode::Autonomous,
@@ -539,7 +540,8 @@ async fn test_cage_pep_clears_rollback_disarm_and_records_receipt() {
     let temp_dir = tempfile::tempdir().unwrap();
     let lineage = Arc::new(EndpointLineageEngine::new_in_memory());
     let adjudicator = Arc::new(ZeroFalsePositiveAdjudicator::new());
-    let containment = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
+    let containment =
+        Arc::new(HostContainmentManager::new_simulated(Some(temp_dir.path())).unwrap());
 
     // Pre-engage isolation
     containment
@@ -591,7 +593,8 @@ async fn test_cage_decision_receipt_persisted_in_checkpoint_and_blake3_trace() {
     let temp_dir = tempfile::tempdir().unwrap();
     let lineage = Arc::new(EndpointLineageEngine::new_in_memory());
     let adjudicator = Arc::new(ZeroFalsePositiveAdjudicator::new());
-    let containment = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
+    let containment =
+        Arc::new(HostContainmentManager::new_simulated(Some(temp_dir.path())).unwrap());
 
     let checkpointer = Arc::new(DurableFileCheckpointer::new(temp_dir.path()).unwrap());
 
