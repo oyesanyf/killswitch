@@ -304,9 +304,19 @@ pub fn detect_binary_masquerade_spoof(
     {
         if let Some(buf) = bytes {
             if !buf.is_empty() {
-                if !buf.starts_with(b"MZ") && !buf.starts_with(b"\x7fELF") {
+                let is_macho_magic = buf.len() >= 4
+                    && (buf.starts_with(&[0xFE, 0xED, 0xFA, 0xCE])
+                        || buf.starts_with(&[0xFE, 0xED, 0xFA, 0xCF])
+                        || buf.starts_with(&[0xCE, 0xFA, 0xED, 0xFE])
+                        || buf.starts_with(&[0xCF, 0xFA, 0xED, 0xFE])
+                        || buf.starts_with(&[0xCA, 0xFE, 0xBA, 0xBE])
+                        || buf.starts_with(&[0xCA, 0xFE, 0xBA, 0xBF])
+                        || buf.starts_with(&[0xBE, 0xBA, 0xFE, 0xCA])
+                        || buf.starts_with(&[0xBF, 0xBA, 0xFE, 0xCA]));
+
+                if !buf.starts_with(b"MZ") && !buf.starts_with(b"\x7fELF") && !is_macho_magic {
                     return Some(format!(
-                        "REA_MASQUERADE_SPOOF_DETECTED: Protected binary '{}' has non-executable payload header (expected PE 'MZ' or ELF magic)",
+                        "REA_MASQUERADE_SPOOF_DETECTED: Protected binary '{}' has non-executable payload header (expected PE 'MZ', ELF, or Mach-O magic)",
                         base_lower
                     ));
                 }

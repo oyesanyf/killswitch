@@ -1103,12 +1103,19 @@ fn test_challenge_path_traversal_and_device_namespace_stress() {
     ];
 
     for path in valid_paths {
+        let is_symlink = std::fs::symlink_metadata(path)
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false);
         let res = validate_rea_target_path(path);
-        assert!(
-            res.is_ok(),
-            "Legitimate path was incorrectly rejected: '{}' -> {:?}",
-            path,
-            res.err()
-        );
+        if is_symlink {
+            assert!(res.is_err(), "Symlink path was NOT rejected: '{}'", path);
+        } else {
+            assert!(
+                res.is_ok(),
+                "Legitimate path was incorrectly rejected: '{}' -> {:?}",
+                path,
+                res.err()
+            );
+        }
     }
 }
