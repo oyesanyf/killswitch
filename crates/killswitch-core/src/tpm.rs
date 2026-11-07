@@ -489,7 +489,7 @@ fn probe_hardware_tpm_uncached() -> HardwareTpmProbe {
         }
 
         let pcr = compute_platform_binding_digest(if present { 2 } else { 0 }, 1, 1);
-        return HardwareTpmProbe {
+        HardwareTpmProbe {
             present,
             version,
             provider: if present {
@@ -506,7 +506,7 @@ fn probe_hardware_tpm_uncached() -> HardwareTpmProbe {
             pcr_0_7_sha256: pcr,
             pcr_update_counter: 1,
             raw_pcr_read_succeeded: false,
-        };
+        }
     }
 
     #[cfg(not(any(target_os = "windows", target_os = "linux")))]

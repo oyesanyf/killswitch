@@ -66,8 +66,14 @@ extern "C" fn posix_signal_handler(_sig: libc::c_int) {
 #[cfg(unix)]
 fn install_posix_signal_handlers() {
     unsafe {
-        libc::signal(libc::SIGTERM, posix_signal_handler as libc::sighandler_t);
-        libc::signal(libc::SIGINT, posix_signal_handler as libc::sighandler_t);
+        libc::signal(
+            libc::SIGTERM,
+            posix_signal_handler as *const () as libc::sighandler_t,
+        );
+        libc::signal(
+            libc::SIGINT,
+            posix_signal_handler as *const () as libc::sighandler_t,
+        );
     }
 }
 
