@@ -66,21 +66,44 @@ impl LineageImmunityVerdict {
     }
 }
 
-/// Checks if a binary is strictly denied from receiving blanket direct target immunity.
+/// Checks if a binary or command is strictly denied from receiving blanket direct target immunity.
 fn is_blanket_immunity_denied(name: &str) -> bool {
     let trimmed = name.trim().trim_matches('"').trim_matches('\'');
-    let base = trimmed.rsplit(['\\', '/']).next().unwrap_or(trimmed);
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    // Extract first token (handling command lines such as "sudo -n id" or "wsl -u root")
+    let first_token = trimmed.split_whitespace().next().unwrap_or(trimmed);
+    let base = first_token.rsplit(['\\', '/']).next().unwrap_or(first_token);
     let name_lc = base.to_ascii_lowercase();
-    matches!(
-        name_lc.as_str(),
-        "wsl.exe"
-            | "wslservice.exe"
-            | "wslhost.exe"
+    let name_no_exe = name_lc.trim_end_matches(".exe");
+
+    if matches!(
+        name_no_exe,
+        "wsl"
+            | "wslservice"
+            | "wslhost"
             | "sudo"
             | "su"
             | "doas"
             | "pkexec"
-    )
+            | "runas"
+    ) {
+        return true;
+    }
+
+    // Dynamic binary metadata probe: if path exists on disk, probe for SUID or PE admin manifest
+    let candidate_path = std::path::Path::new(first_token);
+    if candidate_path.exists() {
+        if let Ok(meta) = crate::binary_probe::inspect_binary_metadata(candidate_path) {
+            if meta.is_privileged_target() {
+                return true;
+            }
+        }
+    }
+
+    false
 }
 
 /// Inspect target PID and traverse its parent ancestry up to depth 5.
@@ -243,11 +266,21 @@ mod tests {
     fn test_privilege_escalation_and_shells_no_blanket_immunity() {
         let non_immune = [
             "sudo",
+            "sudo.exe",
+            "sudo -n id",
             "su",
+            "su.exe",
+            "su -",
+            "wsl",
             "wsl.exe",
+            "wsl -u root id",
             "wslservice.exe",
+            "wslhost.exe",
             "doas",
             "pkexec",
+            "runas",
+            "runas.exe",
+            "runas /user:Administrator cmd.exe",
         ];
         for app in non_immune {
             let verdict = inspect_process_lineage(9876, Some(app));
@@ -258,6 +291,31 @@ mod tests {
             );
             assert_eq!(verdict.to_veto_reason(), None);
         }
+
+        // Dynamic binary metadata probe test on disk
+        let dir = tempfile::tempdir().unwrap();
+        let bin_path = dir.path().join("renamed_installer.exe");
+        let manifest = br#"
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+                <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+                    <security>
+                        <requestedPrivileges>
+                            <requestedExecutionLevel level="requireAdministrator" uiAccess="false"/>
+                        </requestedPrivileges>
+                    </security>
+                </trustInfo>
+            </assembly>
+        "#;
+        std::fs::write(&bin_path, manifest).unwrap();
+
+        let path_str = bin_path.to_str().unwrap();
+        let verdict_dynamic = inspect_process_lineage(8888, Some(path_str));
+        assert!(
+            !verdict_dynamic.is_immune(),
+            "Renamed executable with requireAdministrator manifest must NOT receive blanket immunity"
+        );
+        assert_eq!(verdict_dynamic.to_veto_reason(), None);
     }
 
     #[test]
