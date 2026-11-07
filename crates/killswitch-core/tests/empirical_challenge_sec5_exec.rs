@@ -36,7 +36,7 @@ fn test_exec_sensor_32_thread_concurrent_flood() {
             }
 
             for i in 0..events_per_thread {
-                let pid = (t * 1000 + i) as u32;
+                let pid = (t * 1000 + i + 1) as u32;
                 let event = ExecEvent::new_start(
                     pid,
                     t as u32,
