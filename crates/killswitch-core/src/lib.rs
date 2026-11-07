@@ -53,6 +53,7 @@ pub use wfp::{
     disarm_windows_network_quarantine, engage_windows_network_quarantine,
     remove_all_killswitch_bfe_registry_rules, terminate_active_tcp_sockets_for_ips,
     terminate_all_non_loopback_tcp_sockets, WfpDynamicSession, WfpGuid, WindowsWfpIsolator,
+    FWPM_LAYER_IPFORWARD_V4, FWPM_LAYER_IPFORWARD_V6,
 };
 
 pub use killswitch_types::protocol::{

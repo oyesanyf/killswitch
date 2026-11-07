@@ -13,6 +13,7 @@ pub mod bounded_agents_apc;
 pub mod cage_governance;
 pub mod canary;
 pub mod causal;
+pub mod circumvention;
 pub mod continuous_defense;
 pub mod correlator;
 pub mod distributed_consensus;
@@ -31,6 +32,11 @@ pub mod tamper_and_process_killswitch;
 pub mod watchdog;
 
 // Re-exports for clean ergonomics
+pub use circumvention::{
+    classify_denial_pattern, evaluate_denial_outcome, is_cross_boundary_invocation,
+    observe_denial, CircumventionAlert, DenialPatternKind, DynamicDenialSignal,
+    TemporalCircumventionCorrelator, TemporalCircumventionEngine,
+};
 pub use semantic_command::{
     parse_semantic_command, parse_semantic_command_with_probe, tokenize_command,
     DynamicBinaryMetadataProbe, ElevationRequirement, PrivilegeEquivalenceClass, SemanticCommand,
