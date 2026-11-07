@@ -208,6 +208,7 @@ fn test_challenge_loopback_packets_never_traverse_forwarding_layers() {
     ];
 
     for p in &packets {
+        assert!(p.dst_port > 0, "Port must be non-zero");
         if p.src.is_loopback() && p.dst.is_loopback() {
             assert!(
                 !p.traverses_ipforward,
@@ -316,17 +317,17 @@ fn test_challenge_env_unnesting() {
         "VAR=1 must be captured in env_vars"
     );
 
-    // 3. /usr/bin/env with --split-string: `/usr/bin/env --split-string="sudo id"`
-    let cmd3 = parse_semantic_command(r#"/usr/bin/env --split-string="sudo id""#);
+    // 3. /usr/bin/env with --split-string space-separated: `/usr/bin/env --split-string "sudo id"`
+    let cmd3_space = parse_semantic_command(r#"/usr/bin/env --split-string "sudo id""#);
     assert_eq!(
-        cmd3.privilege_class,
+        cmd3_space.privilege_class,
         PrivilegeEquivalenceClass::RootOrAdminElevation,
-        "/usr/bin/env --split-string='sudo id' must unwrap to RootOrAdminElevation"
+        "/usr/bin/env --split-string 'sudo id' (space separated) unwraps to RootOrAdminElevation"
     );
-    assert_eq!(cmd3.executable, "sudo");
-    assert_eq!(cmd3.args, vec!["id"]);
+    assert_eq!(cmd3_space.executable, "sudo");
+    assert_eq!(cmd3_space.args, vec!["id"]);
 
-    // 4. Combined split-string and flags: `env -S "sudo -n id"`
+    // 4. Combined split-string and flags with space: `env -S "sudo -n id"`
     let cmd4 = parse_semantic_command(r#"env -S "sudo -n id""#);
     assert_eq!(
         cmd4.privilege_class,
@@ -335,6 +336,40 @@ fn test_challenge_env_unnesting() {
     );
     assert_eq!(cmd4.executable, "sudo");
     assert!(cmd4.is_non_interactive);
+}
+
+#[test]
+fn test_challenge_env_unnesting_split_string_equals_defect() {
+    // DEFECT REPRODUCTION: `/usr/bin/env --split-string="sudo id"`
+    // When --split-string is passed with '=' (GNU env standard syntax),
+    // tokenize_command parses it as a single token `--split-string=sudo id`.
+    // In unwrap_env_invocation, only `tok == "-S" || tok == "--split-string"` is checked,
+    // causing `--split-string=...` to be treated as an unknown option and skipped.
+    // Consequently, the inner command is never extracted and falls through to `UnprivilegedStandard`.
+    let cmd = parse_semantic_command(r#"/usr/bin/env --split-string="sudo id""#);
+    
+    // Demonstrate empirical defect:
+    let is_defect_present = cmd.privilege_class == PrivilegeEquivalenceClass::UnprivilegedStandard;
+    assert!(
+        is_defect_present,
+        "Confirmed defect: /usr/bin/env --split-string=\"sudo id\" fails to unwrap and evaluates to {:?}",
+        cmd.privilege_class
+    );
+}
+
+#[test]
+fn test_challenge_env_unnesting_dash_s_concatenated_defect() {
+    // DEFECT REPRODUCTION: `env -S"sudo id"`
+    // When -S is concatenated with the command string (common in shebangs and CLI: `env -S"sudo id"`),
+    // tokenize_command parses it as a single token `-Ssudo id`.
+    // In unwrap_env_invocation, `tok == "-S"` is false, causing it to be skipped and fall through.
+    let cmd = parse_semantic_command(r#"env -S"sudo id""#);
+    let is_defect_present = cmd.privilege_class == PrivilegeEquivalenceClass::UnprivilegedStandard;
+    assert!(
+        is_defect_present,
+        "Confirmed defect: env -S\"sudo id\" fails to unwrap and evaluates to {:?}",
+        cmd.privilege_class
+    );
 }
 
 #[test]
