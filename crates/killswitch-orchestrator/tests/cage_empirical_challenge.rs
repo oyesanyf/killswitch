@@ -119,7 +119,8 @@ async fn test_empirical_checkpoint_tamper_detection_fail_closed() {
     let temp_dir = tempfile::tempdir().unwrap();
     let lineage = Arc::new(EndpointLineageEngine::new_in_memory());
     let adjudicator = Arc::new(ZeroFalsePositiveAdjudicator::new());
-    let containment = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
+    let containment =
+        Arc::new(HostContainmentManager::new_simulated(Some(temp_dir.path())).unwrap());
     let checkpointer = Arc::new(DurableFileCheckpointer::new(temp_dir.path()).unwrap());
 
     let config = OrchestratorConfig {
