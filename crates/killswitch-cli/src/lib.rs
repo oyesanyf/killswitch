@@ -3,6 +3,7 @@
 //! Provides the command line interfaces, direct control client, subsystem self-verifier,
 //! and unified loader runtime for `killswitch` and `start.exe`.
 
+pub mod agentsonar_cli;
 pub mod client;
 pub mod commands;
 pub mod hook_cli;

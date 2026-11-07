@@ -1,0 +1,66 @@
+{
+  "heuristics": {
+    "min_byte_ratio": 4.0,
+    "max_byte_ratio": 200.0,
+    "weight_byte_asymmetry": 0.30,
+    "min_pkt_ratio": 2.5,
+    "min_avg_pkt_in": 50.0,
+    "max_avg_pkt_in": 850.0,
+    "weight_pkt_streaming": 0.30,
+    "min_duration_ms": 1500,
+    "max_duration_ms": 180000,
+    "weight_duration": 0.20,
+    "weight_programmatic": 0.20
+  },
+  "agents": [
+    {
+      "agent": "claude-code",
+      "proc_pattern": "*claude*",
+      "domain_pattern": "*.anthropic.com"
+    },
+    {
+      "agent": "openai-codex",
+      "proc_pattern": "*codex*",
+      "domain_pattern": "*.openai.com"
+    },
+    {
+      "agent": "cursor-agent",
+      "proc_pattern": "*cursor*",
+      "domain_pattern": "*.cursor.sh"
+    },
+    {
+      "agent": "github-copilot",
+      "proc_pattern": "*",
+      "domain_pattern": "*.githubcopilot.com"
+    },
+    {
+      "agent": "google-gemini-cli",
+      "proc_pattern": "*gemini*",
+      "domain_pattern": "generativelanguage.googleapis.com"
+    },
+    {
+      "agent": "openrouter-client",
+      "proc_pattern": "*",
+      "domain_pattern": "*.openrouter.ai"
+    }
+  ],
+  "noise_domains": [
+    "*.mozilla.org",
+    "*.windowsupdate.com",
+    "*.digicert.com",
+    "*.letsencrypt.org",
+    "crates.io",
+    "*.crates.io",
+    "registry.npmjs.org"
+  ],
+  "non_programmatic_procs": [
+    "chrome",
+    "firefox",
+    "safari",
+    "brave",
+    "edge",
+    "msedge",
+    "chromium",
+    "arc"
+  ]
+}

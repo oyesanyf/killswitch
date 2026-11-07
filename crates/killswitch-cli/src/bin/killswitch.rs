@@ -255,6 +255,10 @@ enum Commands {
     },
 
     /// Relational SQL host discovery & active EDR audit engine
+    /// Dynamic AgentSonar SQLite WAL network traffic-shape & Shadow-AI classifier
+    Agentsonar(killswitch_cli::agentsonar_cli::AgentSonarCliArgs),
+
+    /// Relational SQL host discovery & active EDR audit engine
     Siquery {
         /// SQL query to execute (read-only SELECT or PRAGMA)
         #[arg(short, long)]
@@ -597,6 +601,9 @@ async fn main() -> Result<()> {
         },
         Some(Commands::McpProxy { command, args }) => {
             killswitch_cli::hook_cli::handle_mcp_proxy(command, args)?;
+        }
+        Some(Commands::Agentsonar(sonar_args)) => {
+            killswitch_cli::agentsonar_cli::handle_agentsonar(sonar_args)?;
         }
         Some(Commands::Siquery {
             query,

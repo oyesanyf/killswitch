@@ -4359,3 +4359,497 @@ pub async fn post_siquery_protect_sweep(
 
     Ok(Json(telemetry))
 }
+
+// =============================================================================
+// 21. Dynamic AgentSonar SQLite WAL Network Traffic-Shape & Shadow-AI Triage
+// =============================================================================
+
+pub async fn get_agentsonar_status() -> Result<Json<serde_json::Value>, ServerError> {
+    let report = tokio::task::spawn_blocking(|| {
+        killswitch_telemetry::global_agentsonar_engine().status_report()
+    })
+    .await
+    .map_err(|e| ServerError::Internal(format!("AgentSonar status join error: {}", e)))?
+    .map_err(|e| ServerError::Internal(format!("AgentSonar status error: {}", e)))?;
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "report": report,
+    })))
+}
+
+pub async fn get_agentsonar_events(
+    Query(q): Query<AgentSonarEventsQuery>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let limit = q.limit.unwrap_or(100).clamp(1, 2000);
+    let min_score = q.min_score.unwrap_or(0.0);
+    let events = tokio::task::spawn_blocking(move || {
+        let engine = killswitch_telemetry::global_agentsonar_engine();
+        let mut list = engine.list_events(limit)?;
+        if min_score > 0.0 {
+            list.retain(|e| e.ai_score >= min_score);
+        }
+        Ok::<_, anyhow::Error>(list)
+    })
+    .await
+    .map_err(|e| ServerError::Internal(format!("AgentSonar events join error: {}", e)))?
+    .map_err(|e| ServerError::Internal(format!("AgentSonar events error: {}", e)))?;
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "count": events.len(),
+        "events": events,
+    })))
+}
+
+pub async fn get_agentsonar_agents() -> Result<Json<serde_json::Value>, ServerError> {
+    let rules = tokio::task::spawn_blocking(|| {
+        killswitch_telemetry::global_agentsonar_engine().load_rules()
+    })
+    .await
+    .map_err(|e| ServerError::Internal(format!("AgentSonar rules join error: {}", e)))?
+    .map_err(|e| ServerError::Internal(format!("AgentSonar rules error: {}", e)))?;
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "count": rules.agents.len(),
+        "agents": rules.agents,
+    })))
+}
+
+pub async fn post_agentsonar_agents(
+    State(state): State<Arc<ServerState>>,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<AgentSonarAgentMutationRequest>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let _auth = crate::auth::verify_control_plane_auth(
+        &state,
+        &headers,
+        req.token.as_deref(),
+        req.caller_pid,
+        connect_info.as_ref(),
+        "/api/agentsonar/agents",
+    )?;
+
+    let action = req
+        .action
+        .unwrap_or_else(|| "add".to_string())
+        .to_ascii_lowercase();
+    let agent = req.agent.trim().to_string();
+    if agent.is_empty() {
+        return Err(ServerError::Validation(
+            "agent must not be empty".to_string(),
+        ));
+    }
+
+    let result = tokio::task::spawn_blocking(move || {
+        let engine = killswitch_telemetry::global_agentsonar_engine();
+        if action == "remove" || action == "delete" {
+            let removed = engine.remove_agent_rule(&agent)?;
+            let rules = engine.load_rules()?;
+            Ok::<_, anyhow::Error>(serde_json::json!({
+                "status": "ok",
+                "action": "remove",
+                "agent": agent,
+                "removed": removed,
+                "agents": rules.agents,
+            }))
+        } else {
+            let proc_pat = req.proc_pattern.unwrap_or_else(|| "*".to_string());
+            let dom_pat = req.domain_pattern.unwrap_or_else(|| "*".to_string());
+            engine.add_agent_rule(&agent, &proc_pat, &dom_pat)?;
+            let rules = engine.load_rules()?;
+            Ok(serde_json::json!({
+                "status": "ok",
+                "action": "add",
+                "agent": agent,
+                "proc_pattern": proc_pat,
+                "domain_pattern": dom_pat,
+                "agents": rules.agents,
+            }))
+        }
+    })
+    .await
+    .map_err(|e| ServerError::Internal(format!("AgentSonar agent mutation join error: {}", e)))?
+    .map_err(|e| ServerError::Validation(e.to_string()))?;
+
+    Ok(Json(result))
+}
+
+pub async fn get_agentsonar_ignore() -> Result<Json<serde_json::Value>, ServerError> {
+    let mut domains: Vec<String> = tokio::task::spawn_blocking(|| {
+        Ok::<_, anyhow::Error>(
+            killswitch_telemetry::global_agentsonar_engine()
+                .load_rules()?
+                .noise_domains
+                .into_iter()
+                .collect(),
+        )
+    })
+    .await
+    .map_err(|e| ServerError::Internal(format!("AgentSonar ignore join error: {}", e)))?
+    .map_err(|e| ServerError::Internal(format!("AgentSonar ignore error: {}", e)))?;
+    domains.sort();
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "count": domains.len(),
+        "noise_domains": domains,
+    })))
+}
+
+pub async fn post_agentsonar_ignore(
+    State(state): State<Arc<ServerState>>,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<AgentSonarIgnoreMutationRequest>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let _auth = crate::auth::verify_control_plane_auth(
+        &state,
+        &headers,
+        req.token.as_deref(),
+        req.caller_pid,
+        connect_info.as_ref(),
+        "/api/agentsonar/ignore",
+    )?;
+
+    let action = req
+        .action
+        .unwrap_or_else(|| "add".to_string())
+        .to_ascii_lowercase();
+    let dom = req.domain.trim().to_ascii_lowercase();
+    if dom.is_empty() {
+        return Err(ServerError::Validation(
+            "domain must not be empty".to_string(),
+        ));
+    }
+
+    let result = tokio::task::spawn_blocking(move || {
+        let engine = killswitch_telemetry::global_agentsonar_engine();
+        if action == "remove" || action == "delete" {
+            let removed = engine.remove_noise_domain(&dom)?;
+            Ok::<_, anyhow::Error>(serde_json::json!({
+                "status": "ok",
+                "action": "remove",
+                "domain": dom,
+                "removed": removed,
+            }))
+        } else {
+            engine.add_noise_domain(&dom)?;
+            Ok(serde_json::json!({
+                "status": "ok",
+                "action": "add",
+                "domain": dom,
+            }))
+        }
+    })
+    .await
+    .map_err(|e| ServerError::Internal(format!("AgentSonar ignore mutation join error: {}", e)))?
+    .map_err(|e| ServerError::Validation(e.to_string()))?;
+
+    Ok(Json(result))
+}
+
+pub async fn get_agentsonar_browsers() -> Result<Json<serde_json::Value>, ServerError> {
+    let browsers = tokio::task::spawn_blocking(|| {
+        Ok::<_, anyhow::Error>(
+            killswitch_telemetry::global_agentsonar_engine()
+                .load_rules()?
+                .non_programmatic_procs,
+        )
+    })
+    .await
+    .map_err(|e| ServerError::Internal(format!("AgentSonar browsers join error: {}", e)))?
+    .map_err(|e| ServerError::Internal(format!("AgentSonar browsers error: {}", e)))?;
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "count": browsers.len(),
+        "browser_procs": browsers,
+    })))
+}
+
+pub async fn post_agentsonar_browsers(
+    State(state): State<Arc<ServerState>>,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<AgentSonarBrowserMutationRequest>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let _auth = crate::auth::verify_control_plane_auth(
+        &state,
+        &headers,
+        req.token.as_deref(),
+        req.caller_pid,
+        connect_info.as_ref(),
+        "/api/agentsonar/browsers",
+    )?;
+
+    let action = req
+        .action
+        .unwrap_or_else(|| "add".to_string())
+        .to_ascii_lowercase();
+    let sub = req.proc_substring.trim().to_ascii_lowercase();
+    if sub.is_empty() {
+        return Err(ServerError::Validation(
+            "proc_substring must not be empty".to_string(),
+        ));
+    }
+
+    let result = tokio::task::spawn_blocking(move || {
+        let engine = killswitch_telemetry::global_agentsonar_engine();
+        if action == "remove" || action == "delete" {
+            let removed = engine.remove_browser_proc(&sub)?;
+            Ok::<_, anyhow::Error>(serde_json::json!({
+                "status": "ok",
+                "action": "remove",
+                "proc_substring": sub,
+                "removed": removed,
+            }))
+        } else {
+            engine.add_browser_proc(&sub)?;
+            Ok(serde_json::json!({
+                "status": "ok",
+                "action": "add",
+                "proc_substring": sub,
+            }))
+        }
+    })
+    .await
+    .map_err(|e| ServerError::Internal(format!("AgentSonar browser mutation join error: {}", e)))?
+    .map_err(|e| ServerError::Validation(e.to_string()))?;
+
+    Ok(Json(result))
+}
+
+pub async fn get_agentsonar_heuristics() -> Result<Json<serde_json::Value>, ServerError> {
+    let heuristics = tokio::task::spawn_blocking(|| {
+        Ok::<_, anyhow::Error>(
+            killswitch_telemetry::global_agentsonar_engine()
+                .load_rules()?
+                .heuristics,
+        )
+    })
+    .await
+    .map_err(|e| ServerError::Internal(format!("AgentSonar heuristics join error: {}", e)))?
+    .map_err(|e| ServerError::Internal(format!("AgentSonar heuristics error: {}", e)))?;
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "heuristics": heuristics,
+    })))
+}
+
+pub async fn post_agentsonar_heuristics(
+    State(state): State<Arc<ServerState>>,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<AgentSonarHeuristicsUpdateRequest>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let _auth = crate::auth::verify_control_plane_auth(
+        &state,
+        &headers,
+        req.token.as_deref(),
+        req.caller_pid,
+        connect_info.as_ref(),
+        "/api/agentsonar/heuristics",
+    )?;
+
+    let patch = req.patch;
+    let updated = tokio::task::spawn_blocking(move || {
+        killswitch_telemetry::global_agentsonar_engine().update_heuristics(&patch)
+    })
+    .await
+    .map_err(|e| ServerError::Internal(format!("AgentSonar heuristics update join error: {}", e)))?
+    .map_err(|e| ServerError::Validation(e.to_string()))?;
+
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "heuristics": updated,
+    })))
+}
+
+pub async fn get_agentsonar_triage(
+    Query(q): Query<AgentSonarEventsQuery>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let min_score = q.min_score.unwrap_or(0.50).clamp(0.0, 1.0);
+    let candidates = tokio::task::spawn_blocking(move || {
+        killswitch_telemetry::global_agentsonar_engine().triage_candidates(min_score)
+    })
+    .await
+    .map_err(|e| ServerError::Internal(format!("AgentSonar triage join error: {}", e)))?
+    .map_err(|e| ServerError::Internal(format!("AgentSonar triage error: {}", e)))?;
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "min_score": min_score,
+        "count": candidates.len(),
+        "candidates": candidates,
+    })))
+}
+
+pub async fn post_agentsonar_triage(
+    State(state): State<Arc<ServerState>>,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<AgentSonarTriageRequest>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let _auth = crate::auth::verify_control_plane_auth(
+        &state,
+        &headers,
+        req.token.as_deref(),
+        req.caller_pid,
+        connect_info.as_ref(),
+        "/api/agentsonar/triage",
+    )?;
+
+    let act = req.action.trim().to_ascii_lowercase();
+    let decision = if act == "known_agent" || act == "promote" {
+        let agent = req
+            .agent
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                ServerError::Validation("agent is required for known_agent triage".to_string())
+            })?
+            .to_string();
+        let proc_pattern = req.proc_pattern.unwrap_or_else(|| "*".to_string());
+        let domain_pattern = req
+            .domain_pattern
+            .or(req.domain)
+            .unwrap_or_else(|| "*".to_string());
+        killswitch_telemetry::TriageDecision::KnownAgent {
+            agent,
+            proc_pattern,
+            domain_pattern,
+        }
+    } else if act == "ignore_noise" || act == "ignore" || act == "noise" {
+        let domain = req
+            .domain
+            .or(req.domain_pattern)
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                ServerError::Validation("domain is required for ignore_noise triage".to_string())
+            })?
+            .to_string();
+        killswitch_telemetry::TriageDecision::IgnoreNoise { domain }
+    } else {
+        return Err(ServerError::Validation(format!(
+            "Unsupported triage action '{}': expected 'known_agent' or 'ignore_noise'",
+            req.action
+        )));
+    };
+
+    tokio::task::spawn_blocking(move || {
+        killswitch_telemetry::global_agentsonar_engine().apply_triage_decision(&decision)
+    })
+    .await
+    .map_err(|e| ServerError::Internal(format!("AgentSonar triage apply join error: {}", e)))?
+    .map_err(|e| ServerError::Validation(e.to_string()))?;
+
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "applied": req.action,
+    })))
+}
+
+pub async fn post_agentsonar_classify(
+    State(state): State<Arc<ServerState>>,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<AgentSonarClassifyRequest>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let _auth = crate::auth::verify_control_plane_auth(
+        &state,
+        &headers,
+        req.token.as_deref(),
+        req.caller_pid,
+        connect_info.as_ref(),
+        "/api/agentsonar/classify",
+    )?;
+
+    let line = req.event_jsonl;
+    let ext = req.external_cmd;
+    let out = tokio::task::spawn_blocking(move || {
+        killswitch_telemetry::global_agentsonar_engine().classify_jsonl_line(&line, ext.as_deref())
+    })
+    .await
+    .map_err(|e| ServerError::Internal(format!("AgentSonar classify join error: {}", e)))?
+    .map_err(|e| ServerError::Validation(e.to_string()))?;
+
+    Ok(Json(out))
+}
+
+pub async fn get_agentsonar_export() -> Result<Json<serde_json::Value>, ServerError> {
+    let rules = tokio::task::spawn_blocking(|| {
+        killswitch_telemetry::global_agentsonar_engine().load_rules()
+    })
+    .await
+    .map_err(|e| ServerError::Internal(format!("AgentSonar export join error: {}", e)))?
+    .map_err(|e| ServerError::Internal(format!("AgentSonar export error: {}", e)))?;
+    let val = serde_json::to_value(rules)
+        .map_err(|e| ServerError::Internal(format!("AgentSonar export serialize error: {}", e)))?;
+    Ok(Json(val))
+}
+
+pub async fn post_agentsonar_import(
+    State(state): State<Arc<ServerState>>,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<AgentSonarImportRequest>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let _auth = crate::auth::verify_control_plane_auth(
+        &state,
+        &headers,
+        req.token.as_deref(),
+        req.caller_pid,
+        connect_info.as_ref(),
+        "/api/agentsonar/import",
+    )?;
+
+    let ruleset = req.ruleset;
+    let agents_len = ruleset.agents.len();
+    let noise_len = ruleset.noise_domains.len();
+    tokio::task::spawn_blocking(move || {
+        killswitch_telemetry::global_agentsonar_engine().import_ruleset(&ruleset)
+    })
+    .await
+    .map_err(|e| ServerError::Internal(format!("AgentSonar import join error: {}", e)))?
+    .map_err(|e| ServerError::Validation(e.to_string()))?;
+
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "imported_agents": agents_len,
+        "imported_noise_domains": noise_len,
+    })))
+}
+
+pub async fn get_agentsonar_osquery_schema() -> Result<Json<serde_json::Value>, ServerError> {
+    let engine = killswitch_telemetry::global_agentsonar_engine();
+    let schema =
+        killswitch_telemetry::generate_osquery_atc_schema(&engine.db_path().to_string_lossy());
+    Ok(Json(schema))
+}
+
+pub async fn post_agentsonar_sample(
+    State(state): State<Arc<ServerState>>,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let _auth = crate::auth::verify_control_plane_auth(
+        &state,
+        &headers,
+        None,
+        None,
+        connect_info.as_ref(),
+        "/api/agentsonar/sample",
+    )?;
+
+    let flushed = tokio::task::spawn_blocking(|| {
+        killswitch_telemetry::global_agentsonar_engine().sample_live_host_flows_once(false)
+    })
+    .await
+    .map_err(|e| ServerError::Internal(format!("AgentSonar sample join error: {}", e)))?
+    .map_err(|e| ServerError::Internal(format!("AgentSonar sample error: {}", e)))?;
+
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "flows_flushed": flushed,
+    })))
+}

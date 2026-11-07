@@ -187,6 +187,10 @@ impl UnifiedRuntime {
         let arm_registry = Arc::new(ArmRingRegistry::new(&octopus_seed));
         let event_correlator = Arc::new(EventCorrelator::default());
         let phaselock_manager = Arc::new(PhaseLockManager::default());
+        if std::env::var("KILLSWITCH_SELF_DIAGNOSTIC").is_err() {
+            let _ =
+                killswitch_telemetry::global_agentsonar_engine().start_background_collector(false);
+        }
 
         info!("🛡️ [LOADER] Booting Phase 4: LangGraph Orchestrator & BLAKE3 Checkpointer");
         let orch_config = OrchestratorConfig {

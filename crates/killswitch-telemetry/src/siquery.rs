@@ -131,6 +131,11 @@ impl SiqueryEngine {
     pub fn list_tables() -> &'static [&'static str] {
         &[
             "agent_interceptions",
+            "agentsonar_browser_procs",
+            "agentsonar_events",
+            "agentsonar_heuristics",
+            "agentsonar_known_agents",
+            "agentsonar_noise_domains",
             "arp_cache",
             "authenticodes",
             "autoruns",
@@ -623,6 +628,29 @@ impl SiqueryEngine {
 
         CREATE VIEW IF NOT EXISTS live_file_events AS SELECT * FROM file_events;
 
+        CREATE TABLE IF NOT EXISTS agentsonar_events (
+            timestamp INTEGER, pid INTEGER, proc TEXT, cmdline TEXT, domain TEXT,
+            remote_ip TEXT, remote_port INTEGER, source TEXT, bytes_in INTEGER, bytes_out INTEGER,
+            packets_in INTEGER, packets_out INTEGER, duration_ms INTEGER, programmatic INTEGER,
+            ai_score REAL, agent TEXT, is_noise INTEGER
+        );
+
+        CREATE TABLE IF NOT EXISTS agentsonar_known_agents (
+            agent TEXT, proc_pattern TEXT, domain_pattern TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS agentsonar_noise_domains (
+            domain TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS agentsonar_browser_procs (
+            proc_substring TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS agentsonar_heuristics (
+            id INTEGER, config_json TEXT
+        );
+
         CREATE TABLE IF NOT EXISTS edr_threats (
             threat_id TEXT, timestamp TEXT, name TEXT, severity TEXT, process_name TEXT, pid INTEGER, action TEXT, hash TEXT
         );
@@ -688,6 +716,11 @@ impl SiqueryEngine {
         let need_exec_events = is_metadata || lower.contains("exec_events");
         let need_circumvention = is_metadata || lower.contains("circumvention_events");
         let need_dlp = is_metadata || lower.contains("dlp_semantic_events");
+        let need_agentsonar_events = is_metadata || lower.contains("agentsonar_events");
+        let need_agentsonar_agents = is_metadata || lower.contains("agentsonar_known_agents");
+        let need_agentsonar_noise = is_metadata || lower.contains("agentsonar_noise_domains");
+        let need_agentsonar_browsers = is_metadata || lower.contains("agentsonar_browser_procs");
+        let need_agentsonar_heuristics = is_metadata || lower.contains("agentsonar_heuristics");
 
         if need_processes {
             Self::populate_processes(tx, sys)?;
@@ -801,6 +834,21 @@ impl SiqueryEngine {
         }
         if need_dlp {
             Self::populate_dlp_semantic_events(tx)?;
+        }
+        if need_agentsonar_events
+            || need_agentsonar_agents
+            || need_agentsonar_noise
+            || need_agentsonar_browsers
+            || need_agentsonar_heuristics
+        {
+            Self::populate_agentsonar_tables(
+                tx,
+                need_agentsonar_events,
+                need_agentsonar_agents,
+                need_agentsonar_noise,
+                need_agentsonar_browsers,
+                need_agentsonar_heuristics,
+            )?;
         }
 
         Ok(())
@@ -1940,6 +1988,100 @@ impl SiqueryEngine {
         Ok(())
     }
 
+    fn populate_agentsonar_tables(
+        tx: &Transaction,
+        need_events: bool,
+        need_agents: bool,
+        need_noise: bool,
+        need_browsers: bool,
+        need_heuristics: bool,
+    ) -> Result<(), String> {
+        let engine = crate::agentsonar::global_agentsonar_engine();
+        if need_events {
+            if let Ok(events) = engine.list_events(2000) {
+                let mut stmt = tx
+                    .prepare_cached(
+                        "INSERT INTO agentsonar_events (timestamp, pid, proc, cmdline, domain, \
+                         remote_ip, remote_port, source, bytes_in, bytes_out, packets_in, \
+                         packets_out, duration_ms, programmatic, ai_score, agent, is_noise) \
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    )
+                    .map_err(|e| e.to_string())?;
+                for ev in events {
+                    stmt.execute(rusqlite::params![
+                        ev.timestamp as i64,
+                        ev.pid as i64,
+                        ev.proc_name,
+                        ev.cmdline,
+                        ev.domain,
+                        ev.remote_ip,
+                        ev.remote_port as i64,
+                        ev.source,
+                        ev.bytes_in as i64,
+                        ev.bytes_out as i64,
+                        ev.packets_in as i64,
+                        ev.packets_out as i64,
+                        ev.duration_ms as i64,
+                        i64::from(ev.programmatic),
+                        ev.ai_score,
+                        ev.agent,
+                        i64::from(ev.is_noise),
+                    ])
+                    .map_err(|e| e.to_string())?;
+                }
+            }
+        }
+
+        if need_agents || need_noise || need_browsers || need_heuristics {
+            if let Ok(rules) = engine.load_rules() {
+                if need_agents {
+                    let mut stmt = tx
+                        .prepare_cached(
+                            "INSERT INTO agentsonar_known_agents (agent, proc_pattern, domain_pattern) \
+                             VALUES (?, ?, ?)",
+                        )
+                        .map_err(|e| e.to_string())?;
+                    for a in &rules.agents {
+                        stmt.execute(rusqlite::params![a.agent, a.proc_pattern, a.domain_pattern,])
+                            .map_err(|e| e.to_string())?;
+                    }
+                }
+                if need_noise {
+                    let mut stmt = tx
+                        .prepare_cached("INSERT INTO agentsonar_noise_domains (domain) VALUES (?)")
+                        .map_err(|e| e.to_string())?;
+                    let mut sorted_noise: Vec<&String> = rules.noise_domains.iter().collect();
+                    sorted_noise.sort();
+                    for dom in sorted_noise {
+                        stmt.execute(rusqlite::params![dom])
+                            .map_err(|e| e.to_string())?;
+                    }
+                }
+                if need_browsers {
+                    let mut stmt = tx
+                        .prepare_cached(
+                            "INSERT INTO agentsonar_browser_procs (proc_substring) VALUES (?)",
+                        )
+                        .map_err(|e| e.to_string())?;
+                    for b in &rules.non_programmatic_procs {
+                        stmt.execute(rusqlite::params![b])
+                            .map_err(|e| e.to_string())?;
+                    }
+                }
+                if need_heuristics {
+                    if let Ok(cfg_json) = serde_json::to_string(&rules.heuristics) {
+                        tx.execute(
+                            "INSERT INTO agentsonar_heuristics (id, config_json) VALUES (1, ?)",
+                            rusqlite::params![cfg_json],
+                        )
+                        .map_err(|e| e.to_string())?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn populate_dlp_semantic_events(tx: &Transaction) -> Result<(), String> {
         let mut stmt = tx
             .prepare_cached(
@@ -2073,6 +2215,39 @@ impl SiqueryEngine {
                     "mitre_technique": "T1059",
                     "details": format!("Active LLM inference socket detected on port {}", port),
                     "action": "audited_inference_socket"
+                }));
+            }
+        }
+
+        // Sweep 1D: Dynamic AgentSonar Unclassified Shadow-AI Streaming Flows
+        if let Ok(rows) = self.execute_query(
+            "SELECT pid, proc, cmdline, domain, remote_ip, remote_port, ai_score \
+             FROM agentsonar_events \
+             WHERE agent = '' AND is_noise = 0 AND ai_score >= 0.70 \
+             LIMIT 10;",
+        ) {
+            for row in rows {
+                let pid = row.get("pid").and_then(|v| v.as_i64()).unwrap_or(0);
+                let proc_name = row
+                    .get("proc")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let domain = row.get("domain").and_then(|v| v.as_str()).unwrap_or("");
+                let score = row.get("ai_score").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                anomalies.push(serde_json::json!({
+                    "sweep": "agentsonar_shadow_ai",
+                    "severity": "HIGH",
+                    "pid": pid,
+                    "name": proc_name,
+                    "domain": domain,
+                    "ai_score": score,
+                    "mitre_tactic": "TA0010",
+                    "mitre_technique": "T1041",
+                    "details": format!(
+                        "Shadow AI SSE flow shape detected for '{}' -> '{}' (ai_score={:.2})",
+                        proc_name, domain, score
+                    ),
+                    "action": "flagged_shadow_ai_flow"
                 }));
             }
         }

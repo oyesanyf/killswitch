@@ -19,5 +19,7 @@ dist/*
 !dist/SHA256SUMS.txt
 rate_limit_released_allowlist.json
 crates/killswitch-server/rate_limit_released_allowlist.json
+data/
+*agentsonar*.db*
 
 

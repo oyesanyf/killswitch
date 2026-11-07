@@ -383,6 +383,88 @@ pub fn build_router(state: Arc<ServerState>) -> Router {
             "/api/siquery/protection-sweep",
             post(handlers::post_siquery_protect_sweep),
         )
+        // 21. Dynamic AgentSonar SQLite WAL Network Traffic-Shape & Shadow-AI Triage
+        .route("/agentsonar/status", get(handlers::get_agentsonar_status))
+        .route(
+            "/api/agentsonar/status",
+            get(handlers::get_agentsonar_status),
+        )
+        .route("/agentsonar/events", get(handlers::get_agentsonar_events))
+        .route(
+            "/api/agentsonar/events",
+            get(handlers::get_agentsonar_events),
+        )
+        .route(
+            "/agentsonar/agents",
+            get(handlers::get_agentsonar_agents).post(handlers::post_agentsonar_agents),
+        )
+        .route(
+            "/api/agentsonar/agents",
+            get(handlers::get_agentsonar_agents).post(handlers::post_agentsonar_agents),
+        )
+        .route(
+            "/agentsonar/ignore",
+            get(handlers::get_agentsonar_ignore).post(handlers::post_agentsonar_ignore),
+        )
+        .route(
+            "/api/agentsonar/ignore",
+            get(handlers::get_agentsonar_ignore).post(handlers::post_agentsonar_ignore),
+        )
+        .route(
+            "/agentsonar/browsers",
+            get(handlers::get_agentsonar_browsers).post(handlers::post_agentsonar_browsers),
+        )
+        .route(
+            "/api/agentsonar/browsers",
+            get(handlers::get_agentsonar_browsers).post(handlers::post_agentsonar_browsers),
+        )
+        .route(
+            "/agentsonar/heuristics",
+            get(handlers::get_agentsonar_heuristics).post(handlers::post_agentsonar_heuristics),
+        )
+        .route(
+            "/api/agentsonar/heuristics",
+            get(handlers::get_agentsonar_heuristics).post(handlers::post_agentsonar_heuristics),
+        )
+        .route(
+            "/agentsonar/triage",
+            get(handlers::get_agentsonar_triage).post(handlers::post_agentsonar_triage),
+        )
+        .route(
+            "/api/agentsonar/triage",
+            get(handlers::get_agentsonar_triage).post(handlers::post_agentsonar_triage),
+        )
+        .route(
+            "/agentsonar/classify",
+            post(handlers::post_agentsonar_classify),
+        )
+        .route(
+            "/api/agentsonar/classify",
+            post(handlers::post_agentsonar_classify),
+        )
+        .route("/agentsonar/export", get(handlers::get_agentsonar_export))
+        .route(
+            "/api/agentsonar/export",
+            get(handlers::get_agentsonar_export),
+        )
+        .route("/agentsonar/import", post(handlers::post_agentsonar_import))
+        .route(
+            "/api/agentsonar/import",
+            post(handlers::post_agentsonar_import),
+        )
+        .route(
+            "/agentsonar/osquery-schema",
+            get(handlers::get_agentsonar_osquery_schema),
+        )
+        .route(
+            "/api/agentsonar/osquery-schema",
+            get(handlers::get_agentsonar_osquery_schema),
+        )
+        .route("/agentsonar/sample", post(handlers::post_agentsonar_sample))
+        .route(
+            "/api/agentsonar/sample",
+            post(handlers::post_agentsonar_sample),
+        )
         // Middleware Layers (applied bottom-up)
         .layer(axum::middleware::from_fn(middleware::rate_limit_middleware))
         .layer(middleware::cors_layer())
