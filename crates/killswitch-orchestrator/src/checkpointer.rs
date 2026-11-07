@@ -4,12 +4,12 @@
 //! (`DurableFileCheckpointer`) and across multi-node Raft + Valkey AOF consensus clusters
 //! (`DistributedConsensusCheckpointer`) with mandatory BLAKE3 cryptographic trace chain verification.
 
-use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
 use async_trait::async_trait;
 use killswitch_telemetry::distributed_consensus::{global_consensus_cluster, ConsensusCommand};
 use killswitch_types::errors::{KillSwitchError, Result};
 use killswitch_types::graph::{KillSwitchGraphState, StateCheckpointer};
+use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Durable filesystem-backed checkpointer with atomic rename, BLAKE3 verification,
 /// and automatic replication into the multi-node Raft/Valkey consensus cluster.
@@ -26,7 +26,8 @@ impl DurableFileCheckpointer {
     }
 
     fn checkpoint_path(&self, incident_id: &str) -> PathBuf {
-        self.storage_dir.join(format!("checkpoint_{}.json", incident_id))
+        self.storage_dir
+            .join(format!("checkpoint_{}.json", incident_id))
     }
 }
 

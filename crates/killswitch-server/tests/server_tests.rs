@@ -1,8 +1,8 @@
 //! In-memory and integration tests for `killswitch-server`.
 
-use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use std::sync::Arc;
 use tower::ServiceExt;
 
 async fn body_to_bytes(body: axum::body::Body) -> axum::body::Bytes {
@@ -210,9 +210,13 @@ async fn test_server_dlp_lineage_seed_and_evaluate() {
     assert_eq!(resp.status(), StatusCode::OK);
 
     // Manually register process reading file to taint it
-    let file_key = killswitch_telemetry::otel_lineage::FileKey::from_path_or_synthetic("C:\\secrets\\intel.docx");
+    let file_key = killswitch_telemetry::otel_lineage::FileKey::from_path_or_synthetic(
+        "C:\\secrets\\intel.docx",
+    );
     let proc_key = killswitch_telemetry::otel_lineage::ProcessKey::new(8812, 1000, "curl.exe");
-    state.lineage_engine.on_process_create(None, proc_key, "curl.exe");
+    state
+        .lineage_engine
+        .on_process_create(None, proc_key, "curl.exe");
     state.lineage_engine.on_file_read(proc_key, file_key);
 
     // 2. POST /lineage/evaluate
@@ -274,16 +278,51 @@ fn test_zero_os_subprocess_spawning_in_server() {
 
     for path in &files {
         let content = std::fs::read_to_string(path).unwrap();
-        assert!(!content.contains("Command::new(\"netsh"), "Forbidden netsh command in {:?}", path);
-        assert!(!content.contains("Command::new(\"iptables"), "Forbidden iptables command in {:?}", path);
-        assert!(!content.contains("Command::new(\"nft"), "Forbidden nft command in {:?}", path);
-        assert!(!content.contains("Command::new(\"taskkill"), "Forbidden taskkill command in {:?}", path);
-        assert!(!content.contains("Command::new(\"kill"), "Forbidden kill command in {:?}", path);
-        assert!(!content.contains("Command::new(\"powershell"), "Forbidden powershell command in {:?}", path);
-        assert!(!content.contains("Command::new(\"cmd"), "Forbidden cmd command in {:?}", path);
-        assert!(!content.contains("Command::new(\"sc.exe"), "Forbidden sc.exe command in {:?}", path);
+        assert!(
+            !content.contains("Command::new(\"netsh"),
+            "Forbidden netsh command in {:?}",
+            path
+        );
+        assert!(
+            !content.contains("Command::new(\"iptables"),
+            "Forbidden iptables command in {:?}",
+            path
+        );
+        assert!(
+            !content.contains("Command::new(\"nft"),
+            "Forbidden nft command in {:?}",
+            path
+        );
+        assert!(
+            !content.contains("Command::new(\"taskkill"),
+            "Forbidden taskkill command in {:?}",
+            path
+        );
+        assert!(
+            !content.contains("Command::new(\"kill"),
+            "Forbidden kill command in {:?}",
+            path
+        );
+        assert!(
+            !content.contains("Command::new(\"powershell"),
+            "Forbidden powershell command in {:?}",
+            path
+        );
+        assert!(
+            !content.contains("Command::new(\"cmd"),
+            "Forbidden cmd command in {:?}",
+            path
+        );
+        assert!(
+            !content.contains("Command::new(\"sc.exe"),
+            "Forbidden sc.exe command in {:?}",
+            path
+        );
     }
-    assert!(!files.is_empty(), "Must scan at least one .rs file in killswitch-server");
+    assert!(
+        !files.is_empty(),
+        "Must scan at least one .rs file in killswitch-server"
+    );
 }
 
 #[tokio::test]
@@ -358,7 +397,8 @@ async fn test_research_menu_user_approval_gate_and_code_enforcement() {
     let ui_resp = app.clone().oneshot(ui_req).await.unwrap();
     assert_eq!(ui_resp.status(), StatusCode::OK);
     let ui_html = String::from_utf8(body_to_bytes(ui_resp.into_body()).await.to_vec()).unwrap();
-    assert!(ui_html.contains("ArXiv &amp; LangExtract Security Research Menu (Mandatory User Approval Gate)"));
+    assert!(ui_html
+        .contains("ArXiv &amp; LangExtract Security Research Menu (Mandatory User Approval Gate)"));
     assert!(ui_html.contains("approveSelectedResearch('approve', this)"));
 
     // 2. Discover/stage a new candidate in PendingApproval
@@ -381,7 +421,10 @@ async fn test_research_menu_user_approval_gate_and_code_enforcement() {
     let menu: ResearchMenuResponse =
         serde_json::from_slice(&body_to_bytes(disc_resp.into_body()).await).unwrap();
     assert!(menu.user_approval_required);
-    assert!(menu.candidates.iter().any(|c| c.arxiv_id == "2610.77777" && c.status == "PendingApproval"));
+    assert!(menu
+        .candidates
+        .iter()
+        .any(|c| c.arxiv_id == "2610.77777" && c.status == "PendingApproval"));
 
     // 3. Approve the staged candidate via POST /api/research/approve
     let approve_body = serde_json::json!({
@@ -402,7 +445,10 @@ async fn test_research_menu_user_approval_gate_and_code_enforcement() {
         serde_json::from_slice(&body_to_bytes(app_resp.into_body()).await).unwrap();
     assert!(app_res.success);
     assert_eq!(app_res.candidate.status, "Approved");
-    assert_eq!(app_res.candidate.approved_by.as_deref(), Some("secops_lead"));
+    assert_eq!(
+        app_res.candidate.approved_by.as_deref(),
+        Some("secops_lead")
+    );
     assert!(app_res.candidate.approval_seal_blake3.is_some());
     assert!(app_res.live_probe_verified);
 
@@ -414,9 +460,11 @@ async fn test_research_menu_user_approval_gate_and_code_enforcement() {
         None,
         1,
     );
-    assert!(!verdict.is_clean, "Approved research vector must be actively blocked by Rust code");
+    assert!(
+        !verdict.is_clean,
+        "Approved research vector must be actively blocked by Rust code"
+    );
 }
-
 
 #[tokio::test]
 async fn test_edr_behavioral_lineage_ioa_and_baseline_narrative_endpoints() {
@@ -442,7 +490,10 @@ async fn test_edr_behavioral_lineage_ioa_and_baseline_narrative_endpoints() {
         .unwrap();
     let json_lotl: serde_json::Value = serde_json::from_slice(&body_lotl).unwrap();
     assert_eq!(json_lotl["success"].as_bool(), Some(true));
-    assert!(!json_lotl["narratives_emitted"].as_array().unwrap().is_empty());
+    assert!(!json_lotl["narratives_emitted"]
+        .as_array()
+        .unwrap()
+        .is_empty());
 
     // 2. Trigger 3-anomaly statistical baseline correlation (service account recon + temp unsigned DLL + 3-sigma egress spike)
     let req_base = Request::builder()
@@ -467,7 +518,6 @@ async fn test_edr_behavioral_lineage_ioa_and_baseline_narrative_endpoints() {
     assert!(final_nar["composite_risk_score"].as_f64().unwrap() >= 0.85);
 }
 
-
 #[tokio::test]
 async fn test_oshoosiclaw_research_accuracy_suite_and_4_gate_endpoints() {
     let state = setup_test_server_state();
@@ -482,13 +532,18 @@ async fn test_oshoosiclaw_research_accuracy_suite_and_4_gate_endpoints() {
         .unwrap();
     let resp_acc = app.clone().oneshot(req_acc).await.unwrap();
     assert_eq!(resp_acc.status(), StatusCode::OK);
-    let body_acc = axum::body::to_bytes(resp_acc.into_body(), usize::MAX).await.unwrap();
+    let body_acc = axum::body::to_bytes(resp_acc.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let json_acc: serde_json::Value = serde_json::from_slice(&body_acc).unwrap();
     assert_eq!(json_acc["status"].as_str(), Some("verified"));
     assert_eq!(json_acc["true_positive_rate_pct"].as_f64(), Some(100.0));
     assert_eq!(json_acc["false_positive_rate_pct"].as_f64(), Some(0.0));
     assert_eq!(json_acc["byte_exact_parity"].as_bool(), Some(true));
-    assert_eq!(json_acc["llm_fusion_consensus_passed"].as_bool(), Some(true));
+    assert_eq!(
+        json_acc["llm_fusion_consensus_passed"].as_bool(),
+        Some(true)
+    );
     assert!(json_acc["total_rules_tested"].as_u64().unwrap_or(0) >= 4);
 
     // 2. POST /api/research/novelty-check
@@ -505,7 +560,9 @@ async fn test_oshoosiclaw_research_accuracy_suite_and_4_gate_endpoints() {
         .unwrap();
     let resp_nov = app.clone().oneshot(req_nov).await.unwrap();
     assert_eq!(resp_nov.status(), StatusCode::OK);
-    let body_nov = axum::body::to_bytes(resp_nov.into_body(), usize::MAX).await.unwrap();
+    let body_nov = axum::body::to_bytes(resp_nov.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let json_nov: serde_json::Value = serde_json::from_slice(&body_nov).unwrap();
     assert_eq!(json_nov["novel_count"].as_u64(), Some(1));
     assert_eq!(json_nov["already_implemented_count"].as_u64(), Some(2));
@@ -535,12 +592,16 @@ async fn test_oshoosiclaw_research_accuracy_suite_and_4_gate_endpoints() {
         .unwrap();
     let resp_val = app.clone().oneshot(req_val).await.unwrap();
     assert_eq!(resp_val.status(), StatusCode::OK);
-    let body_val = axum::body::to_bytes(resp_val.into_body(), usize::MAX).await.unwrap();
+    let body_val = axum::body::to_bytes(resp_val.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let json_val: serde_json::Value = serde_json::from_slice(&body_val).unwrap();
     assert_eq!(json_val["accepted"].as_bool(), Some(false));
-    assert_eq!(json_val["rejection_code"].as_str(), Some("RejectedOutdatedResearch"));
+    assert_eq!(
+        json_val["rejection_code"].as_str(),
+        Some("RejectedOutdatedResearch")
+    );
 }
-
 
 #[tokio::test]
 async fn test_oshoosiclaw_oso_aws_apc_tamper_and_hitl_endpoints() {
@@ -570,7 +631,9 @@ async fn test_oshoosiclaw_oso_aws_apc_tamper_and_hitl_endpoints() {
         .unwrap();
     let resp_wd = app.clone().oneshot(req_wd).await.unwrap();
     assert_eq!(resp_wd.status(), StatusCode::OK);
-    let body_wd = axum::body::to_bytes(resp_wd.into_body(), usize::MAX).await.unwrap();
+    let body_wd = axum::body::to_bytes(resp_wd.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let json_wd: serde_json::Value = serde_json::from_slice(&body_wd).unwrap();
     assert_eq!(json_wd["iam_policy_invariant_ok"].as_bool(), Some(false));
     assert_eq!(json_wd["kill_switch_engaged"].as_bool(), Some(true));
@@ -594,7 +657,9 @@ async fn test_oshoosiclaw_oso_aws_apc_tamper_and_hitl_endpoints() {
         .unwrap();
     let resp_apc = app.clone().oneshot(req_apc).await.unwrap();
     assert_eq!(resp_apc.status(), StatusCode::OK);
-    let body_apc = axum::body::to_bytes(resp_apc.into_body(), usize::MAX).await.unwrap();
+    let body_apc = axum::body::to_bytes(resp_apc.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let json_apc: serde_json::Value = serde_json::from_slice(&body_apc).unwrap();
     assert_eq!(json_apc["allowed"].as_bool(), Some(true));
 
@@ -617,10 +682,15 @@ async fn test_oshoosiclaw_oso_aws_apc_tamper_and_hitl_endpoints() {
         .unwrap();
     let resp_apc2 = app.clone().oneshot(req_apc2).await.unwrap();
     assert_eq!(resp_apc2.status(), StatusCode::OK);
-    let body_apc2 = axum::body::to_bytes(resp_apc2.into_body(), usize::MAX).await.unwrap();
+    let body_apc2 = axum::body::to_bytes(resp_apc2.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let json_apc2: serde_json::Value = serde_json::from_slice(&body_apc2).unwrap();
     assert_eq!(json_apc2["allowed"].as_bool(), Some(false));
-    assert_eq!(json_apc2["failed_condition"].as_str(), Some("C2_COMPOSITION"));
+    assert_eq!(
+        json_apc2["failed_condition"].as_str(),
+        Some("C2_COMPOSITION")
+    );
 
     // 4. GET /api/tamper-guard/status
     let req_tg = Request::builder()
@@ -630,9 +700,14 @@ async fn test_oshoosiclaw_oso_aws_apc_tamper_and_hitl_endpoints() {
         .unwrap();
     let resp_tg = app.clone().oneshot(req_tg).await.unwrap();
     assert_eq!(resp_tg.status(), StatusCode::OK);
-    let body_tg = axum::body::to_bytes(resp_tg.into_body(), usize::MAX).await.unwrap();
+    let body_tg = axum::body::to_bytes(resp_tg.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let json_tg: serde_json::Value = serde_json::from_slice(&body_tg).unwrap();
-    assert_eq!(json_tg["tamper_guard"]["console_mode_hardened"].as_bool(), Some(true));
+    assert_eq!(
+        json_tg["tamper_guard"]["console_mode_hardened"].as_bool(),
+        Some(true)
+    );
 
     // 5. POST /api/hitl/evaluate (Cognitive Red-Team HITL auto-veto on deceptive credential dump)
     let req_hitl = Request::builder()
@@ -658,7 +733,9 @@ async fn test_oshoosiclaw_oso_aws_apc_tamper_and_hitl_endpoints() {
         .unwrap();
     let resp_hitl = app.clone().oneshot(req_hitl).await.unwrap();
     assert_eq!(resp_hitl.status(), StatusCode::OK);
-    let body_hitl = axum::body::to_bytes(resp_hitl.into_body(), usize::MAX).await.unwrap();
+    let body_hitl = axum::body::to_bytes(resp_hitl.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let json_hitl: serde_json::Value = serde_json::from_slice(&body_hitl).unwrap();
     assert_eq!(json_hitl["auto_vetoed"].as_bool(), Some(true));
 }
@@ -899,7 +976,6 @@ async fn test_cage_pep_endpoints_e2e() {
     assert!(!trace_rep.violations.is_empty());
 }
 
-
 #[tokio::test]
 async fn test_manual_trigger_attribution_webui_reconnect_and_standalone_ui() {
     let state = setup_test_server_state();
@@ -927,7 +1003,11 @@ async fn test_manual_trigger_attribution_webui_reconnect_and_standalone_ui() {
             "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
             "chrome.exe --type=renderer",
         );
-        assert!(eval.is_clean, "Normal multi-socket OS process must remain clean: {}", eval.summary);
+        assert!(
+            eval.is_clean,
+            "Normal multi-socket OS process must remain clean: {}",
+            eval.summary
+        );
     }
 
     // 3. Verify manual engage sets plain-English manual operator trigger attribution
@@ -952,10 +1032,16 @@ async fn test_manual_trigger_attribution_webui_reconnect_and_standalone_ui() {
         .body(Body::empty())
         .unwrap();
     let resp_st = app.clone().oneshot(req_st).await.unwrap();
-    let st: StatusResponse = serde_json::from_slice(&body_to_bytes(resp_st.into_body()).await).unwrap();
+    let st: StatusResponse =
+        serde_json::from_slice(&body_to_bytes(resp_st.into_body()).await).unwrap();
     assert!(st.isolated);
-    assert_eq!(st.trigger_cause, "Manual Operator Disconnect (Turned On Manually by You)");
-    assert!(st.trigger_details.contains("You manually turned on the KillSwitch"));
+    assert_eq!(
+        st.trigger_cause,
+        "Manual Operator Disconnect (Turned On Manually by You)"
+    );
+    assert!(st
+        .trigger_details
+        .contains("You manually turned on the KillSwitch"));
 
     // 4. Verify WebUI Reconnect (/disarm) restores internet and clears trigger cause
     let disarm_body = serde_json::json!({
@@ -978,7 +1064,8 @@ async fn test_manual_trigger_attribution_webui_reconnect_and_standalone_ui() {
         .body(Body::empty())
         .unwrap();
     let resp_st2 = app.oneshot(req_st2).await.unwrap();
-    let st2: StatusResponse = serde_json::from_slice(&body_to_bytes(resp_st2.into_body()).await).unwrap();
+    let st2: StatusResponse =
+        serde_json::from_slice(&body_to_bytes(resp_st2.into_body()).await).unwrap();
     assert!(!st2.isolated);
     assert_eq!(st2.trigger_cause, "None (Host Operational)");
 }
@@ -1012,7 +1099,8 @@ async fn test_insufficient_privileges_server_error_and_webui_script() {
     assert!(killswitch_server::webui::WEBUI_HTML.contains(
         "⚠️ Administrator privileges required to install kernel firewall filters. Please accept the UAC prompt or run KillSwitch as Administrator."
     ));
-    assert!(killswitch_server::webui::WEBUI_HTML.contains("data.error.code === 'INSUFFICIENT_PRIVILEGES'"));
+    assert!(killswitch_server::webui::WEBUI_HTML
+        .contains("data.error.code === 'INSUFFICIENT_PRIVILEGES'"));
 }
 
 #[tokio::test]
@@ -1036,7 +1124,10 @@ async fn test_protocol_catalog_endpoint_and_webui_matrix() {
     assert_eq!(json["iana_protocols_blocked"], 256);
     assert_eq!(json["l2_ethertypes_blocked"], 4);
     assert!(json["total_protocols"].as_u64().unwrap() >= 200);
-    assert_eq!(json["protocols"].as_array().unwrap().len(), json["total_protocols"].as_u64().unwrap() as usize);
+    assert_eq!(
+        json["protocols"].as_array().unwrap().len(),
+        json["total_protocols"].as_u64().unwrap() as usize
+    );
 
     // 2. GET /api/protocol-catalog/domain?domain=1
     let req = Request::builder()
@@ -1051,7 +1142,10 @@ async fn test_protocol_catalog_endpoint_and_webui_matrix() {
     let body_bytes = body_to_bytes(resp.into_body()).await;
     let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
     assert_eq!(json["domain_number"], 1);
-    assert!(json["domain_name"].as_str().unwrap().contains("Classical Network"));
+    assert!(json["domain_name"]
+        .as_str()
+        .unwrap()
+        .contains("Classical Network"));
     assert!(!json["protocols"].as_array().unwrap().is_empty());
 
     // 3. GET /ui contains the interactive 16-Domain Universal Protocol Quarantine Matrix panel
@@ -1072,4 +1166,3 @@ async fn test_protocol_catalog_endpoint_and_webui_matrix() {
     assert!(html.contains("protocol-table-body"));
     assert!(html.contains("/api/protocol-catalog"));
 }
-

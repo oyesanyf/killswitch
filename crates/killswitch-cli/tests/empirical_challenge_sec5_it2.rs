@@ -10,15 +10,14 @@
 //! 6. Root SSH credential paths and Docker socket containment.
 
 use killswitch_telemetry::agent_hooks::{
-    clear_interceptions, evaluate_hook_synchronously, parse_claude_request,
-    parse_cursor_request, parse_mcp_call_request,
+    clear_interceptions, evaluate_hook_synchronously, parse_claude_request, parse_cursor_request,
+    parse_mcp_call_request,
 };
 use killswitch_telemetry::semantic_dlp::{
     RedactXStructuredValidator, SemanticDlpEngine, SemanticEntityKind,
 };
 use killswitch_telemetry::sensitive_paths::{
-    classify_sensitive_system_path, normalize_path_for_inspection,
-    SensitiveCredentialStoreKind,
+    classify_sensitive_system_path, normalize_path_for_inspection, SensitiveCredentialStoreKind,
 };
 
 #[test]
@@ -34,12 +33,16 @@ fn test_challenge_compact_nested_json_dlp_evasion() {
         "Compact nested JSON containing AWS key must be denied by DLP"
     );
     assert!(
-        verdict_aws.entities().iter().any(|e| e.kind == SemanticEntityKind::SecretKey),
+        verdict_aws
+            .entities()
+            .iter()
+            .any(|e| e.kind == SemanticEntityKind::SecretKey),
         "Detected entity must be SecretKey"
     );
 
     // 2. GitHub Token in compact nested JSON
-    let compact_gh = r#"{"provider":{"github":{"pat":"ghp_111111111122222222223333333333444444"}}}"#;
+    let compact_gh =
+        r#"{"provider":{"github":{"pat":"ghp_111111111122222222223333333333444444"}}}"#;
     let verdict_gh = dlp.evaluate_verdict_fail_closed(compact_gh);
     assert!(
         !verdict_gh.is_allow(),
@@ -54,7 +57,10 @@ fn test_challenge_compact_nested_json_dlp_evasion() {
         "Compact nested JSON containing Luhn PAN must be denied by DLP"
     );
     assert!(
-        verdict_pan.entities().iter().any(|e| e.kind == SemanticEntityKind::PaymentCard),
+        verdict_pan
+            .entities()
+            .iter()
+            .any(|e| e.kind == SemanticEntityKind::PaymentCard),
         "Detected entity must be PaymentCard"
     );
 
@@ -66,13 +72,17 @@ fn test_challenge_compact_nested_json_dlp_evasion() {
         "Compact nested JSON containing SSA SSN must be denied by DLP"
     );
     assert!(
-        verdict_ssn.entities().iter().any(|e| e.kind == SemanticEntityKind::PhiMedicalRecord),
+        verdict_ssn
+            .entities()
+            .iter()
+            .any(|e| e.kind == SemanticEntityKind::PhiMedicalRecord),
         "Detected entity must be PhiMedicalRecord"
     );
 
     // 5. HIPAA NPI with clinical context in compact nested JSON
     assert!(RedactXStructuredValidator::npi_valid("1234567893"));
-    let compact_npi = r#"{"clinical_findings":{"hospital":"City Clinic","provider_npi":"1234567893"}}"#;
+    let compact_npi =
+        r#"{"clinical_findings":{"hospital":"City Clinic","provider_npi":"1234567893"}}"#;
     let verdict_npi = dlp.evaluate_verdict_fail_closed(compact_npi);
     assert!(
         !verdict_npi.is_allow(),
@@ -125,7 +135,8 @@ fn test_challenge_compact_arrays_and_mixed_entities() {
     let dlp = SemanticDlpEngine::default();
 
     // Compact array of objects with mixed entity types
-    let compact_array = r#"[{"key":"AKIAIOSFODNN7EXAMPLE"},{"pan":"4532015112830366"},{"ssn":"123-45-6789"}]"#;
+    let compact_array =
+        r#"[{"key":"AKIAIOSFODNN7EXAMPLE"},{"pan":"4532015112830366"},{"ssn":"123-45-6789"}]"#;
     let verdict = dlp.evaluate_verdict_fail_closed(compact_array);
     assert!(
         !verdict.is_allow(),
@@ -209,12 +220,16 @@ fn test_challenge_deal_value_compact_json_and_arguments() {
         "Compact JSON deal value must be restricted or denied by DLP"
     );
     assert!(
-        verdict.entities().iter().any(|e| e.kind == SemanticEntityKind::DealValue),
+        verdict
+            .entities()
+            .iter()
+            .any(|e| e.kind == SemanticEntityKind::DealValue),
         "Entity must be DealValue"
     );
 
     // 2. Large acquisition in nested compact JSON
-    let compact_acq = r#"{"terms":{"acquisition":"Merger","purchase_price":"$45,000,000.00","currency":"USD"}}"#;
+    let compact_acq =
+        r#"{"terms":{"acquisition":"Merger","purchase_price":"$45,000,000.00","currency":"USD"}}"#;
     let verdict_acq = dlp.evaluate_verdict_fail_closed(compact_acq);
     assert!(!verdict_acq.is_allow());
 
@@ -268,7 +283,8 @@ fn test_challenge_sensitive_path_traversal_and_windows_variations() {
             classified,
             Some(SensitiveCredentialStoreKind::UnixShadow),
             "Path traversal variant '{}' (normalized: '{}') must resolve to UnixShadow",
-            path, normalized
+            path,
+            normalized
         );
 
         // PreToolUse gate via MCP
@@ -424,7 +440,8 @@ fn test_challenge_root_ssh_and_docker_socket_containment() {
         })
         .to_string();
 
-        let cursor_req = parse_cursor_request(&cursor_call, "beforeReadFile").expect("parse cursor");
+        let cursor_req =
+            parse_cursor_request(&cursor_call, "beforeReadFile").expect("parse cursor");
         let cursor_decision = evaluate_hook_synchronously(&cursor_req);
         eprintln!(
             "[EMPIRICAL CONTAINMENT PROBE] Cursor beforeReadFile '{}': allowed={}, rationale='{}', layer={:?}",
@@ -443,4 +460,3 @@ fn test_challenge_root_ssh_and_docker_socket_containment() {
         );
     }
 }
-

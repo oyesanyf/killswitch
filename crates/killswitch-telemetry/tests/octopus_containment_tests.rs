@@ -12,7 +12,10 @@ async fn test_t1_f19_01_monotonic_generation_epoch_advancement() {
     assert!(ring.validate_epoch(1).await.is_ok());
 
     // Sever and regenerate -> advances Gen 1 -> Gen 2
-    let next_gen = ring.sever_and_regenerate("Suspicious lateral scan").await.unwrap();
+    let next_gen = ring
+        .sever_and_regenerate("Suspicious lateral scan")
+        .await
+        .unwrap();
     assert_eq!(next_gen, 2);
     assert_eq!(ring.current_generation(), 2);
 
@@ -20,7 +23,11 @@ async fn test_t1_f19_01_monotonic_generation_epoch_advancement() {
     let stale_res = ring.validate_epoch(1).await;
     assert!(matches!(
         stale_res,
-        Err(KillSwitchError::StaleGenerationEpoch { arm_id: 0, expected: 2, presented: 1 })
+        Err(KillSwitchError::StaleGenerationEpoch {
+            arm_id: 0,
+            expected: 2,
+            presented: 1
+        })
     ));
 
     // Presenting valid Gen 2 succeeds
@@ -32,7 +39,9 @@ async fn test_t1_f19_02_surgical_autotomy_and_quarantine() {
     let master_seed = [0x55u8; 32];
     let ring = ArmContainmentRing::new(1, ArmRole::AccountingLedgerWrite, 1, &master_seed);
 
-    ring.sever("Anomalous privilege escalation attempt").await.unwrap();
+    ring.sever("Anomalous privilege escalation attempt")
+        .await
+        .unwrap();
 
     // While severed, validation returns ArmQuarantined error
     let res = ring.validate_epoch(1).await;
@@ -67,7 +76,8 @@ async fn test_t1_f19_03_capability_token_constant_time_verification() {
 
     // Tampered signature fails HMAC check
     let mut bad_sig = token.clone();
-    bad_sig.signature_hex = "0000000000000000000000000000000000000000000000000000000000000000".to_string();
+    bad_sig.signature_hex =
+        "0000000000000000000000000000000000000000000000000000000000000000".to_string();
     let sig_res = ring.verify_capability(&bad_sig).await;
     assert!(matches!(
         sig_res,
@@ -102,8 +112,16 @@ async fn test_t1_f19_04_fail_closed_all_18_arm_roles() {
 
     for role in &all_roles {
         let (tools, prefixes) = ArmContainmentRing::default_permissions_for_role(role);
-        assert!(!tools.is_empty(), "Role {:?} must have non-empty tools", role);
-        assert!(!prefixes.is_empty(), "Role {:?} must have non-empty prefixes", role);
+        assert!(
+            !tools.is_empty(),
+            "Role {:?} must have non-empty tools",
+            role
+        );
+        assert!(
+            !prefixes.is_empty(),
+            "Role {:?} must have non-empty prefixes",
+            role
+        );
     }
 }
 

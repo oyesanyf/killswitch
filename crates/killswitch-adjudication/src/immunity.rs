@@ -53,7 +53,10 @@ pub enum LineageImmunityVerdict {
 
 impl LineageImmunityVerdict {
     pub fn is_immune(&self) -> bool {
-        matches!(self, Self::ImmuneTarget { .. } | Self::ImmuneAncestor { .. })
+        matches!(
+            self,
+            Self::ImmuneTarget { .. } | Self::ImmuneAncestor { .. }
+        )
     }
 
     pub fn to_veto_reason(&self) -> Option<VetoReason> {
@@ -75,20 +78,16 @@ fn is_blanket_immunity_denied(name: &str) -> bool {
 
     // Extract first token (handling command lines such as "sudo -n id" or "wsl -u root")
     let first_token = trimmed.split_whitespace().next().unwrap_or(trimmed);
-    let base = first_token.rsplit(['\\', '/']).next().unwrap_or(first_token);
+    let base = first_token
+        .rsplit(['\\', '/'])
+        .next()
+        .unwrap_or(first_token);
     let name_lc = base.to_ascii_lowercase();
     let name_no_exe = name_lc.trim_end_matches(".exe");
 
     if matches!(
         name_no_exe,
-        "wsl"
-            | "wslservice"
-            | "wslhost"
-            | "sudo"
-            | "su"
-            | "doas"
-            | "pkexec"
-            | "runas"
+        "wsl" | "wslservice" | "wslhost" | "sudo" | "su" | "doas" | "pkexec" | "runas"
     ) {
         return true;
     }
@@ -147,10 +146,7 @@ pub fn inspect_process_lineage(target_pid: u32, proc_name: Option<&str>) -> Line
 
         depth += 1;
 
-        let parent_name = sys
-            .process(parent_pid_obj)
-            .map(|p| p.name())
-            .unwrap_or("");
+        let parent_name = sys.process(parent_pid_obj).map(|p| p.name()).unwrap_or("");
 
         // Check if ancestor is an agent runtime or developer tool/shell
         if is_developer_or_agent_runtime(parent_name) {
@@ -219,7 +215,10 @@ mod tests {
     fn test_critical_system_pid_direct_immunity() {
         let verdict = inspect_process_lineage(4, Some("system"));
         assert!(verdict.is_immune());
-        assert_eq!(verdict.to_veto_reason(), Some(VetoReason::CriticalSystemPid));
+        assert_eq!(
+            verdict.to_veto_reason(),
+            Some(VetoReason::CriticalSystemPid)
+        );
 
         let verdict_self = inspect_process_lineage(std::process::id(), Some("killswitch-test"));
         assert!(verdict_self.is_immune());
@@ -258,7 +257,10 @@ mod tests {
                 "Expected '{}' to be protected by 5-layer ancestry immunity",
                 app
             );
-            assert_eq!(verdict.to_veto_reason(), Some(VetoReason::CriticalSystemPid));
+            assert_eq!(
+                verdict.to_veto_reason(),
+                Some(VetoReason::CriticalSystemPid)
+            );
         }
     }
 

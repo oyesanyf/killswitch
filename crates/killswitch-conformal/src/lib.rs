@@ -14,11 +14,7 @@ pub struct CalibratedSource {
 }
 
 impl CalibratedSource {
-    pub fn new(
-        mean: Array1<f64>,
-        precision_matrix: Array2<f64>,
-        mut cal_scores: Vec<f64>,
-    ) -> Self {
+    pub fn new(mean: Array1<f64>, precision_matrix: Array2<f64>, mut cal_scores: Vec<f64>) -> Self {
         cal_scores.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         Self {
             mean,
@@ -75,7 +71,10 @@ impl MultiSourceCalibration {
         pca_mean: Option<Array1<f64>>,
         sources: Vec<CalibratedSource>,
     ) -> Self {
-        assert!(!sources.is_empty(), "At least one known source is required.");
+        assert!(
+            !sources.is_empty(),
+            "At least one known source is required."
+        );
         Self {
             pca_projection,
             pca_mean,
@@ -138,22 +137,30 @@ impl MultiSourceCalibration {
 
         // Source 1: Persona / Roleplay Hijack
         let mut m1 = Array1::zeros(d);
-        if d > 0 { m1[0] = 1.5; }
+        if d > 0 {
+            m1[0] = 1.5;
+        }
         let src1 = CalibratedSource::new(m1, id_d.clone(), gen_scores(1.2));
 
         // Source 2: Adversarial Token Suffix
         let mut m2 = Array1::zeros(d);
-        if d > 1 { m2[1] = 2.0; }
+        if d > 1 {
+            m2[1] = 2.0;
+        }
         let src2 = CalibratedSource::new(m2, id_d.clone(), gen_scores(1.5));
 
         // Source 3: Encoding Polyglots
         let mut m3 = Array1::zeros(d);
-        if d > 2 { m3[2] = 2.5; }
+        if d > 2 {
+            m3[2] = 2.5;
+        }
         let src3 = CalibratedSource::new(m3, id_d.clone(), gen_scores(1.8));
 
         // Source 4: Recursive Agentic Escalation
         let mut m4 = Array1::zeros(d);
-        for i in 0..d { m4[i] = 1.0; }
+        for i in 0..d {
+            m4[i] = 1.0;
+        }
         let src4 = CalibratedSource::new(m4, id_d, gen_scores(2.0));
 
         Self::new(proj, None, vec![src1, src2, src3, src4])
@@ -651,11 +658,7 @@ mod tests {
     fn test_sr_detector_dkw_escalation() {
         let pca = Array2::eye(2);
         let cal_scores: Vec<f64> = (1..=100).map(|i| i as f64 * 0.05).collect();
-        let src = CalibratedSource::new(
-            array![0.0, 0.0],
-            Array2::eye(2),
-            cal_scores,
-        );
+        let src = CalibratedSource::new(array![0.0, 0.0], Array2::eye(2), cal_scores);
         let cal = MultiSourceCalibration::new(pca, None, vec![src]);
 
         let mut sr = SrDetector::new(cal, 0.05, true, 0.5, 5.0);
@@ -717,13 +720,16 @@ mod tests {
         assert_eq!(persist.source_count(), 4);
         assert_eq!(sr.source_count(), 4);
 
-        let count_after = persist.register_text_anchor("zombie agent long-term memory persistence attack", 1.6);
+        let count_after =
+            persist.register_text_anchor("zombie agent long-term memory persistence attack", 1.6);
         assert_eq!(count_after, 5);
         // Duplicate anchor should be deduplicated
-        let count_dup = persist.register_text_anchor("zombie agent long-term memory persistence attack", 1.6);
+        let count_dup =
+            persist.register_text_anchor("zombie agent long-term memory persistence attack", 1.6);
         assert_eq!(count_dup, 5);
 
-        let sr_count = sr.register_text_anchor("zombie agent long-term memory persistence attack", 1.6);
+        let sr_count =
+            sr.register_text_anchor("zombie agent long-term memory persistence attack", 1.6);
         assert_eq!(sr_count, 5);
     }
 }

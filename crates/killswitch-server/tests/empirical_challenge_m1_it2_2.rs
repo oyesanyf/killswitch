@@ -15,7 +15,6 @@
 //!    - Sealed envelope Ed25519 signature tamper detection via `load_and_verify()`.
 //! 3. Trace Conformance Verification across all 8 tiers + ALLOW via `scripts/check_trace_conformance.py`.
 
-use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -24,6 +23,7 @@ use chrono::Utc;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier};
 use rand::rngs::OsRng;
 use serde_json::json;
+use std::sync::Arc;
 use tempfile::tempdir;
 use tower::ServiceExt;
 
@@ -47,8 +47,7 @@ fn setup_test_server_state() -> Arc<ServerState> {
         "test_master_token_0123456789abcdef0123456789abcdef",
     );
     let temp_dir = tempdir().unwrap();
-    let containment =
-        Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
+    let containment = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
     Arc::new(ServerState::with_defaults(containment))
 }
 
@@ -81,7 +80,10 @@ async fn test_adversarial_conformal_benign_vectors_produce_nontrivial_pvalues() 
     let body = body_to_bytes(resp.into_body()).await;
     let val_resp: CageConformalValidateResponse = serde_json::from_slice(&body).unwrap();
 
-    assert!(val_resp.admitted, "Benign scalar score 0.05 must be admitted");
+    assert!(
+        val_resp.admitted,
+        "Benign scalar score 0.05 must be admitted"
+    );
     assert!(
         val_resp.p_value > 0.05,
         "P-value must exceed alpha=0.05, got {}",
@@ -110,7 +112,11 @@ async fn test_adversarial_conformal_benign_vectors_produce_nontrivial_pvalues() 
     let val_resp2: CageConformalValidateResponse = serde_json::from_slice(&body2).unwrap();
 
     assert!(val_resp2.admitted, "Conforming score 0.5 must be admitted");
-    assert!(val_resp2.p_value > 0.05, "P-value must exceed alpha, got {}", val_resp2.p_value);
+    assert!(
+        val_resp2.p_value > 0.05,
+        "P-value must exceed alpha, got {}",
+        val_resp2.p_value
+    );
     assert_eq!(val_resp2.voter_consensus, "CONSENSUS_ALLOW");
 
     // Vector 3: Multi-dimensional benign representation vector at calibrated centroid
@@ -133,7 +139,10 @@ async fn test_adversarial_conformal_benign_vectors_produce_nontrivial_pvalues() 
     let body3 = body_to_bytes(resp3.into_body()).await;
     let val_resp3: CageConformalValidateResponse = serde_json::from_slice(&body3).unwrap();
 
-    assert!(val_resp3.admitted, "Calibrated multivariate vector must be admitted");
+    assert!(
+        val_resp3.admitted,
+        "Calibrated multivariate vector must be admitted"
+    );
     assert!(
         val_resp3.p_value > 0.05,
         "Multivariate benign p-value must exceed alpha=0.05, got {}",
@@ -267,7 +276,8 @@ async fn test_adversarial_conformal_responses_are_not_hardcoded_dummy_constants(
             assert!(
                 (val_resp.p_value - dummy).abs() > 1e-4,
                 "Observed p_value {} matched legacy hardcoded constant {}",
-                val_resp.p_value, dummy
+                val_resp.p_value,
+                dummy
             );
         }
 
@@ -279,7 +289,10 @@ async fn test_adversarial_conformal_responses_are_not_hardcoded_dummy_constants(
         assert!(
             observed_p_values[i] >= observed_p_values[i + 1],
             "P-values must decrease monotonically with score: p[{}]={} vs p[{}]={}",
-            i, observed_p_values[i], i + 1, observed_p_values[i + 1]
+            i,
+            observed_p_values[i],
+            i + 1,
+            observed_p_values[i + 1]
         );
     }
 
@@ -341,7 +354,11 @@ async fn test_adversarial_conformal_signature_verification_and_replay_attack() {
     let sig = Signature::from_bytes(&sig_arr);
 
     assert!(
-        state.signing_key.verifying_key().verify(&preimage, &sig).is_ok(),
+        state
+            .signing_key
+            .verifying_key()
+            .verify(&preimage, &sig)
+            .is_ok(),
         "Conformal validation response signature must cryptographically verify"
     );
 
@@ -499,7 +516,11 @@ fn test_journal_tamper_detection_intermediate_record_mutations() {
     {
         let mut parsed: serde_json::Value = serde_json::from_str(&original_json).unwrap();
         parsed["payload"]["records"][1]["action"] = json!("NOP_ACTION");
-        std::fs::write(&journal_file, serde_json::to_string_pretty(&parsed).unwrap()).unwrap();
+        std::fs::write(
+            &journal_file,
+            serde_json::to_string_pretty(&parsed).unwrap(),
+        )
+        .unwrap();
 
         let reopened = QuarantineJournal::new(
             temp_dir.path().to_path_buf(),
@@ -528,7 +549,11 @@ fn test_journal_tamper_detection_intermediate_record_mutations() {
         let sig = signing_key.sign(&preimage);
         envelope.signature = URL_SAFE_NO_PAD.encode(sig.to_bytes());
 
-        std::fs::write(&journal_file, serde_json::to_string_pretty(&envelope).unwrap()).unwrap();
+        std::fs::write(
+            &journal_file,
+            serde_json::to_string_pretty(&envelope).unwrap(),
+        )
+        .unwrap();
 
         let reopened = QuarantineJournal::new(
             temp_dir.path().to_path_buf(),
@@ -537,7 +562,10 @@ fn test_journal_tamper_detection_intermediate_record_mutations() {
         );
         // Envelope seal is cryptographically valid, but hash chain MUST fail!
         let chain_res = reopened.verify_hash_chain();
-        assert!(chain_res.is_err(), "verify_hash_chain must detect mutated payload_digest");
+        assert!(
+            chain_res.is_err(),
+            "verify_hash_chain must detect mutated payload_digest"
+        );
         let err_msg = chain_res.unwrap_err();
         assert!(
             err_msg.contains("Record hash mismatch at seq 2"),
@@ -551,7 +579,8 @@ fn test_journal_tamper_detection_intermediate_record_mutations() {
     // -------------------------------------------------------------------------
     {
         let mut envelope: SealedJournalEnvelope = serde_json::from_str(&original_json).unwrap();
-        envelope.payload.records[2].prev_hash = "0000000000000000000000000000000000000000000000000000000000000000".to_string();
+        envelope.payload.records[2].prev_hash =
+            "0000000000000000000000000000000000000000000000000000000000000000".to_string();
 
         let payload_val = serde_json::to_value(&envelope.payload).unwrap();
         let canonical = killswitch_telemetry::canonicalize_jcs(&payload_val).unwrap();
@@ -560,7 +589,11 @@ fn test_journal_tamper_detection_intermediate_record_mutations() {
         let sig = signing_key.sign(&preimage);
         envelope.signature = URL_SAFE_NO_PAD.encode(sig.to_bytes());
 
-        std::fs::write(&journal_file, serde_json::to_string_pretty(&envelope).unwrap()).unwrap();
+        std::fs::write(
+            &journal_file,
+            serde_json::to_string_pretty(&envelope).unwrap(),
+        )
+        .unwrap();
 
         let reopened = QuarantineJournal::new(
             temp_dir.path().to_path_buf(),
@@ -568,7 +601,10 @@ fn test_journal_tamper_detection_intermediate_record_mutations() {
             kid.clone(),
         );
         let chain_res = reopened.verify_hash_chain();
-        assert!(chain_res.is_err(), "verify_hash_chain must detect broken prev_hash");
+        assert!(
+            chain_res.is_err(),
+            "verify_hash_chain must detect broken prev_hash"
+        );
         let err_msg = chain_res.unwrap_err();
         assert!(
             err_msg.contains("Prev hash chain broken at seq 3"),
@@ -591,7 +627,11 @@ fn test_journal_tamper_detection_intermediate_record_mutations() {
         let sig = signing_key.sign(&preimage);
         envelope.signature = URL_SAFE_NO_PAD.encode(sig.to_bytes());
 
-        std::fs::write(&journal_file, serde_json::to_string_pretty(&envelope).unwrap()).unwrap();
+        std::fs::write(
+            &journal_file,
+            serde_json::to_string_pretty(&envelope).unwrap(),
+        )
+        .unwrap();
 
         let reopened = QuarantineJournal::new(
             temp_dir.path().to_path_buf(),
@@ -599,7 +639,10 @@ fn test_journal_tamper_detection_intermediate_record_mutations() {
             kid.clone(),
         );
         let chain_res = reopened.verify_hash_chain();
-        assert!(chain_res.is_err(), "verify_hash_chain must detect non-monotonic sequence");
+        assert!(
+            chain_res.is_err(),
+            "verify_hash_chain must detect non-monotonic sequence"
+        );
         let err_msg = chain_res.unwrap_err();
         assert!(
             err_msg.contains("Monotonic sequence broken at index 2"),
@@ -622,7 +665,11 @@ fn test_journal_tamper_detection_intermediate_record_mutations() {
         let sig = signing_key.sign(&preimage);
         envelope.signature = URL_SAFE_NO_PAD.encode(sig.to_bytes());
 
-        std::fs::write(&journal_file, serde_json::to_string_pretty(&envelope).unwrap()).unwrap();
+        std::fs::write(
+            &journal_file,
+            serde_json::to_string_pretty(&envelope).unwrap(),
+        )
+        .unwrap();
 
         let reopened = QuarantineJournal::new(
             temp_dir.path().to_path_buf(),
@@ -630,10 +677,14 @@ fn test_journal_tamper_detection_intermediate_record_mutations() {
             kid.clone(),
         );
         let chain_res = reopened.verify_hash_chain();
-        assert!(chain_res.is_err(), "Deleted record must break sequence / hash chain");
+        assert!(
+            chain_res.is_err(),
+            "Deleted record must break sequence / hash chain"
+        );
         let err_msg = chain_res.unwrap_err();
         assert!(
-            err_msg.contains("Monotonic sequence broken at index 1") || err_msg.contains("Prev hash chain broken"),
+            err_msg.contains("Monotonic sequence broken at index 1")
+                || err_msg.contains("Prev hash chain broken"),
             "Error must catch omission, got '{}'",
             err_msg
         );
@@ -653,13 +704,14 @@ fn test_journal_tamper_detection_intermediate_record_mutations() {
         let sig = signing_key.sign(&preimage);
         envelope.signature = URL_SAFE_NO_PAD.encode(sig.to_bytes());
 
-        std::fs::write(&journal_file, serde_json::to_string_pretty(&envelope).unwrap()).unwrap();
+        std::fs::write(
+            &journal_file,
+            serde_json::to_string_pretty(&envelope).unwrap(),
+        )
+        .unwrap();
 
-        let reopened = QuarantineJournal::new(
-            temp_dir.path().to_path_buf(),
-            Arc::clone(&signing_key),
-            kid,
-        );
+        let reopened =
+            QuarantineJournal::new(temp_dir.path().to_path_buf(), Arc::clone(&signing_key), kid);
         let chain_res = reopened.verify_hash_chain();
         assert!(chain_res.is_err(), "Reordered records must fail hash chain");
     }
@@ -710,7 +762,11 @@ fn test_governance_trace_conformance_all_eight_tiers_and_allow() {
     };
 
     let mut trace_events = export_cage_governance_trace_v1(&dummy_req, &resp_allow);
-    assert_eq!(trace_events.len(), 2, "ALLOW must emit SEAL_ISSUED and EXECUTED events");
+    assert_eq!(
+        trace_events.len(),
+        2,
+        "ALLOW must emit SEAL_ISSUED and EXECUTED events"
+    );
     assert_eq!(trace_events[0]["phase"], "SEAL_ISSUED");
     assert_eq!(trace_events[0]["verdict"], "ALLOW");
     assert_eq!(trace_events[0]["seal_present"], true);
@@ -774,10 +830,12 @@ fn test_governance_trace_conformance_all_eight_tiers_and_allow() {
         .iter()
         .map(|e| serde_json::to_string(e).unwrap())
         .collect::<Vec<_>>()
-        .join("\n") + "\n";
+        .join("\n")
+        + "\n";
 
     let python_cmd = "C:\\Python314\\python.exe";
-    let script_path = "d:\\harfile\\cybernetic-agent-governance-engine\\scripts\\check_trace_conformance.py";
+    let script_path =
+        "d:\\harfile\\cybernetic-agent-governance-engine\\scripts\\check_trace_conformance.py";
 
     let mut child = std::process::Command::new(python_cmd)
         .arg(script_path)
@@ -791,10 +849,14 @@ fn test_governance_trace_conformance_all_eight_tiers_and_allow() {
     use std::io::Write;
     {
         let stdin = child.stdin.as_mut().expect("Failed to open stdin");
-        stdin.write_all(jsonl_content.as_bytes()).expect("Failed to write to stdin");
+        stdin
+            .write_all(jsonl_content.as_bytes())
+            .expect("Failed to write to stdin");
     }
 
-    let output = child.wait_with_output().expect("Failed to wait on child process");
+    let output = child
+        .wait_with_output()
+        .expect("Failed to wait on child process");
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 

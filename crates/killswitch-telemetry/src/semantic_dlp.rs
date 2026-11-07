@@ -8,11 +8,11 @@
 //! - Implements GLiNER span-based bi-encoder candidate scoring, RedactX-v3 18 HIPAA Safe Harbor
 //!   structural validation, and Presidio zero-PII commitment generation with volatile scrubbing.
 
-use std::collections::VecDeque;
-use std::sync::atomic::{AtomicU64, Ordering};
 use chrono::Utc;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::otel_lineage::{DlpClassification, DlpPolicy, EndpointLineageEngine, ProcessKey};
 
@@ -20,7 +20,8 @@ use crate::otel_lineage::{DlpClassification, DlpPolicy, EndpointLineageEngine, P
 pub const MAX_LIVE_SEMANTIC_EVENTS: usize = 1024;
 
 /// Live ring buffer of semantic DLP events accessible by Siquery EDR host discovery.
-pub static LIVE_SEMANTIC_DLP_EVENTS: RwLock<Option<VecDeque<SemanticDlpRecord>>> = RwLock::new(None);
+pub static LIVE_SEMANTIC_DLP_EVENTS: RwLock<Option<VecDeque<SemanticDlpRecord>>> =
+    RwLock::new(None);
 static EVENT_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 /// Volatile memory zeroizer ensuring temporary raw PII/secret buffers are wiped
@@ -113,8 +114,13 @@ pub type SemanticEntityMatch = SemanticDlpEntity;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SemanticDlpVerdict {
     Allow,
-    Restricted { entities: Vec<SemanticDlpEntity> },
-    Deny { reason: String, entities: Vec<SemanticDlpEntity> },
+    Restricted {
+        entities: Vec<SemanticDlpEntity>,
+    },
+    Deny {
+        reason: String,
+        entities: Vec<SemanticDlpEntity>,
+    },
 }
 
 impl SemanticDlpVerdict {
@@ -274,7 +280,9 @@ impl RedactXStructuredValidator {
             let mut decoded_any = false;
 
             // Base64 attempt
-            if let Ok(bytes) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, current.trim()) {
+            if let Ok(bytes) =
+                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, current.trim())
+            {
                 if let Ok(s) = String::from_utf8(bytes) {
                     if s.chars().all(|c| !c.is_control() || c.is_whitespace()) {
                         current = s;
@@ -285,7 +293,11 @@ impl RedactXStructuredValidator {
             }
 
             // Hex attempt
-            if !decoded_any && current.len() >= 4 && current.len() % 2 == 0 && current.chars().all(|c| c.is_ascii_hexdigit()) {
+            if !decoded_any
+                && current.len() >= 4
+                && current.len() % 2 == 0
+                && current.chars().all(|c| c.is_ascii_hexdigit())
+            {
                 if let Ok(bytes) = hex::decode(current.trim()) {
                     if let Ok(s) = String::from_utf8(bytes) {
                         if s.chars().all(|c| !c.is_control() || c.is_whitespace()) {
@@ -341,7 +353,9 @@ impl GlinerSpanNerEngine {
         match label {
             "us_ssn" => {
                 let parts: Vec<&str> = clean.split('-').collect();
-                if parts.len() == 3 && RedactXStructuredValidator::ssn_valid(parts[0], parts[1], parts[2]) {
+                if parts.len() == 3
+                    && RedactXStructuredValidator::ssn_valid(parts[0], parts[1], parts[2])
+                {
                     0.99
                 } else {
                     0.10
@@ -355,7 +369,10 @@ impl GlinerSpanNerEngine {
                 }
             }
             "hipaa_mrn" => {
-                if clean.len() >= 6 && clean.len() <= 12 && RedactXStructuredValidator::mod11_valid(clean) {
+                if clean.len() >= 6
+                    && clean.len() <= 12
+                    && RedactXStructuredValidator::mod11_valid(clean)
+                {
                     0.95
                 } else {
                     0.05
@@ -396,7 +413,9 @@ impl GlinerSpanNerEngine {
         for (i, &word) in words.iter().enumerate() {
             let trimmed = word.trim_matches([',', ';', '.', ':', '(', ')', '[', ']']);
             let parts: Vec<&str> = trimmed.split('-').collect();
-            if parts.len() == 3 && RedactXStructuredValidator::ssn_valid(parts[0], parts[1], parts[2]) {
+            if parts.len() == 3
+                && RedactXStructuredValidator::ssn_valid(parts[0], parts[1], parts[2])
+            {
                 let start = text.find(trimmed).unwrap_or(0);
                 matches.push(GlinerSpanMatch {
                     label: "us_ssn".to_string(),
@@ -474,9 +493,12 @@ impl PresidioGlinerPiiZeroGuard {
 
         // Redact SSNs
         for word in tokenize_dlp_payload(text) {
-            let clean = word.trim_matches([',', ';', '.', ':', '(', ')', '[', ']', '{', '}', '"', '\'']);
+            let clean =
+                word.trim_matches([',', ';', '.', ':', '(', ')', '[', ']', '{', '}', '"', '\'']);
             let parts: Vec<&str> = clean.split('-').collect();
-            if parts.len() == 3 && RedactXStructuredValidator::ssn_valid(parts[0], parts[1], parts[2]) {
+            if parts.len() == 3
+                && RedactXStructuredValidator::ssn_valid(parts[0], parts[1], parts[2])
+            {
                 let digest = blake3::hash(clean.as_bytes()).to_hex().to_string();
                 let commitment = format!("<ZK_PII:SSN:{}>", &digest[..8]);
                 scrubbed = scrubbed.replace(clean, &commitment);
@@ -519,13 +541,24 @@ pub fn is_dlp_structural_delimiter(c: char) -> bool {
         || matches!(
             c,
             '{' | '}'
-                | '[' | ']'
-                | '(' | ')'
-                | '<' | '>'
-                | ':' | ';' | ','
-                | '"' | '\'' | '`'
-                | '=' | '&' | '?'
-                | '\\' | '/' | '|'
+                | '['
+                | ']'
+                | '('
+                | ')'
+                | '<'
+                | '>'
+                | ':'
+                | ';'
+                | ','
+                | '"'
+                | '\''
+                | '`'
+                | '='
+                | '&'
+                | '?'
+                | '\\'
+                | '/'
+                | '|'
         )
 }
 
@@ -550,13 +583,23 @@ pub fn is_dlp_deal_delimiter(c: char) -> bool {
         || matches!(
             c,
             '{' | '}'
-                | '[' | ']'
-                | '(' | ')'
-                | '<' | '>'
-                | ':' | ';'
-                | '"' | '\'' | '`'
-                | '=' | '&' | '?'
-                | '\\' | '/' | '|'
+                | '['
+                | ']'
+                | '('
+                | ')'
+                | '<'
+                | '>'
+                | ':'
+                | ';'
+                | '"'
+                | '\''
+                | '`'
+                | '='
+                | '&'
+                | '?'
+                | '\\'
+                | '/'
+                | '|'
         )
 }
 
@@ -654,7 +697,10 @@ impl SemanticDlpEngine {
         if verdict.is_allow() {
             // Re-verify against any hidden unclassified markings
             let lower = payload.to_ascii_lowercase();
-            if lower.contains("confidential") || lower.contains("secret") || lower.contains("internal only") {
+            if lower.contains("confidential")
+                || lower.contains("secret")
+                || lower.contains("internal only")
+            {
                 let entity = SemanticDlpEntity {
                     kind: SemanticEntityKind::UnclassifiedSensitive,
                     raw: "Fail-closed unclassified detection".to_string(),
@@ -664,7 +710,9 @@ impl SemanticDlpEngine {
                     classification: DlpClassification::Confidential,
                     policy: DlpPolicy::Block,
                 };
-                return SemanticDlpVerdict::Restricted { entities: vec![entity] };
+                return SemanticDlpVerdict::Restricted {
+                    entities: vec![entity],
+                };
             }
         }
         verdict
@@ -736,7 +784,9 @@ impl SemanticDlpEngine {
 
         while i < tokens.len() {
             let token = tokens[i];
-            let trimmed = token.trim_matches([',', ';', ':', '(', ')', '[', ']', '{', '}', '"', '\'', '\\', '=', '&']);
+            let trimmed = token.trim_matches([
+                ',', ';', ':', '(', ')', '[', ']', '{', '}', '"', '\'', '\\', '=', '&',
+            ]);
 
             // 1. Identify currency prefix and extract numeric candidate string
             enum CurrencyMatch<'a> {
@@ -752,7 +802,11 @@ impl SemanticDlpEngine {
                 let num_part = rest.trim_start_matches([':', '=', '-']);
                 if num_part.is_empty() {
                     currency_match = Some(CurrencyMatch::Separated);
-                } else if num_part.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+                } else if num_part
+                    .chars()
+                    .next()
+                    .map_or(false, |c| c.is_ascii_digit())
+                {
                     currency_match = Some(CurrencyMatch::Attached(num_part));
                 }
             }
@@ -760,12 +814,19 @@ impl SemanticDlpEngine {
             // Check standard ISO 4217 currency codes (USD, EUR, GBP, CAD, AUD, CHF, JPY)
             if currency_match.is_none() {
                 if let Some(prefix) = trimmed.get(..3) {
-                    if ISO_CURRENCIES.iter().any(|&c| prefix.eq_ignore_ascii_case(c)) {
+                    if ISO_CURRENCIES
+                        .iter()
+                        .any(|&c| prefix.eq_ignore_ascii_case(c))
+                    {
                         let rest = &trimmed[3..];
                         let num_part = rest.trim_start_matches([':', '=', '-', ' ']);
                         if num_part.is_empty() {
                             currency_match = Some(CurrencyMatch::Separated);
-                        } else if num_part.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+                        } else if num_part
+                            .chars()
+                            .next()
+                            .map_or(false, |c| c.is_ascii_digit())
+                        {
                             currency_match = Some(CurrencyMatch::Attached(num_part));
                         }
                     }
@@ -775,9 +836,15 @@ impl SemanticDlpEngine {
             let (num_candidate, mut tokens_consumed, lookahead_idx) = match currency_match {
                 Some(CurrencyMatch::Attached(num_str)) => (num_str, 1, i + 1),
                 Some(CurrencyMatch::Separated) if i + 1 < tokens.len() => {
-                    let next_trimmed = tokens[i + 1].trim_matches([',', ';', ':', '(', ')', '[', ']', '{', '}', '"', '\'', '\\', '=', '&']);
+                    let next_trimmed = tokens[i + 1].trim_matches([
+                        ',', ';', ':', '(', ')', '[', ']', '{', '}', '"', '\'', '\\', '=', '&',
+                    ]);
                     let num_clean = next_trimmed.trim_start_matches(['$', '€', '£', '¥']);
-                    if num_clean.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+                    if num_clean
+                        .chars()
+                        .next()
+                        .map_or(false, |c| c.is_ascii_digit())
+                    {
                         (num_clean, 2, i + 2)
                     } else {
                         i += 1;
@@ -791,18 +858,20 @@ impl SemanticDlpEngine {
             };
 
             // 2. Determine magnitude multiplier strictly from token suffix or adjacent lookahead token
-            let (mut multiplier, has_suffix_mult) = if num_candidate.ends_with('M') || num_candidate.ends_with('m') {
-                (1_000_000.0, true)
-            } else if num_candidate.ends_with('B') || num_candidate.ends_with('b') {
-                (1_000_000_000.0, true)
-            } else if num_candidate.ends_with('K') || num_candidate.ends_with('k') {
-                (1_000.0, true)
-            } else {
-                (1.0, false)
-            };
+            let (mut multiplier, has_suffix_mult) =
+                if num_candidate.ends_with('M') || num_candidate.ends_with('m') {
+                    (1_000_000.0, true)
+                } else if num_candidate.ends_with('B') || num_candidate.ends_with('b') {
+                    (1_000_000_000.0, true)
+                } else if num_candidate.ends_with('K') || num_candidate.ends_with('k') {
+                    (1_000.0, true)
+                } else {
+                    (1.0, false)
+                };
 
             if !has_suffix_mult && lookahead_idx < tokens.len() {
-                let lookahead_clean = tokens[lookahead_idx].trim_matches([',', ';', ':', '(', ')', '[', ']', '"', '\'']);
+                let lookahead_clean = tokens[lookahead_idx]
+                    .trim_matches([',', ';', ':', '(', ')', '[', ']', '"', '\'']);
                 let lookahead_lower = lookahead_clean.to_ascii_lowercase();
                 if lookahead_lower == "million" || lookahead_lower == "m" {
                     multiplier = 1_000_000.0;
@@ -817,13 +886,19 @@ impl SemanticDlpEngine {
             }
 
             // 3. Parse numeric value and compute total
-            let num_clean: String = num_candidate.chars().filter(|c| c.is_ascii_digit() || *c == '.').collect();
+            let num_clean: String = num_candidate
+                .chars()
+                .filter(|c| c.is_ascii_digit() || *c == '.')
+                .collect();
             if let Ok(val) = num_clean.parse::<f64>() {
                 let total = val * multiplier;
 
                 let first_token = tokens[i];
                 let last_token = tokens[i + tokens_consumed - 1];
-                let start = payload[scan_cursor..].find(first_token).map(|pos| scan_cursor + pos).unwrap_or(scan_cursor);
+                let start = payload[scan_cursor..]
+                    .find(first_token)
+                    .map(|pos| scan_cursor + pos)
+                    .unwrap_or(scan_cursor);
                 let end = if let Some(last_pos) = payload[start..].find(last_token) {
                     start + last_pos + last_token.len()
                 } else {
@@ -886,17 +961,23 @@ impl SemanticDlpEngine {
             || lower.contains("chart number");
 
         for word in tokenize_dlp_payload(payload) {
-            let trimmed = word.trim_matches([',', ';', '.', ':', '(', ')', '[', ']', '{', '}', '"', '\'', '\\', '=', '&']);
+            let trimmed = word.trim_matches([
+                ',', ';', '.', ':', '(', ')', '[', ']', '{', '}', '"', '\'', '\\', '=', '&',
+            ]);
 
             // 1. SSN Check: \d{3}-\d{2}-\d{4}
             let parts: Vec<&str> = trimmed.split('-').collect();
             if parts.len() == 3
-                && parts[0].len() == 3 && parts[0].chars().all(|c| c.is_ascii_digit())
-                && parts[1].len() == 2 && parts[1].chars().all(|c| c.is_ascii_digit())
-                && parts[2].len() == 4 && parts[2].chars().all(|c| c.is_ascii_digit())
+                && parts[0].len() == 3
+                && parts[0].chars().all(|c| c.is_ascii_digit())
+                && parts[1].len() == 2
+                && parts[1].chars().all(|c| c.is_ascii_digit())
+                && parts[2].len() == 4
+                && parts[2].chars().all(|c| c.is_ascii_digit())
             {
                 if RedactXStructuredValidator::ssn_valid(parts[0], parts[1], parts[2]) {
-                    let start = (trimmed.as_ptr() as usize).saturating_sub(payload.as_ptr() as usize);
+                    let start =
+                        (trimmed.as_ptr() as usize).saturating_sub(payload.as_ptr() as usize);
                     let end = start + trimmed.len();
                     if !matches.iter().any(|m| m.span == (start, end)) {
                         matches.push(SemanticDlpEntity {
@@ -923,7 +1004,8 @@ impl SemanticDlpEngine {
                     && candidate_npi.chars().all(|c| c.is_ascii_digit())
                     && RedactXStructuredValidator::npi_valid(candidate_npi)
                 {
-                    let start = (candidate_npi.as_ptr() as usize).saturating_sub(payload.as_ptr() as usize);
+                    let start =
+                        (candidate_npi.as_ptr() as usize).saturating_sub(payload.as_ptr() as usize);
                     let end = start + candidate_npi.len();
                     if !matches.iter().any(|m| m.span == (start, end)) {
                         matches.push(SemanticDlpEntity {
@@ -940,12 +1022,14 @@ impl SemanticDlpEngine {
 
                 // 3. Candidate attached MRN tokens (e.g. MRN:1234569 or MRN-1234569)
                 if trimmed.to_ascii_lowercase().starts_with("mrn") {
-                    let candidate_mrn = trimmed[3..].trim_matches(|c: char| !c.is_ascii_alphanumeric());
+                    let candidate_mrn =
+                        trimmed[3..].trim_matches(|c: char| !c.is_ascii_alphanumeric());
                     if candidate_mrn.len() >= 6
                         && candidate_mrn.len() <= 12
                         && RedactXStructuredValidator::mod11_valid(candidate_mrn)
                     {
-                        let start = (candidate_mrn.as_ptr() as usize).saturating_sub(payload.as_ptr() as usize);
+                        let start = (candidate_mrn.as_ptr() as usize)
+                            .saturating_sub(payload.as_ptr() as usize);
                         let end = start + candidate_mrn.len();
                         if !matches.iter().any(|m| m.span == (start, end)) {
                             matches.push(SemanticDlpEntity {
@@ -984,7 +1068,12 @@ impl SemanticDlpEngine {
         }
     }
 
-    fn detect_person_names(&self, payload: &str, lower: &str, matches: &mut Vec<SemanticDlpEntity>) {
+    fn detect_person_names(
+        &self,
+        payload: &str,
+        lower: &str,
+        matches: &mut Vec<SemanticDlpEntity>,
+    ) {
         let triggers = [
             "patient name:",
             "attending physician:",
@@ -1015,7 +1104,11 @@ impl SemanticDlpEngine {
                 matches.push(SemanticDlpEntity {
                     kind: SemanticEntityKind::PersonName,
                     raw: payload.to_string(),
-                    text: if name.is_empty() { payload.to_string() } else { name.to_string() },
+                    text: if name.is_empty() {
+                        payload.to_string()
+                    } else {
+                        name.to_string()
+                    },
                     span: (idx, idx + trig.len() + name.len()),
                     confidence: 0.95,
                     classification: DlpClassification::Confidential,
@@ -1047,7 +1140,9 @@ impl SemanticDlpEngine {
 
     fn detect_secret_keys(&self, payload: &str, matches: &mut Vec<SemanticDlpEntity>) {
         for word in tokenize_dlp_payload(payload) {
-            let trimmed = word.trim_matches(['"', '\'', ';', ',', '.', '{', '}', '[', ']', ':', '\\', '=', '&']);
+            let trimmed = word.trim_matches([
+                '"', '\'', ';', ',', '.', '{', '}', '[', ']', ':', '\\', '=', '&',
+            ]);
             if (trimmed.starts_with("ghp_") || trimmed.starts_with("gho_")) && trimmed.len() >= 36 {
                 let start = (trimmed.as_ptr() as usize).saturating_sub(payload.as_ptr() as usize);
                 let end = start + trimmed.len();
@@ -1060,7 +1155,10 @@ impl SemanticDlpEngine {
                     classification: DlpClassification::CrownJewel,
                     policy: DlpPolicy::Quarantine,
                 });
-            } else if trimmed.starts_with("AKIA") && trimmed.len() == 20 && trimmed.chars().all(|c| c.is_ascii_alphanumeric()) {
+            } else if trimmed.starts_with("AKIA")
+                && trimmed.len() == 20
+                && trimmed.chars().all(|c| c.is_ascii_alphanumeric())
+            {
                 let start = (trimmed.as_ptr() as usize).saturating_sub(payload.as_ptr() as usize);
                 let end = start + trimmed.len();
                 matches.push(SemanticDlpEntity {
@@ -1076,7 +1174,12 @@ impl SemanticDlpEngine {
         }
     }
 
-    fn detect_unclassified_sensitive(&self, _payload: &str, lower: &str, matches: &mut Vec<SemanticDlpEntity>) {
+    fn detect_unclassified_sensitive(
+        &self,
+        _payload: &str,
+        lower: &str,
+        matches: &mut Vec<SemanticDlpEntity>,
+    ) {
         let markers = [
             "strictly confidential",
             "confidential",
@@ -1183,8 +1286,12 @@ mod tests {
         assert!(!RedactXStructuredValidator::ssn_valid("123", "45", "0000"));
 
         // Email
-        assert!(RedactXStructuredValidator::rfc5321_email_valid("doctor@hospital.org"));
-        assert!(!RedactXStructuredValidator::rfc5321_email_valid("invalid-email"));
+        assert!(RedactXStructuredValidator::rfc5321_email_valid(
+            "doctor@hospital.org"
+        ));
+        assert!(!RedactXStructuredValidator::rfc5321_email_valid(
+            "invalid-email"
+        ));
 
         // Unwrapped layers
         let encoded = "QUtJQUlaWUVaWTJNRVpZMk1FWlk="; // Base64 of AKIAIZYEZY2MEZY2MEZY
@@ -1254,12 +1361,18 @@ mod tests {
 
         // Verify that USD and EUR accompanied by multibyte emojis/Cyrillic in deal contexts are detected
         let usd_deal = engine.scan_payload("deal value: 💰 USD 15,000,000");
-        assert!(usd_deal.iter().any(|e| e.kind == SemanticEntityKind::DealValue));
+        assert!(usd_deal
+            .iter()
+            .any(|e| e.kind == SemanticEntityKind::DealValue));
 
         let cyrillic_deal = engine.scan_payload("valuation: аб USD 12,000,000");
-        assert!(cyrillic_deal.iter().any(|e| e.kind == SemanticEntityKind::DealValue));
+        assert!(cyrillic_deal
+            .iter()
+            .any(|e| e.kind == SemanticEntityKind::DealValue));
 
         let eur_deal = engine.scan_payload("merger price: 💳 EUR 50,000,000");
-        assert!(eur_deal.iter().any(|e| e.kind == SemanticEntityKind::DealValue));
+        assert!(eur_deal
+            .iter()
+            .any(|e| e.kind == SemanticEntityKind::DealValue));
     }
 }

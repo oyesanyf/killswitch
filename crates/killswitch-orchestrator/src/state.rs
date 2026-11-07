@@ -31,7 +31,6 @@ pub enum LifecycleStage {
     Terminal,
 }
 
-
 impl LifecycleStage {
     /// Maps 10-node LifecycleStage to killswitch-types GraphNodeId.
     pub fn to_graph_node_id(&self) -> GraphNodeId {

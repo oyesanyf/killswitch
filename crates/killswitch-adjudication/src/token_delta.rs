@@ -31,24 +31,44 @@ impl SecurityContextDelta {
 
     pub fn description(&self) -> String {
         match self {
-            Self::LinuxEuidEscalation { parent_euid, child_euid } => {
-                format!("Linux EUID escalation from {} to {}", parent_euid, child_euid)
+            Self::LinuxEuidEscalation {
+                parent_euid,
+                child_euid,
+            } => {
+                format!(
+                    "Linux EUID escalation from {} to {}",
+                    parent_euid, child_euid
+                )
             }
             Self::LinuxCapabilityExpansion { added_capabilities } => {
-                format!("Linux CapEff expanded by bitmask 0x{:016X}", added_capabilities)
+                format!(
+                    "Linux CapEff expanded by bitmask 0x{:016X}",
+                    added_capabilities
+                )
             }
             Self::LinuxNamespaceTransition { namespaces } => {
-                format!("Linux namespace transition across: {}", namespaces.join(", "))
+                format!(
+                    "Linux namespace transition across: {}",
+                    namespaces.join(", ")
+                )
             }
-            Self::WindowsIntegrityEscalation { parent_rid, child_rid } => {
+            Self::WindowsIntegrityEscalation {
+                parent_rid,
+                child_rid,
+            } => {
                 format!(
                     "Windows integrity escalation from RID 0x{:04X} to 0x{:04X}",
                     parent_rid, child_rid
                 )
             }
-            Self::WindowsTokenElevation => "Windows TokenElevation: child process elevated".to_string(),
+            Self::WindowsTokenElevation => {
+                "Windows TokenElevation: child process elevated".to_string()
+            }
             Self::WindowsSession0Transition { parent_session } => {
-                format!("Windows Session 0 transition from session {}", parent_session)
+                format!(
+                    "Windows Session 0 transition from session {}",
+                    parent_session
+                )
             }
             Self::CleanIdentityPreserved => {
                 "Clean identity preserved (no privilege escalation)".to_string()
@@ -150,16 +170,21 @@ pub fn evaluate_security_context_delta(
 }
 
 /// Observe real-time parent-to-child token delta for live PIDs.
-pub fn observe_parent_child_token_delta(parent_pid: u32, child_pid: u32) -> Vec<SecurityContextDelta> {
-    let parent_ctx = query_process_security_context(parent_pid).unwrap_or_else(|_| ProcessSecurityContext {
-        pid: parent_pid,
-        ..Default::default()
-    });
+pub fn observe_parent_child_token_delta(
+    parent_pid: u32,
+    child_pid: u32,
+) -> Vec<SecurityContextDelta> {
+    let parent_ctx =
+        query_process_security_context(parent_pid).unwrap_or_else(|_| ProcessSecurityContext {
+            pid: parent_pid,
+            ..Default::default()
+        });
 
-    let child_ctx = query_process_security_context(child_pid).unwrap_or_else(|_| ProcessSecurityContext {
-        pid: child_pid,
-        ..Default::default()
-    });
+    let child_ctx =
+        query_process_security_context(child_pid).unwrap_or_else(|_| ProcessSecurityContext {
+            pid: child_pid,
+            ..Default::default()
+        });
 
     evaluate_security_context_delta(&parent_ctx, &child_ctx)
 }
@@ -205,8 +230,8 @@ pub fn query_process_security_context(pid: u32) -> Result<ProcessSecurityContext
 fn query_windows_token_security_context(pid: u32) -> Result<ProcessSecurityContext, String> {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::Security::{
-        GetTokenInformation, TokenElevation, TokenIntegrityLevel, TokenSessionId,
-        TOKEN_ELEVATION, TOKEN_MANDATORY_LABEL, TOKEN_QUERY,
+        GetTokenInformation, TokenElevation, TokenIntegrityLevel, TokenSessionId, TOKEN_ELEVATION,
+        TOKEN_MANDATORY_LABEL, TOKEN_QUERY,
     };
     use windows_sys::Win32::System::Threading::{
         OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -478,9 +503,9 @@ mod tests {
 
         let deltas = evaluate_security_context_delta(&parent, &child);
         assert!(deltas.contains(&SecurityContextDelta::WindowsTokenElevation));
-        assert!(deltas.contains(&SecurityContextDelta::WindowsSession0Transition {
-            parent_session: 1
-        }));
+        assert!(
+            deltas.contains(&SecurityContextDelta::WindowsSession0Transition { parent_session: 1 })
+        );
     }
 
     #[test]

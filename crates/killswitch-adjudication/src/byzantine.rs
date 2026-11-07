@@ -78,7 +78,9 @@ pub fn veto_peer_kill_switch_candidate(
     // 3. Poisoned YARA Rule Veto
     if let Some(yara_src) = candidate_yara {
         let yara_lower = yara_src.to_ascii_lowercase();
-        for token in yara_lower.split(|c: char| !c.is_ascii_alphanumeric() && c != '.' && c != '-' && c != '_') {
+        for token in yara_lower
+            .split(|c: char| !c.is_ascii_alphanumeric() && c != '.' && c != '-' && c != '_')
+        {
             if (token.ends_with(".exe") || token.ends_with(".dll") || token.ends_with(".so"))
                 && is_critical_system_pid(0, token)
             {

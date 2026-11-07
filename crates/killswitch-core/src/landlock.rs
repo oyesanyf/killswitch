@@ -475,10 +475,8 @@ pub fn build_blackhole_route_msg(is_v6: bool, is_delete: bool, priority: u32) ->
         );
         buf.extend_from_slice(hdr_bytes);
 
-        let rt_bytes = std::slice::from_raw_parts(
-            &rt as *const _ as *const u8,
-            std::mem::size_of::<RtMsg>(),
-        );
+        let rt_bytes =
+            std::slice::from_raw_parts(&rt as *const _ as *const u8, std::mem::size_of::<RtMsg>());
         buf.extend_from_slice(rt_bytes);
 
         let rta_bytes = std::slice::from_raw_parts(
@@ -594,8 +592,12 @@ fn send_netlink_route_message(msg: &[u8]) -> Result<(), KillSwitchError> {
             let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
             if errno == libc::EPERM || errno == libc::EACCES {
                 return Err(KillSwitchError::InsufficientPrivileges {
-                    details: format!("Netlink NETLINK_ROUTE socket creation failed: errno {}", errno),
-                    remediation: "Ensure the process is running as root with CAP_NET_ADMIN.".to_string(),
+                    details: format!(
+                        "Netlink NETLINK_ROUTE socket creation failed: errno {}",
+                        errno
+                    ),
+                    remediation: "Ensure the process is running as root with CAP_NET_ADMIN."
+                        .to_string(),
                 });
             }
             return Err(KillSwitchError::NetlinkSocketCreateFailed {
@@ -623,21 +625,34 @@ fn send_netlink_route_message(msg: &[u8]) -> Result<(), KillSwitchError> {
             libc::close(fd);
             if errno == libc::EPERM || errno == libc::EACCES {
                 return Err(KillSwitchError::InsufficientPrivileges {
-                    details: format!("Netlink route sendto failed with permission denied (errno {})", errno),
-                    remediation: "Ensure the process is running as root with CAP_NET_ADMIN.".to_string(),
+                    details: format!(
+                        "Netlink route sendto failed with permission denied (errno {})",
+                        errno
+                    ),
+                    remediation: "Ensure the process is running as root with CAP_NET_ADMIN."
+                        .to_string(),
                 });
             }
-            return Err(KillSwitchError::Other(format!("Netlink route sendto failed: errno {}", errno)));
+            return Err(KillSwitchError::Other(format!(
+                "Netlink route sendto failed: errno {}",
+                errno
+            )));
         }
 
         // Read Netlink ACK (nlmsgerr) to confirm kernel accepted the route
         let mut resp_buf = [0u8; 1024];
-        let recv_len = libc::recv(fd, resp_buf.as_mut_ptr() as *mut libc::c_void, resp_buf.len(), 0);
+        let recv_len = libc::recv(
+            fd,
+            resp_buf.as_mut_ptr() as *mut libc::c_void,
+            resp_buf.len(),
+            0,
+        );
         libc::close(fd);
 
         if recv_len >= std::mem::size_of::<NlMsgHdr>() as isize {
             let hdr = *(resp_buf.as_ptr() as *const NlMsgHdr);
-            if hdr.nlmsg_type == 2 { // NLMSG_ERROR
+            if hdr.nlmsg_type == 2 {
+                // NLMSG_ERROR
                 let err_offset = std::mem::size_of::<NlMsgHdr>();
                 if recv_len >= (err_offset + 4) as isize {
                     let err_code = i32::from_ne_bytes([
@@ -655,7 +670,10 @@ fn send_netlink_route_message(msg: &[u8]) -> Result<(), KillSwitchError> {
                                 remediation: "Run with root privileges (sudo) and ensure CAP_NET_ADMIN capability.".to_string(),
                             });
                         }
-                        return Err(KillSwitchError::Other(format!("Kernel Netlink route error: {}", err_code)));
+                        return Err(KillSwitchError::Other(format!(
+                            "Kernel Netlink route error: {}",
+                            err_code
+                        )));
                     }
                 }
             }
@@ -695,7 +713,10 @@ fn terminate_linux_socket_netlink(entry: &LinuxSocketEntry) -> Result<(), KillSw
         if ret < 0 {
             let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
             return Err(KillSwitchError::NetlinkSockDestroyFailed {
-                four_tuple: format!("{}:{} -> {}:{}", entry.local_addr, entry.local_port, entry.remote_addr, entry.remote_port),
+                four_tuple: format!(
+                    "{}:{} -> {}:{}",
+                    entry.local_addr, entry.local_port, entry.remote_addr, entry.remote_port
+                ),
                 errno,
             });
         }
@@ -855,7 +876,9 @@ impl NetworkIsolator for LinuxNetlinkIsolator {
         }
 
         self.active.store(false, Ordering::SeqCst);
-        tracing::info!("🟢 [LinuxNetlinkIsolator] Restored host network isolation via Netlink RTM_DELROUTE.");
+        tracing::info!(
+            "🟢 [LinuxNetlinkIsolator] Restored host network isolation via Netlink RTM_DELROUTE."
+        );
         Ok(())
     }
 
@@ -977,17 +1000,15 @@ pub fn parse_tcp_line(line: &str, is_v6: bool) -> Result<LinuxSocketEntry, KillS
         });
     }
 
-    let slot = parts[0]
-        .trim_end_matches(':')
-        .parse::<usize>()
-        .unwrap_or(0);
+    let slot = parts[0].trim_end_matches(':').parse::<usize>().unwrap_or(0);
 
     // Local address:port
-    let (local_ip_hex, local_port_hex) = parts[1]
-        .split_once(':')
-        .ok_or_else(|| KillSwitchError::ProcNetTcpParseFailed {
-            line: line.to_string(),
-        })?;
+    let (local_ip_hex, local_port_hex) =
+        parts[1]
+            .split_once(':')
+            .ok_or_else(|| KillSwitchError::ProcNetTcpParseFailed {
+                line: line.to_string(),
+            })?;
     let local_port = u16::from_str_radix(local_port_hex, 16).map_err(|_| {
         KillSwitchError::ProcNetTcpParseFailed {
             line: line.to_string(),
@@ -1008,11 +1029,12 @@ pub fn parse_tcp_line(line: &str, is_v6: bool) -> Result<LinuxSocketEntry, KillS
     };
 
     // Remote address:port
-    let (remote_ip_hex, remote_port_hex) = parts[2]
-        .split_once(':')
-        .ok_or_else(|| KillSwitchError::ProcNetTcpParseFailed {
-            line: line.to_string(),
-        })?;
+    let (remote_ip_hex, remote_port_hex) =
+        parts[2]
+            .split_once(':')
+            .ok_or_else(|| KillSwitchError::ProcNetTcpParseFailed {
+                line: line.to_string(),
+            })?;
     let remote_port = u16::from_str_radix(remote_port_hex, 16).map_err(|_| {
         KillSwitchError::ProcNetTcpParseFailed {
             line: line.to_string(),
@@ -1156,7 +1178,10 @@ mod tests {
         assert_eq!(entries[0].state, TcpState::Listen);
 
         // Entry 2: 192.168.1.5:54321 -> 8.8.8.8:53 Established
-        assert_eq!(entries[2].remote_addr, IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)));
+        assert_eq!(
+            entries[2].remote_addr,
+            IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))
+        );
         assert_eq!(entries[2].remote_port, 53);
         assert_eq!(entries[2].state, TcpState::Established);
 
@@ -1178,7 +1203,10 @@ mod tests {
         let receipt = res.unwrap();
         assert_eq!(receipt.engine, NetworkIsolationEngine::LinuxNetlink);
         assert!(receipt.preserved_ports.contains(&3030));
-        assert_eq!(receipt.netlink_rule_ids, vec!["netlink_rtn_blackhole_active"]);
+        assert_eq!(
+            receipt.netlink_rule_ids,
+            vec!["netlink_rtn_blackhole_active"]
+        );
         assert!(isolator.restore_quarantine(&receipt).is_ok());
 
         // Verify Landlock default sandbox config strictly excludes port 53
@@ -1194,7 +1222,10 @@ mod tests {
         let hdr = unsafe { &*(v4_msg.as_ptr() as *const NlMsgHdr) };
         assert_eq!(hdr.nlmsg_len, 36);
         assert_eq!(hdr.nlmsg_type, RTM_NEWROUTE);
-        assert_eq!(hdr.nlmsg_flags, NLM_F_REQUEST | NLM_F_ACK | NLM_F_CREATE | NLM_F_REPLACE);
+        assert_eq!(
+            hdr.nlmsg_flags,
+            NLM_F_REQUEST | NLM_F_ACK | NLM_F_CREATE | NLM_F_REPLACE
+        );
 
         let rt = unsafe { &*(v4_msg.as_ptr().add(16) as *const RtMsg) };
         assert_eq!(rt.rtm_dst_len, 0, "Default route must have dst_len = 0");

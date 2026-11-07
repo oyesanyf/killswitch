@@ -4,8 +4,8 @@
 //! allowing the HTTP server to step the graph, inspect state, and update modes.
 
 use async_trait::async_trait;
-use tokio::sync::RwLock;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 use killswitch_types::adjudication::ThreatCandidate;
 use killswitch_types::graph::{
@@ -18,8 +18,15 @@ use crate::error::ServerError;
 pub trait OrchestratorBridge: Send + Sync {
     async fn get_state(&self) -> KillSwitchGraphState;
     async fn set_mode(&self, mode: OrchestratorMode) -> Result<(), ServerError>;
-    async fn step(&self, input: Option<serde_json::Value>, force_node: Option<GraphNodeId>) -> Result<GraphNodeOutput, ServerError>;
-    async fn submit_threat(&self, candidate: ThreatCandidate) -> Result<GraphNodeOutput, ServerError>;
+    async fn step(
+        &self,
+        input: Option<serde_json::Value>,
+        force_node: Option<GraphNodeId>,
+    ) -> Result<GraphNodeOutput, ServerError>;
+    async fn submit_threat(
+        &self,
+        candidate: ThreatCandidate,
+    ) -> Result<GraphNodeOutput, ServerError>;
 }
 
 /// In-memory bridge implementation executing transitions and maintaining BLAKE3 trace chains.
@@ -79,7 +86,15 @@ impl OrchestratorBridge for InMemoryOrchestratorBridge {
         });
 
         let summary = format!("Step transition from {:?} to {:?}", current, next);
-        let input_digest = blake3::hash(input.as_ref().map(|v| v.to_string()).unwrap_or_default().as_bytes()).to_hex().to_string();
+        let input_digest = blake3::hash(
+            input
+                .as_ref()
+                .map(|v| v.to_string())
+                .unwrap_or_default()
+                .as_bytes(),
+        )
+        .to_hex()
+        .to_string();
         let output_digest = blake3::hash(summary.as_bytes()).to_hex().to_string();
 
         state.record_execution_step(
@@ -100,14 +115,20 @@ impl OrchestratorBridge for InMemoryOrchestratorBridge {
         })
     }
 
-    async fn submit_threat(&self, candidate: ThreatCandidate) -> Result<GraphNodeOutput, ServerError> {
+    async fn submit_threat(
+        &self,
+        candidate: ThreatCandidate,
+    ) -> Result<GraphNodeOutput, ServerError> {
         let mut state = self.state.write().await;
         state.active_threats.push(candidate);
         if state.aggregate_threat_score < 0.85 {
             state.aggregate_threat_score = 0.85;
         }
 
-        let summary = format!("Threat submitted; active candidates: {}", state.active_threats.len());
+        let summary = format!(
+            "Threat submitted; active candidates: {}",
+            state.active_threats.len()
+        );
         Ok(GraphNodeOutput {
             next_node: Some(GraphNodeId::AdjudicatingZeroFalsePositive),
             updated_threat_score: Some(state.aggregate_threat_score),

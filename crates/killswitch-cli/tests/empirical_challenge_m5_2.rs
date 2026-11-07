@@ -11,9 +11,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
 
-use killswitch_adjudication::immunity::{
-    inspect_process_lineage, MAX_ANCESTRY_DEPTH,
-};
+use killswitch_adjudication::immunity::{inspect_process_lineage, MAX_ANCESTRY_DEPTH};
 use killswitch_adjudication::ZeroFalsePositiveAdjudicator;
 use killswitch_cli::client::KillSwitchClient;
 use killswitch_cli::loader::{UnifiedConfig, UnifiedRuntime};
@@ -26,7 +24,9 @@ use killswitch_orchestrator::engine::{KillSwitchOrchestrator, OrchestratorConfig
 use killswitch_telemetry::otel_lineage::{
     DlpClassification, DlpPolicy, EgressVerdict, EndpointLineageEngine, FileKey, ProcessKey,
 };
-use killswitch_types::adjudication::{AdjudicationResult, EvidenceClass, ThreatCandidate, VetoReason};
+use killswitch_types::adjudication::{
+    AdjudicationResult, EvidenceClass, ThreatCandidate, VetoReason,
+};
 use killswitch_types::graph::OrchestratorMode;
 use killswitch_types::status::{ContainmentLevel, OperatorCredentials};
 
@@ -45,8 +45,14 @@ fn test_subsystem_diagnostics_live_binary_verify_and_check() {
 
     let candidates_killswitch = [
         workspace_root.join("killswitch.exe"),
-        workspace_root.join("target").join("debug").join("killswitch.exe"),
-        workspace_root.join("target").join("release").join("killswitch.exe"),
+        workspace_root
+            .join("target")
+            .join("debug")
+            .join("killswitch.exe"),
+        workspace_root
+            .join("target")
+            .join("release")
+            .join("killswitch.exe"),
     ];
     let killswitch_exe = candidates_killswitch
         .into_iter()
@@ -55,8 +61,14 @@ fn test_subsystem_diagnostics_live_binary_verify_and_check() {
 
     let candidates_start = [
         workspace_root.join("start.exe"),
-        workspace_root.join("target").join("debug").join("start.exe"),
-        workspace_root.join("target").join("release").join("start.exe"),
+        workspace_root
+            .join("target")
+            .join("debug")
+            .join("start.exe"),
+        workspace_root
+            .join("target")
+            .join("release")
+            .join("start.exe"),
     ];
     let start_exe = candidates_start
         .into_iter()
@@ -217,7 +229,10 @@ fn test_subsystem_diagnostics_live_binary_verify_and_check() {
     {
         Ok(out) => out,
         Err(e) if e.raw_os_error() == Some(4551) => return,
-        Err(e) => panic!("Failed to execute {:?} with invalid flag: {:?}", active_exe, e),
+        Err(e) => panic!(
+            "Failed to execute {:?} with invalid flag: {:?}",
+            active_exe, e
+        ),
     };
     assert!(
         !output_invalid.status.success(),
@@ -241,7 +256,11 @@ async fn test_subsystem_diagnostics_in_memory_verifier_contract() {
             idx + 1,
             "Phase numbers must be 1-indexed and consecutive"
         );
-        assert!(phase.passed, "Phase {} failed: {}", phase.phase_number, phase.details);
+        assert!(
+            phase.passed,
+            "Phase {} failed: {}",
+            phase.phase_number, phase.details
+        );
         assert!(!phase.name.is_empty(), "Phase name must not be empty");
         assert!(!phase.details.is_empty(), "Phase details must not be empty");
     }
@@ -272,7 +291,9 @@ async fn test_dlp_lineage_exfiltration_taint_propagation_and_egress_block() {
     engine.on_process_create(None, proc_key, "exfiltrator.exe");
 
     // Initially, process has not accessed sensitive file, so baggage is None
-    let initial_taint = engine.get_process_taint(&proc_key).expect("Process record must exist");
+    let initial_taint = engine
+        .get_process_taint(&proc_key)
+        .expect("Process record must exist");
     assert!(
         initial_taint.baggage.is_none(),
         "Process baggage must be None before reading sensitive file"
@@ -283,9 +304,14 @@ async fn test_dlp_lineage_exfiltration_taint_propagation_and_egress_block() {
 
     // Now process is tainted with CrownJewel baggage
     let taint = engine.get_process_taint(&proc_key);
-    assert!(taint.is_some(), "Process must be tainted after reading Crown Jewel file");
+    assert!(
+        taint.is_some(),
+        "Process must be tainted after reading Crown Jewel file"
+    );
     let taint_state = taint.unwrap();
-    let baggage = taint_state.baggage.expect("Tainted process must contain baggage");
+    let baggage = taint_state
+        .baggage
+        .expect("Tainted process must contain baggage");
     assert_eq!(baggage.classification, DlpClassification::CrownJewel);
     assert_eq!(baggage.policy, DlpPolicy::Quarantine);
 
@@ -331,9 +357,8 @@ async fn test_dlp_lineage_exfiltration_taint_propagation_and_egress_block() {
 #[tokio::test]
 async fn test_dlp_lineage_autonomous_trigger_containment_and_state_ledger() {
     let temp_dir = tempfile::tempdir().unwrap();
-    let containment_mgr = Arc::new(
-        HostContainmentManager::new_default(Some(temp_dir.path())).unwrap(),
-    );
+    let containment_mgr =
+        Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
     let adjudicator = Arc::new(ZeroFalsePositiveAdjudicator::new());
     let lineage_engine = Arc::new(EndpointLineageEngine::new_in_memory());
 
@@ -370,19 +395,31 @@ async fn test_dlp_lineage_autonomous_trigger_containment_and_state_ledger() {
 
     // Step 1: Ingest
     let t1 = orch.step().await.unwrap();
-    assert_eq!(t1.from_stage, killswitch_orchestrator::LifecycleStage::Ingest);
+    assert_eq!(
+        t1.from_stage,
+        killswitch_orchestrator::LifecycleStage::Ingest
+    );
 
     // Step 2: Correlate
     let t2 = orch.step().await.unwrap();
-    assert_eq!(t2.from_stage, killswitch_orchestrator::LifecycleStage::Correlate);
+    assert_eq!(
+        t2.from_stage,
+        killswitch_orchestrator::LifecycleStage::Correlate
+    );
 
     // Step 3: Adjudicate
     let t3 = orch.step().await.unwrap();
-    assert_eq!(t3.from_stage, killswitch_orchestrator::LifecycleStage::Adjudicate);
+    assert_eq!(
+        t3.from_stage,
+        killswitch_orchestrator::LifecycleStage::Adjudicate
+    );
 
     // Step 4: LineageTrigger -> Evaluates DLP taint graph and catches Crown Jewel exfiltration
     let t4 = orch.step().await.unwrap();
-    assert_eq!(t4.from_stage, killswitch_orchestrator::LifecycleStage::LineageTrigger);
+    assert_eq!(
+        t4.from_stage,
+        killswitch_orchestrator::LifecycleStage::LineageTrigger
+    );
 
     let state_after_trigger = orch.get_state().await;
     assert!(
@@ -390,32 +427,50 @@ async fn test_dlp_lineage_autonomous_trigger_containment_and_state_ledger() {
         "LineageTrigger must emit threat candidate into active_threats"
     );
     assert_eq!(
-        state_after_trigger.metadata.get("lineage_classification").map(|s| s.as_str()),
+        state_after_trigger
+            .metadata
+            .get("lineage_classification")
+            .map(|s| s.as_str()),
         Some("CrownJewel"),
         "State metadata must record CrownJewel classification"
     );
     assert_eq!(
-        state_after_trigger.metadata.get("lineage_policy").map(|s| s.as_str()),
+        state_after_trigger
+            .metadata
+            .get("lineage_policy")
+            .map(|s| s.as_str()),
         Some("Quarantine"),
         "State metadata must record Quarantine policy"
     );
     assert_eq!(
-        state_after_trigger.metadata.get("lineage_critical_pid_preserved").map(|s| s.as_str()),
+        state_after_trigger
+            .metadata
+            .get("lineage_critical_pid_preserved")
+            .map(|s| s.as_str()),
         Some("false"),
         "Untrusted exfiltrator is not a critical OS process"
     );
 
     // Step 5: ReasonOllama (executes local forensic check with 400ms timeout fallback)
     let t5 = orch.step().await.unwrap();
-    assert_eq!(t5.from_stage, killswitch_orchestrator::LifecycleStage::ReasonOllama);
+    assert_eq!(
+        t5.from_stage,
+        killswitch_orchestrator::LifecycleStage::ReasonOllama
+    );
 
     // Step 6: Decide (evaluates autonomous containment action)
     let t6 = orch.step().await.unwrap();
-    assert_eq!(t6.from_stage, killswitch_orchestrator::LifecycleStage::Decide);
+    assert_eq!(
+        t6.from_stage,
+        killswitch_orchestrator::LifecycleStage::Decide
+    );
 
     // Step 7: Contain (engages HostContainmentManager isolation and records into BLAKE3 state ledger)
     let t7 = orch.step().await.unwrap();
-    assert_eq!(t7.from_stage, killswitch_orchestrator::LifecycleStage::Contain);
+    assert_eq!(
+        t7.from_stage,
+        killswitch_orchestrator::LifecycleStage::Contain
+    );
 
     // 4. Verify host containment was engaged
     let current_status = containment_mgr.get_status();
@@ -455,14 +510,30 @@ fn test_critical_system_pid_immunity_exhaustive_catalog() {
     assert!(is_critical_system_pid(0, "System Idle Process"));
     assert!(is_critical_system_pid(1, "init"));
     assert!(is_critical_system_pid(4, "System"));
-    assert!(is_critical_system_pid(std::process::id(), "empirical_challenge_m5_2.exe"));
+    assert!(is_critical_system_pid(
+        std::process::id(),
+        "empirical_challenge_m5_2.exe"
+    ));
 
     // 2. Canonical Windows Core OS Daemons
     let critical_windows = [
-        "smss.exe", "csrss.exe", "wininit.exe", "winlogon.exe", "services.exe",
-        "lsass.exe", "lsm.exe", "dwm.exe", "svchost.exe", "explorer.exe",
-        "taskhostw.exe", "audiodg.exe", "spoolsv.exe", "taskmgr.exe",
-        "securityhealthservice.exe", "smartscreen.exe", "consent.exe",
+        "smss.exe",
+        "csrss.exe",
+        "wininit.exe",
+        "winlogon.exe",
+        "services.exe",
+        "lsass.exe",
+        "lsm.exe",
+        "dwm.exe",
+        "svchost.exe",
+        "explorer.exe",
+        "taskhostw.exe",
+        "audiodg.exe",
+        "spoolsv.exe",
+        "taskmgr.exe",
+        "securityhealthservice.exe",
+        "smartscreen.exe",
+        "consent.exe",
     ];
     for name in critical_windows {
         assert!(
@@ -474,9 +545,19 @@ fn test_critical_system_pid_immunity_exhaustive_catalog() {
 
     // 3. Developer and Toolchain Infrastructure
     let critical_dev = [
-        "code.exe", "powershell.exe", "pwsh.exe", "cmd.exe", "windowsterminal.exe",
-        "conhost.exe", "wsl.exe", "docker.exe", "cargo.exe", "rustc.exe", "git.exe",
-        "python.exe", "node.exe",
+        "code.exe",
+        "powershell.exe",
+        "pwsh.exe",
+        "cmd.exe",
+        "windowsterminal.exe",
+        "conhost.exe",
+        "wsl.exe",
+        "docker.exe",
+        "cargo.exe",
+        "rustc.exe",
+        "git.exe",
+        "python.exe",
+        "node.exe",
     ];
     for name in critical_dev {
         assert!(
@@ -487,15 +568,30 @@ fn test_critical_system_pid_immunity_exhaustive_catalog() {
     }
 
     // 4. Case-insensitivity & path normalization stress tests
-    assert!(is_critical_system_pid(1234, "C:\\Windows\\System32\\SVCHOST.EXE"));
-    assert!(is_critical_system_pid(1235, "C:\\Program Files\\Git\\bin\\GIT.EXE"));
+    assert!(is_critical_system_pid(
+        1234,
+        "C:\\Windows\\System32\\SVCHOST.EXE"
+    ));
+    assert!(is_critical_system_pid(
+        1235,
+        "C:\\Program Files\\Git\\bin\\GIT.EXE"
+    ));
     assert!(is_critical_system_pid(1236, "d:\\rust\\bin\\CarGo.Exe"));
-    assert!(is_critical_system_pid(1237, "\"C:\\Windows\\explorer.exe\""));
+    assert!(is_critical_system_pid(
+        1237,
+        "\"C:\\Windows\\explorer.exe\""
+    ));
 
     // 5. Negative tests: Malicious and untrusted processes MUST NOT be immune
     let untrusted_binaries = [
-        "mimikatz.exe", "cobaltstrike.exe", "ransom.exe", "cryptolocker.exe",
-        "reverse_shell.exe", "c2_beacon.exe", "trojan.exe", "stealer.exe",
+        "mimikatz.exe",
+        "cobaltstrike.exe",
+        "ransom.exe",
+        "cryptolocker.exe",
+        "reverse_shell.exe",
+        "c2_beacon.exe",
+        "trojan.exe",
+        "stealer.exe",
     ];
     for bad in untrusted_binaries {
         assert!(
@@ -589,18 +685,9 @@ fn test_process_ancestry_depth_5_boundary_and_cyclic_immunity() {
     // 3. Test NativeProcessFreezer immune set includes depth-5 ancestry
     let freezer = NativeProcessFreezer::new();
     let immune_pids = freezer.get_immune_pids();
-    assert!(
-        immune_pids.contains(&0),
-        "Immune set must contain PID 0"
-    );
-    assert!(
-        immune_pids.contains(&1),
-        "Immune set must contain PID 1"
-    );
-    assert!(
-        immune_pids.contains(&4),
-        "Immune set must contain PID 4"
-    );
+    assert!(immune_pids.contains(&0), "Immune set must contain PID 0");
+    assert!(immune_pids.contains(&1), "Immune set must contain PID 1");
+    assert!(immune_pids.contains(&4), "Immune set must contain PID 4");
     assert!(
         immune_pids.contains(&current_pid),
         "Immune set must contain current test process PID"
@@ -710,7 +797,9 @@ async fn test_reversible_mode_emergency_unauthenticated_disarm() {
     // history.first() is the latest entry (prepended)
     let disarm_entry = history.first().unwrap();
     assert_eq!(disarm_entry.action, "DISARMED_SHUTDOWN");
-    assert!(disarm_entry.reason.contains("Emergency unauthenticated disarm"));
+    assert!(disarm_entry
+        .reason
+        .contains("Emergency unauthenticated disarm"));
 }
 
 #[tokio::test]
@@ -742,7 +831,11 @@ async fn test_reversible_mode_authenticated_disarm_and_bad_credentials() {
         confirmation_phrase: Some("WRONG_CONFIRMATION_PHRASE".to_string()),
     };
     let bad_res = mgr
-        .disarm_isolation("unauthorized_user", "Unauthorized disarm attempt", Some(&bad_creds))
+        .disarm_isolation(
+            "unauthorized_user",
+            "Unauthorized disarm attempt",
+            Some(&bad_creds),
+        )
         .await;
 
     // Disarm with bad credentials must be rejected
@@ -765,7 +858,11 @@ async fn test_reversible_mode_authenticated_disarm_and_bad_credentials() {
         confirmation_phrase: Some(test_master_token.to_string()),
     };
     let restored = mgr
-        .disarm_isolation("SecOps-Lead", "Incident remediated cleanly", Some(&valid_creds))
+        .disarm_isolation(
+            "SecOps-Lead",
+            "Incident remediated cleanly",
+            Some(&valid_creds),
+        )
         .await
         .expect("Authorized disarm must succeed with valid token");
 
@@ -802,8 +899,8 @@ async fn test_client_server_disarm_integration_and_offline_fallback() {
     assert!(runtime.containment_manager.get_status().isolated);
 
     // 2. Disarm via in-process emergency function
-    let disarm_status = execute_host_disarm_unauthenticated()
-        .expect("Direct emergency disarm must succeed");
+    let disarm_status =
+        execute_host_disarm_unauthenticated().expect("Direct emergency disarm must succeed");
     assert!(!disarm_status.isolated);
 
     // 3. Test KillSwitchClient offline fallback
@@ -816,7 +913,9 @@ async fn test_client_server_disarm_integration_and_offline_fallback() {
 
     assert!(fallback_res.success);
     assert!(
-        fallback_res.message.contains("Direct in-process emergency restore"),
+        fallback_res
+            .message
+            .contains("Direct in-process emergency restore"),
         "Message must confirm in-process emergency fallback execution: {}",
         fallback_res.message
     );

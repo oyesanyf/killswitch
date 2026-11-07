@@ -52,7 +52,10 @@ fn test_empirical_active_socket_telemetry_latency_under_250ms() {
         let rows = query_live_os_process_sockets();
         let elapsed = start.elapsed();
 
-        assert!(!rows.is_empty(), "query_live_os_process_sockets must return active process rows");
+        assert!(
+            !rows.is_empty(),
+            "query_live_os_process_sockets must return active process rows"
+        );
         total_duration += elapsed;
         if elapsed > max_duration {
             max_duration = elapsed;
@@ -104,11 +107,20 @@ fn test_empirical_processes_without_open_sockets_reported() {
             "Kernel PIDs <= 4 must be excluded from socket emission (got PID {})",
             row.pid
         );
-        assert!(!row.process_name.is_empty(), "Process name must be populated");
+        assert!(
+            !row.process_name.is_empty(),
+            "Process name must be populated"
+        );
         assert_eq!(row.direction, "NONE", "Direction must be NONE");
         assert_eq!(row.state, "RUNNING", "State must be RUNNING");
-        assert_eq!(row.local_port, 0, "Local port must be 0 for socketless processes");
-        assert_eq!(row.remote_port, 0, "Remote port must be 0 for socketless processes");
+        assert_eq!(
+            row.local_port, 0,
+            "Local port must be 0 for socketless processes"
+        );
+        assert_eq!(
+            row.remote_port, 0,
+            "Remote port must be 0 for socketless processes"
+        );
         assert!(
             row.remote_address.is_empty(),
             "Remote address must be empty for socketless processes"
@@ -133,23 +145,38 @@ fn test_empirical_linux_proc_net_tcp_and_tcp6_parser_stress() {
     assert_eq!(entries_v4.len(), 3, "All 3 IPv4 lines must parse cleanly");
 
     // Line 0: Listen on 127.0.0.1:3030
-    assert_eq!(entries_v4[0].local_addr, IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
+    assert_eq!(
+        entries_v4[0].local_addr,
+        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))
+    );
     assert_eq!(entries_v4[0].local_port, 3030);
     assert_eq!(entries_v4[0].state, TcpState::Listen);
     assert_eq!(entries_v4[0].inode, 35123);
     assert!(!entries_v4[0].is_ipv6);
 
     // Line 1: Established 127.0.0.1:22 -> 127.0.0.2:49153
-    assert_eq!(entries_v4[1].local_addr, IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
+    assert_eq!(
+        entries_v4[1].local_addr,
+        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))
+    );
     assert_eq!(entries_v4[1].local_port, 22);
-    assert_eq!(entries_v4[1].remote_addr, IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)));
+    assert_eq!(
+        entries_v4[1].remote_addr,
+        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2))
+    );
     assert_eq!(entries_v4[1].remote_port, 49153);
     assert_eq!(entries_v4[1].state, TcpState::Established);
 
     // Line 2: Established 192.168.1.5:54321 -> 8.8.8.8:53
-    assert_eq!(entries_v4[2].local_addr, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 5)));
+    assert_eq!(
+        entries_v4[2].local_addr,
+        IpAddr::V4(Ipv4Addr::new(192, 168, 1, 5))
+    );
     assert_eq!(entries_v4[2].local_port, 54321);
-    assert_eq!(entries_v4[2].remote_addr, IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)));
+    assert_eq!(
+        entries_v4[2].remote_addr,
+        IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))
+    );
     assert_eq!(entries_v4[2].remote_port, 53);
 
     // 2. Realistic IPv6 /proc/net/tcp6 sample content
@@ -206,7 +233,10 @@ fn test_empirical_macos_darwin_socket_structures() {
     let darwin_res = get_active_darwin_sockets();
     assert!(darwin_res.is_ok(), "Darwin socket query must succeed");
     let sockets = darwin_res.unwrap();
-    assert!(!sockets.is_empty(), "Darwin socket table must return entries");
+    assert!(
+        !sockets.is_empty(),
+        "Darwin socket table must return entries"
+    );
 
     // 2. Verify DarwinSocketEntry semantic methods
     let local_entry = DarwinSocketEntry {
@@ -383,12 +413,7 @@ fn test_empirical_immutable_kernel_anchors_strictly_preserved() {
     }
 
     // 4. Canonical macOS immutable anchors
-    let mac_anchors = [
-        "launchd",
-        "kernel_task",
-        "windowserver",
-        "opendirectoryd",
-    ];
+    let mac_anchors = ["launchd", "kernel_task", "windowserver", "opendirectoryd"];
     for anchor in mac_anchors {
         assert!(
             is_immutable_os_kernel_pid(1, anchor),
@@ -530,9 +555,18 @@ async fn test_empirical_adversarial_challenge_direct_target_immunity() {
     let python_lineage = inspect_process_lineage(5003, Some("python.exe"));
     let ps_lineage = inspect_process_lineage(5004, Some("powershell.exe"));
 
-    println!("🔬 [EMPIRICAL FINDING PROBE] node.exe lineage verdict: {:?}", node_lineage);
-    println!("🔬 [EMPIRICAL FINDING PROBE] python.exe lineage verdict: {:?}", python_lineage);
-    println!("🔬 [EMPIRICAL FINDING PROBE] powershell.exe lineage verdict: {:?}", ps_lineage);
+    println!(
+        "🔬 [EMPIRICAL FINDING PROBE] node.exe lineage verdict: {:?}",
+        node_lineage
+    );
+    println!(
+        "🔬 [EMPIRICAL FINDING PROBE] python.exe lineage verdict: {:?}",
+        python_lineage
+    );
+    println!(
+        "🔬 [EMPIRICAL FINDING PROBE] powershell.exe lineage verdict: {:?}",
+        ps_lineage
+    );
 
     let node_candidate = ThreatCandidate::new(
         Some(5002),
@@ -545,7 +579,10 @@ async fn test_empirical_adversarial_challenge_direct_target_immunity() {
     let node_result = adjudicator
         .adjudicate_threat_candidate(&node_candidate, None)
         .await;
-    println!("🔬 [EMPIRICAL ADJUDICATION PROBE] node.exe adjudication result: {:?}", node_result);
+    println!(
+        "🔬 [EMPIRICAL ADJUDICATION PROBE] node.exe adjudication result: {:?}",
+        node_result
+    );
 
     // Note for Challenger Report: If node.exe/python.exe/powershell.exe are granted ImmuneTarget,
     // this empirically proves that is_blanket_immunity_denied() only denied wsl.exe/sudo/su/doas/pkexec,
@@ -563,13 +600,22 @@ fn test_empirical_dynamic_binary_probe_metadata_and_pe_manifest() {
     assert!(!meta.is_privileged_target());
 
     meta.elevation_requirement = ElevationRequirement::RequireAdministrator;
-    assert!(meta.is_privileged_target(), "RequireAdministrator must be privileged");
+    assert!(
+        meta.is_privileged_target(),
+        "RequireAdministrator must be privileged"
+    );
 
     meta.elevation_requirement = ElevationRequirement::HighestAvailable;
-    assert!(meta.is_privileged_target(), "HighestAvailable must be privileged");
+    assert!(
+        meta.is_privileged_target(),
+        "HighestAvailable must be privileged"
+    );
 
     meta.elevation_requirement = ElevationRequirement::AsInvoker;
-    assert!(!meta.is_privileged_target(), "AsInvoker alone is not privileged");
+    assert!(
+        !meta.is_privileged_target(),
+        "AsInvoker alone is not privileged"
+    );
 
     meta.is_suid = true;
     meta.file_uid = 0;
@@ -577,10 +623,16 @@ fn test_empirical_dynamic_binary_probe_metadata_and_pe_manifest() {
 
     meta.is_suid = true;
     meta.file_uid = 1000;
-    assert!(!meta.is_privileged_target(), "SUID non-root alone is not privileged");
+    assert!(
+        !meta.is_privileged_target(),
+        "SUID non-root alone is not privileged"
+    );
 
     meta.invokes_wsl_subsystem = true;
-    assert!(meta.is_privileged_target(), "WSL subsystem invocation must be privileged");
+    assert!(
+        meta.is_privileged_target(),
+        "WSL subsystem invocation must be privileged"
+    );
 
     // 2. Synthetic PE Manifest XML Extraction
     let temp_dir = tempfile::tempdir().unwrap();
@@ -626,7 +678,13 @@ fn test_empirical_dynamic_token_delta_observation() {
     };
     let deltas = evaluate_security_context_delta(&parent_clean, &child_escalated);
     assert!(
-        deltas.iter().any(|d| matches!(d, SecurityContextDelta::LinuxEuidEscalation { parent_euid: 1000, child_euid: 0 })),
+        deltas.iter().any(|d| matches!(
+            d,
+            SecurityContextDelta::LinuxEuidEscalation {
+                parent_euid: 1000,
+                child_euid: 0
+            }
+        )),
         "Linux EUID escalation must be captured"
     );
     assert!(deltas.iter().any(|d| d.is_privilege_escalation()));
@@ -648,11 +706,19 @@ fn test_empirical_dynamic_token_delta_observation() {
     };
     let win_deltas = evaluate_security_context_delta(&parent_win, &child_win_high);
     assert!(
-        win_deltas.iter().any(|d| matches!(d, SecurityContextDelta::WindowsIntegrityEscalation { parent_rid: 0x2000, child_rid: 0x3000 })),
+        win_deltas.iter().any(|d| matches!(
+            d,
+            SecurityContextDelta::WindowsIntegrityEscalation {
+                parent_rid: 0x2000,
+                child_rid: 0x3000
+            }
+        )),
         "Windows integrity escalation must be captured"
     );
     assert!(
-        win_deltas.iter().any(|d| matches!(d, SecurityContextDelta::WindowsTokenElevation)),
+        win_deltas
+            .iter()
+            .any(|d| matches!(d, SecurityContextDelta::WindowsTokenElevation)),
         "Windows token elevation must be captured"
     );
 
@@ -666,7 +732,10 @@ fn test_empirical_dynamic_token_delta_observation() {
     };
     let session_deltas = evaluate_security_context_delta(&parent_win, &child_service);
     assert!(
-        session_deltas.iter().any(|d| matches!(d, SecurityContextDelta::WindowsSession0Transition { parent_session: 1 })),
+        session_deltas.iter().any(|d| matches!(
+            d,
+            SecurityContextDelta::WindowsSession0Transition { parent_session: 1 }
+        )),
         "Windows Session 0 transition must be captured"
     );
 
@@ -680,13 +749,19 @@ fn test_empirical_dynamic_token_delta_observation() {
     };
     let clean_deltas = evaluate_security_context_delta(&parent_win, &clean_child);
     assert_eq!(clean_deltas.len(), 1);
-    assert_eq!(clean_deltas[0], SecurityContextDelta::CleanIdentityPreserved);
+    assert_eq!(
+        clean_deltas[0],
+        SecurityContextDelta::CleanIdentityPreserved
+    );
     assert!(!clean_deltas[0].is_privilege_escalation());
 
     // 5. Live PID query check (PID 4 and self PID)
     let self_pid = std::process::id();
     let live_deltas = observe_parent_child_token_delta(4, self_pid);
-    println!("🛡️  Live token deltas (PID 4 -> self PID {}): {:?}", self_pid, live_deltas);
+    println!(
+        "🛡️  Live token deltas (PID 4 -> self PID {}): {:?}",
+        self_pid, live_deltas
+    );
     // Observe that live query executes cleanly without panic
     assert!(!live_deltas.is_empty());
 }

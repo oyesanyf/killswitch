@@ -29,7 +29,9 @@ use serde::{Deserialize, Serialize};
 use sysinfo::{ProcessRefreshKind, RefreshKind, System};
 
 use killswitch_types::adjudication::EvidenceClass;
-use killswitch_types::telemetry::{SecurityEvent, TelemetryEventKind, ThreatSeverity, ThreatSignal};
+use killswitch_types::telemetry::{
+    SecurityEvent, TelemetryEventKind, ThreatSeverity, ThreatSignal,
+};
 
 use crate::attack::AttackStage;
 use crate::rl_traffic::query_live_os_process_sockets;
@@ -300,25 +302,28 @@ impl StatefulProcessLineageTree {
                 self.nodes.remove(&oldest_pid);
             }
         }
-        let entry = self.nodes.entry(ev.pid).or_insert_with(|| ProcessLineageNode {
-            pid: ev.pid,
-            parent_pid: ev.parent_pid,
-            process_name: ev.process_name.clone(),
-            image_path: ev.image_path.clone(),
-            command_line: ev.command_line.clone(),
-            account_name: ev.account_name.clone(),
-            account_role: ev.account_role,
-            first_seen: now,
-            last_seen: now,
-            children_pids: Vec::new(),
-            api_calls_observed: Vec::new(),
-            unsigned_dlls_loaded: Vec::new(),
-            external_connections: Vec::new(),
-            total_outbound_bytes: 0,
-            rapid_file_mod_count: 0,
-            max_file_entropy: 0.0,
-            shadow_copy_delete_attempted: false,
-        });
+        let entry = self
+            .nodes
+            .entry(ev.pid)
+            .or_insert_with(|| ProcessLineageNode {
+                pid: ev.pid,
+                parent_pid: ev.parent_pid,
+                process_name: ev.process_name.clone(),
+                image_path: ev.image_path.clone(),
+                command_line: ev.command_line.clone(),
+                account_name: ev.account_name.clone(),
+                account_role: ev.account_role,
+                first_seen: now,
+                last_seen: now,
+                children_pids: Vec::new(),
+                api_calls_observed: Vec::new(),
+                unsigned_dlls_loaded: Vec::new(),
+                external_connections: Vec::new(),
+                total_outbound_bytes: 0,
+                rapid_file_mod_count: 0,
+                max_file_entropy: 0.0,
+                shadow_copy_delete_attempted: false,
+            });
 
         entry.last_seen = now;
         if ev.parent_pid.is_some() {
@@ -333,7 +338,8 @@ impl StatefulProcessLineageTree {
             }
         }
         if let Some(dll_path) = &ev.target_file_or_dll_path {
-            if ev.module_is_signed == Some(false) && !entry.unsigned_dlls_loaded.contains(dll_path) {
+            if ev.module_is_signed == Some(false) && !entry.unsigned_dlls_loaded.contains(dll_path)
+            {
                 entry.unsigned_dlls_loaded.push(dll_path.clone());
             }
         }
@@ -457,14 +463,16 @@ impl StatefulProcessLineageTree {
         let root_pid = chain.first().map(|n| n.pid).unwrap_or(leaf_pid);
 
         // Check 1: Document/Office/Mail/PDF app -> Shell (cmd/powershell/wscript) -> Encoded payload / External IP
-        let has_office_ancestor = chain.iter().any(|n| is_document_or_mail_app(&n.process_name));
-        let has_command_shell = chain.iter().any(|n| is_command_shell_binary(&n.process_name));
+        let has_office_ancestor = chain
+            .iter()
+            .any(|n| is_document_or_mail_app(&n.process_name));
+        let has_command_shell = chain
+            .iter()
+            .any(|n| is_command_shell_binary(&n.process_name));
         let has_encoded_payload = chain
             .iter()
             .any(|n| has_encoded_or_stealth_powershell_flags(&n.command_line));
-        let has_external_net = chain
-            .iter()
-            .any(|n| !n.external_connections.is_empty());
+        let has_external_net = chain.iter().any(|n| !n.external_connections.is_empty());
 
         if has_office_ancestor && has_command_shell && (has_encoded_payload || has_external_net) {
             let confidence = if has_encoded_payload && has_external_net {
@@ -842,7 +850,10 @@ impl EndpointBehavioralBaseline {
                     ),
                 });
             } else {
-                *self.recon_counts_by_role.entry(ev.account_role).or_insert(0) += 1;
+                *self
+                    .recon_counts_by_role
+                    .entry(ev.account_role)
+                    .or_insert(0) += 1;
             }
         }
 
@@ -1302,10 +1313,12 @@ impl EdrBehavioralEngine {
         narrative.recompute(&tree_guard);
         if !matches!(
             narrative.containment_action,
-            EdrContainmentAction::MonitorOnly | EdrContainmentAction::ElevateAlertToAdjudicator { .. }
+            EdrContainmentAction::MonitorOnly
+                | EdrContainmentAction::ElevateAlertToAdjudicator { .. }
         ) && matches!(
             prev_action,
-            EdrContainmentAction::MonitorOnly | EdrContainmentAction::ElevateAlertToAdjudicator { .. }
+            EdrContainmentAction::MonitorOnly
+                | EdrContainmentAction::ElevateAlertToAdjudicator { .. }
         ) {
             self.automated_containments_triggered
                 .fetch_add(1, Ordering::Relaxed);
@@ -1650,9 +1663,9 @@ mod tests {
         ps_ev.destination_ip = Some("198.51.100.42".to_string());
         ps_ev.destination_port = Some(8443);
 
-        let narrative = engine
-            .ingest_telemetry_event(&ps_ev)
-            .expect("Word -> cmd -> encoded PowerShell -> external IP must emit a threat narrative");
+        let narrative = engine.ingest_telemetry_event(&ps_ev).expect(
+            "Word -> cmd -> encoded PowerShell -> external IP must emit a threat narrative",
+        );
 
         assert!(narrative.composite_risk_score >= 0.90);
         assert!(narrative
@@ -1743,9 +1756,9 @@ mod tests {
             &vss_cmd,
             "corp_user",
         );
-        let nar_ransom = engine
-            .ingest_telemetry_event(&vss_child)
-            .expect("Rapid encryption + shadow copy deletion must trigger critical ransomware narrative");
+        let nar_ransom = engine.ingest_telemetry_event(&vss_child).expect(
+            "Rapid encryption + shadow copy deletion must trigger critical ransomware narrative",
+        );
         assert!(nar_ransom
             .mitre_techniques
             .contains(&"T1486+T1490".to_string()));

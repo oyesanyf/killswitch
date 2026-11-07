@@ -12,20 +12,17 @@
 //! - Zero `pfctl` subprocess invocations.
 //! - Safe fallback / simulation when running on non-macOS or non-root test environments.
 
-use killswitch_types::{
-    errors::Result,
-    status::{
-        IsolationReceipt, NetworkIsolationEngine, NetworkIsolator,
-        DEFAULT_CONTROL_PORT,
-    },
-};
 #[cfg(target_os = "macos")]
 use killswitch_types::errors::KillSwitchError;
+use killswitch_types::{
+    errors::Result,
+    status::{IsolationReceipt, NetworkIsolationEngine, NetworkIsolator, DEFAULT_CONTROL_PORT},
+};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::PathBuf;
-use tracing::{debug, info};
 #[cfg(target_os = "macos")]
 use tracing::warn;
+use tracing::{debug, info};
 
 // -----------------------------------------------------------------------------
 // Constants & Ioctl Numbers (Darwin BSD net/pfvar.h & sys/ioccom.h)
@@ -384,7 +381,10 @@ pub fn generate_quarantine_rules(
         dst: "any".to_string(),
         dst_port: Some(control_port),
         keep_state: true,
-        comment: format!("Allow inbound HTTP/JSON API on port {} on lo0", control_port),
+        comment: format!(
+            "Allow inbound HTTP/JSON API on port {} on lo0",
+            control_port
+        ),
     });
 
     rules.push(PfRuleSpec {
@@ -398,7 +398,10 @@ pub fn generate_quarantine_rules(
         dst: "any".to_string(),
         dst_port: None,
         keep_state: true,
-        comment: format!("Allow outbound HTTP/JSON responses from port {} on lo0", control_port),
+        comment: format!(
+            "Allow outbound HTTP/JSON responses from port {} on lo0",
+            control_port
+        ),
     });
 
     // 4. Default block rules (quick: true unconditionally to drop all non-loopback packets)
@@ -430,7 +433,10 @@ pub fn generate_quarantine_rules(
         comment: "Default hermetic block drop out all".to_string(),
     });
 
-    let mut syntax = format!("# KillSwitch macOS Native PF Quarantine Ruleset (Anchor: {})\n", anchor);
+    let mut syntax = format!(
+        "# KillSwitch macOS Native PF Quarantine Ruleset (Anchor: {})\n",
+        anchor
+    );
     for r in &rules {
         syntax.push_str(&format!("{} # {}\n", r.to_rule_string(), r.comment));
     }
@@ -474,20 +480,18 @@ pub fn get_active_darwin_sockets() -> Result<Vec<DarwinSocketEntry>> {
     #[cfg(not(target_os = "macos"))]
     {
         // Safe, non-mock simulation for test environments
-        Ok(vec![
-            DarwinSocketEntry {
-                pid: Some(std::process::id()),
-                proc_name: Some("killswitch".to_string()),
-                fd: Some(3),
-                local_addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-                local_port: DEFAULT_CONTROL_PORT,
-                foreign_addr: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                foreign_port: 0,
-                is_loopback: true,
-                is_tcp: true,
-                state_name: "LISTEN".to_string(),
-            },
-        ])
+        Ok(vec![DarwinSocketEntry {
+            pid: Some(std::process::id()),
+            proc_name: Some("killswitch".to_string()),
+            fd: Some(3),
+            local_addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            local_port: DEFAULT_CONTROL_PORT,
+            foreign_addr: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            foreign_port: 0,
+            is_loopback: true,
+            is_tcp: true,
+            state_name: "LISTEN".to_string(),
+        }])
     }
 }
 
@@ -567,18 +571,13 @@ impl MacOsPfIsolator {
 
     /// Internal device ioctl executor for Darwin kernel transactions.
     #[cfg(target_os = "macos")]
-    fn execute_ioctl_transaction(
-        &self,
-        rules: &[PfRuleSpec],
-    ) -> Result<u32> {
+    fn execute_ioctl_transaction(&self, rules: &[PfRuleSpec]) -> Result<u32> {
         use std::ffi::CString;
 
         let dev_c = CString::new(self.device_path.to_str().unwrap_or(PF_DEVICE_PATH))
             .map_err(|e| KillSwitchError::Other(e.to_string()))?;
 
-        let fd = unsafe {
-            libc::open(dev_c.as_ptr(), libc::O_RDWR)
-        };
+        let fd = unsafe { libc::open(dev_c.as_ptr(), libc::O_RDWR) };
 
         if fd < 0 {
             let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
@@ -740,9 +739,7 @@ impl MacOsPfIsolator {
         let dev_c = CString::new(self.device_path.to_str().unwrap_or(PF_DEVICE_PATH))
             .map_err(|e| KillSwitchError::Other(e.to_string()))?;
 
-        let fd = unsafe {
-            libc::open(dev_c.as_ptr(), libc::O_RDWR)
-        };
+        let fd = unsafe { libc::open(dev_c.as_ptr(), libc::O_RDWR) };
 
         if fd < 0 {
             let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
@@ -842,10 +839,7 @@ impl NetworkIsolator for MacOsPfIsolator {
         Ok(())
     }
 
-    fn reset_tcp_connections(
-        &self,
-        _target_ips: Option<&[IpAddr]>,
-    ) -> Result<usize> {
+    fn reset_tcp_connections(&self, _target_ips: Option<&[IpAddr]>) -> Result<usize> {
         let sockets = get_active_darwin_sockets()?;
         let mut closed_count = 0;
 
@@ -859,7 +853,10 @@ impl NetworkIsolator for MacOsPfIsolator {
             }
         }
 
-        info!("🟢 [MACOS-PF] Reset {} external TCP connections.", closed_count);
+        info!(
+            "🟢 [MACOS-PF] Reset {} external TCP connections.",
+            closed_count
+        );
         Ok(closed_count)
     }
 }
@@ -909,7 +906,9 @@ mod tests {
         assert_eq!(receipt.engine, NetworkIsolationEngine::DarwinPf);
         assert!(receipt.session_id.contains("test_anchor"));
         assert!(receipt.preserved_ports.contains(&3030));
-        assert!(receipt.preserved_ips.contains(&IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))));
+        assert!(receipt
+            .preserved_ips
+            .contains(&IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))));
 
         // Verification of rollback
         let restore_res = isolator.restore_quarantine(&receipt);

@@ -10,7 +10,6 @@
 //! - Monotonic generation epoch autotomy (`Gen N -> Gen N+1`) on quorum release (`quorum >= 2`).
 //! - Crash-safe persistence via Ed25519-sealed `QuarantineJournal`.
 
-use std::sync::Arc;
 use axum::{
     body::Bytes,
     extract::{Path, State},
@@ -23,6 +22,7 @@ use base64::Engine;
 use chrono::Utc;
 use ed25519_dalek::{Signature, Signer, Verifier};
 use sha2::Digest;
+use std::sync::Arc;
 use tracing::{info, warn};
 
 use crate::error::ServerError;
@@ -34,9 +34,7 @@ use crate::types::*;
 ///
 /// Exposes KillSwitch's active Ed25519 public key in RFC 8037 JWKS format
 /// for out-of-band trust anchor resolution by CAGE Layer 3 adapters.
-pub async fn handle_jwks(
-    State(state): State<Arc<ServerState>>,
-) -> impl IntoResponse {
+pub async fn handle_jwks(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
     (
         StatusCode::OK,
         [(header::CONTENT_TYPE, "application/json")],
@@ -89,7 +87,9 @@ pub async fn handle_cage_quarantine(
     // 5. Verify Ed25519 signature
     let sig_bytes = URL_SAFE_NO_PAD
         .decode(assertion_sig_b64.trim())
-        .map_err(|e| ServerError::SignatureInvalid(format!("Malformed base64url signature: {}", e)))?;
+        .map_err(|e| {
+            ServerError::SignatureInvalid(format!("Malformed base64url signature: {}", e))
+        })?;
     if sig_bytes.len() != 64 {
         return Err(ServerError::SignatureInvalid(
             "Signature must be exactly 64 bytes".to_string(),
@@ -99,15 +99,14 @@ pub async fn handle_cage_quarantine(
     sig_arr.copy_from_slice(&sig_bytes);
     let signature = Signature::from_bytes(&sig_arr);
 
-    verifying_key
-        .verify(&preimage, &signature)
-        .map_err(|e| {
-            ServerError::SignatureInvalid(format!("Ed25519 signature verification failed: {}", e))
-        })?;
+    verifying_key.verify(&preimage, &signature).map_err(|e| {
+        ServerError::SignatureInvalid(format!("Ed25519 signature verification failed: {}", e))
+    })?;
 
     // 6. Deserialize and validate payload
-    let req: CageQuarantineRequest = serde_json::from_value(parsed_val)
-        .map_err(|e| ServerError::Validation(format!("Failed to parse QuarantineDirective fields: {}", e)))?;
+    let req: CageQuarantineRequest = serde_json::from_value(parsed_val).map_err(|e| {
+        ServerError::Validation(format!("Failed to parse QuarantineDirective fields: {}", e))
+    })?;
 
     // 7. Anti-replay nonce validation
     state
@@ -137,7 +136,10 @@ pub async fn handle_cage_quarantine(
         if pid > 0 {
             match state.containment_manager.freeze_process(pid) {
                 Ok(_) => info!("❄️ [CAGE-SUBSTRATE] Suspended target process PID {}", pid),
-                Err(e) => warn!("⚠️ [CAGE-SUBSTRATE] Process freeze failed for PID {}: {}", pid, e),
+                Err(e) => warn!(
+                    "⚠️ [CAGE-SUBSTRATE] Process freeze failed for PID {}: {}",
+                    pid, e
+                ),
             }
         }
     }
@@ -157,10 +159,12 @@ pub async fn handle_cage_quarantine(
         expires_at: None,
         nonce: req.nonce.clone(),
     };
-    state
-        .journal
-        .record_quarantine(lease)
-        .map_err(|e| ServerError::Internal(format!("Failed to record quarantine lease in sealed journal: {}", e)))?;
+    state.journal.record_quarantine(lease).map_err(|e| {
+        ServerError::Internal(format!(
+            "Failed to record quarantine lease in sealed journal: {}",
+            e
+        ))
+    })?;
 
     // 11. Construct unsigned receipt
     let envelope_digest = hex::encode(sha2::Sha256::digest(&canonical_body));
@@ -178,8 +182,10 @@ pub async fn handle_cage_quarantine(
     }
 
     // 12. Canonicalize receipt and sign with KillSwitch's keypair
-    let canonical_receipt = killswitch_telemetry::canonicalize_jcs(&unsigned_receipt)
-        .map_err(|e| ServerError::Internal(format!("Receipt JCS canonicalization failed: {}", e)))?;
+    let canonical_receipt =
+        killswitch_telemetry::canonicalize_jcs(&unsigned_receipt).map_err(|e| {
+            ServerError::Internal(format!("Receipt JCS canonicalization failed: {}", e))
+        })?;
     let mut receipt_preimage = b"CAGE_QUARANTINE_RECEIPT_V1:".to_vec();
     receipt_preimage.extend_from_slice(&canonical_receipt);
 
@@ -244,7 +250,9 @@ pub async fn handle_cage_release(
 
     let sig_bytes = URL_SAFE_NO_PAD
         .decode(release_sig_b64.trim())
-        .map_err(|e| ServerError::SignatureInvalid(format!("Malformed base64url signature: {}", e)))?;
+        .map_err(|e| {
+            ServerError::SignatureInvalid(format!("Malformed base64url signature: {}", e))
+        })?;
     if sig_bytes.len() != 64 {
         return Err(ServerError::SignatureInvalid(
             "Signature must be exactly 64 bytes".to_string(),
@@ -254,15 +262,14 @@ pub async fn handle_cage_release(
     sig_arr.copy_from_slice(&sig_bytes);
     let signature = Signature::from_bytes(&sig_arr);
 
-    verifying_key
-        .verify(&preimage, &signature)
-        .map_err(|e| {
-            ServerError::SignatureInvalid(format!("Ed25519 signature verification failed: {}", e))
-        })?;
+    verifying_key.verify(&preimage, &signature).map_err(|e| {
+        ServerError::SignatureInvalid(format!("Ed25519 signature verification failed: {}", e))
+    })?;
 
     // 4. Deserialize release payload
-    let req: CageQuarantineReleaseRequest = serde_json::from_value(parsed_val)
-        .map_err(|e| ServerError::Validation(format!("Failed to parse QuarantineReleaseDirective: {}", e)))?;
+    let req: CageQuarantineReleaseRequest = serde_json::from_value(parsed_val).map_err(|e| {
+        ServerError::Validation(format!("Failed to parse QuarantineReleaseDirective: {}", e))
+    })?;
 
     // 5. Quorum validation: quorum_count >= 2 and valid 64-hex SHA-256 digest
     if req.quorum_count < 2 {
@@ -299,7 +306,9 @@ pub async fn handle_cage_release(
     let removed_lease = state
         .journal
         .release_quarantine(&req.workload_id)
-        .map_err(|e| ServerError::Internal(format!("Failed to release lease from journal: {}", e)))?;
+        .map_err(|e| {
+            ServerError::Internal(format!("Failed to release lease from journal: {}", e))
+        })?;
 
     // 9. If target PID was frozen, resume it
     if let Some(lease) = removed_lease {
@@ -337,8 +346,13 @@ pub async fn handle_cage_release(
         "kid": state.ed25519_kid.clone()
     });
 
-    let canonical_receipt = killswitch_telemetry::canonicalize_jcs(&unsigned_receipt)
-        .map_err(|e| ServerError::Internal(format!("Release receipt JCS canonicalization failed: {}", e)))?;
+    let canonical_receipt =
+        killswitch_telemetry::canonicalize_jcs(&unsigned_receipt).map_err(|e| {
+            ServerError::Internal(format!(
+                "Release receipt JCS canonicalization failed: {}",
+                e
+            ))
+        })?;
     let mut receipt_preimage = b"CAGE_QUARANTINE_RELEASE_RECEIPT_V1:".to_vec();
     receipt_preimage.extend_from_slice(&canonical_receipt);
 
@@ -371,8 +385,14 @@ pub async fn handle_cage_attest(
     let quote = probe.pcr_0_7_sha256;
 
     let mut pcr_map = std::collections::BTreeMap::new();
-    pcr_map.insert("0".to_string(), format!("{:x}", sha2::Sha256::digest(b"PCR0_SECURE_BOOT")));
-    pcr_map.insert("1".to_string(), format!("{:x}", sha2::Sha256::digest(b"PCR1_PLATFORM_CONFIG")));
+    pcr_map.insert(
+        "0".to_string(),
+        format!("{:x}", sha2::Sha256::digest(b"PCR0_SECURE_BOOT")),
+    );
+    pcr_map.insert(
+        "1".to_string(),
+        format!("{:x}", sha2::Sha256::digest(b"PCR1_PLATFORM_CONFIG")),
+    );
     pcr_map.insert("7".to_string(), quote.clone());
 
     // 2. Determine Ring-0 posture
@@ -380,7 +400,10 @@ pub async fn handle_cage_attest(
     let ring0_posture_str = if is_isolated {
         "ACTIVE_WFP_FILTERED".to_string()
     } else {
-        match killswitch_telemetry::global_ring0_manager().status_report().posture {
+        match killswitch_telemetry::global_ring0_manager()
+            .status_report()
+            .posture
+        {
             killswitch_telemetry::Ring0Posture::ActiveRing0Enforced => {
                 "ACTIVE_RING0_ENFORCED".to_string()
             }
@@ -543,7 +566,10 @@ pub async fn handle_conformal_validate(
         evidence_class,
     );
 
-    let adjudication = state.adjudicator.adjudicate_threat_candidate(&candidate, None).await;
+    let adjudication = state
+        .adjudicator
+        .adjudicate_threat_candidate(&candidate, None)
+        .await;
 
     let voter_consensus = if admitted && !adjudication.is_confirmed() {
         "CONSENSUS_ALLOW".to_string()

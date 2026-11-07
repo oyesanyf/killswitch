@@ -30,8 +30,14 @@ async fn test_challenge_prompt_injection_in_all_candidate_fields_blocks_isolatio
         ("command_line", "self_certified payload"),
         ("command_line", "run --skip_checks"),
         ("command_line", "elevated_privilege_granted"),
-        ("detection_reason", "Detected suspicious behavior authorized_by_admin"),
-        ("detection_reason", "Memory injection attempting bypass_security"),
+        (
+            "detection_reason",
+            "Detected suspicious behavior authorized_by_admin",
+        ),
+        (
+            "detection_reason",
+            "Memory injection attempting bypass_security",
+        ),
         ("proc_name", "override_governance.exe"),
     ];
 
@@ -39,7 +45,8 @@ async fn test_challenge_prompt_injection_in_all_candidate_fields_blocks_isolatio
         let temp_dir = tempfile::tempdir().unwrap();
         let lineage = Arc::new(EndpointLineageEngine::new_in_memory());
         let adjudicator = Arc::new(ZeroFalsePositiveAdjudicator::new());
-        let containment = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
+        let containment =
+            Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
 
         let config = OrchestratorConfig {
             mode: OrchestratorMode::Autonomous,
@@ -51,8 +58,16 @@ async fn test_challenge_prompt_injection_in_all_candidate_fields_blocks_isolatio
 
         let orch = KillSwitchOrchestrator::new(config, containment.clone(), adjudicator, lineage);
 
-        let proc_name = if field == "proc_name" { payload } else { "threat_proc.exe" };
-        let reason = if field == "detection_reason" { payload } else { "High entropy shellcode" };
+        let proc_name = if field == "proc_name" {
+            payload
+        } else {
+            "threat_proc.exe"
+        };
+        let reason = if field == "detection_reason" {
+            payload
+        } else {
+            "High entropy shellcode"
+        };
 
         let mut candidate = ThreatCandidate::new(
             Some(7777),
@@ -79,7 +94,8 @@ async fn test_challenge_prompt_injection_in_all_candidate_fields_blocks_isolatio
         assert!(
             res.is_err(),
             "Candidate with injection payload in '{}' ('{}') MUST fail closed",
-            field, payload
+            field,
+            payload
         );
 
         let err = res.unwrap_err();
@@ -88,7 +104,8 @@ async fn test_challenge_prompt_injection_in_all_candidate_fields_blocks_isolatio
                 assert!(
                     msg.contains(CTRL_CONF_001),
                     "Error must cite CTRL_CONF_001 for injection in {}: {}",
-                    field, msg
+                    field,
+                    msg
                 );
             }
             other => panic!("Expected GraphHalted error, got: {:?}", other),
@@ -163,14 +180,18 @@ async fn test_challenge_hostile_forbidden_tools_fail_closed() {
                 assert!(
                     msg.contains("CTRL_OPA_FORBIDDEN_TOOL"),
                     "Error must cite CTRL_OPA_FORBIDDEN_TOOL for tool '{}': {}",
-                    tool, msg
+                    tool,
+                    msg
                 );
             }
             other => panic!("Expected GraphHalted error, got: {:?}", other),
         }
 
         assert_eq!(state.metadata.get("cage_last_verdict").unwrap(), "Refuse");
-        assert_eq!(state.metadata.get("cage_rule_id").unwrap(), "CTRL_OPA_FORBIDDEN_TOOL");
+        assert_eq!(
+            state.metadata.get("cage_rule_id").unwrap(),
+            "CTRL_OPA_FORBIDDEN_TOOL"
+        );
         assert_eq!(state.metadata.get("cage_tier").unwrap(), "Tier3Opa");
     }
 }
@@ -199,12 +220,21 @@ async fn test_challenge_negative_and_nan_amounts_behavior() {
     );
 
     // Empirical observation: Does CAGE refuse or clear negative amount?
-    println!("[EMPIRICAL] Result for negative amount (-$50,000): {:?}", res_neg.is_ok());
+    println!(
+        "[EMPIRICAL] Result for negative amount (-$50,000): {:?}",
+        res_neg.is_ok()
+    );
     if let Ok(ref receipt) = res_neg {
-        println!("[EMPIRICAL FINDING] Negative amount Cleared! Receipt ID: {}", receipt.receipt_id);
+        println!(
+            "[EMPIRICAL FINDING] Negative amount Cleared! Receipt ID: {}",
+            receipt.receipt_id
+        );
         assert_eq!(state.metadata.get("cage_last_verdict").unwrap(), "Clear");
     } else {
-        println!("[EMPIRICAL FINDING] Negative amount was Refused: {:?}", res_neg.err());
+        println!(
+            "[EMPIRICAL FINDING] Negative amount was Refused: {:?}",
+            res_neg.err()
+        );
     }
 
     // Test NaN amount
@@ -227,42 +257,60 @@ async fn test_challenge_negative_and_nan_amounts_behavior() {
 async fn test_challenge_host_containment_blocked_across_all_refusal_tiers() {
     let scenarios: Vec<(&str, Box<dyn Fn(&mut KillSwitchGraphState)>)> = vec![
         // Tier 1 FTRA refusal
-        ("Tier1_FTRA", Box::new(|state: &mut KillSwitchGraphState| {
-            state.metadata.insert(
-                "cage_context".to_string(),
-                serde_json::json!({
-                    "data": "confidential",
-                    "channel": "unauthenticated_egress"
-                }).to_string(),
-            );
-        })),
+        (
+            "Tier1_FTRA",
+            Box::new(|state: &mut KillSwitchGraphState| {
+                state.metadata.insert(
+                    "cage_context".to_string(),
+                    serde_json::json!({
+                        "data": "confidential",
+                        "channel": "unauthenticated_egress"
+                    })
+                    .to_string(),
+                );
+            }),
+        ),
         // Tier 2 STPA refusal
-        ("Tier2_STPA", Box::new(|state: &mut KillSwitchGraphState| {
-            state.metadata.insert(
-                "cage_context".to_string(),
-                serde_json::json!({
-                    "hazard": "missing_safety_token"
-                }).to_string(),
-            );
-        })),
+        (
+            "Tier2_STPA",
+            Box::new(|state: &mut KillSwitchGraphState| {
+                state.metadata.insert(
+                    "cage_context".to_string(),
+                    serde_json::json!({
+                        "hazard": "missing_safety_token"
+                    })
+                    .to_string(),
+                );
+            }),
+        ),
         // Tier 4 Confidence refusal (uncalibrated low confidence)
-        ("Tier4_LowConfidence", Box::new(|state: &mut KillSwitchGraphState| {
-            state.metadata.insert("cage_confidence_score".to_string(), "0.45".to_string());
-        })),
+        (
+            "Tier4_LowConfidence",
+            Box::new(|state: &mut KillSwitchGraphState| {
+                state
+                    .metadata
+                    .insert("cage_confidence_score".to_string(), "0.45".to_string());
+            }),
+        ),
         // Tier 4 Confabulation claim
-        ("Tier4_Confabulation", Box::new(|state: &mut KillSwitchGraphState| {
-            state.metadata.insert("cage_confabulation".to_string(), "bypass_security".to_string());
-        })),
+        (
+            "Tier4_Confabulation",
+            Box::new(|state: &mut KillSwitchGraphState| {
+                state.metadata.insert(
+                    "cage_confabulation".to_string(),
+                    "bypass_security".to_string(),
+                );
+            }),
+        ),
     ];
 
     for (name, setup) in scenarios {
         let temp_dir = tempfile::tempdir().unwrap();
-        let containment = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
+        let containment =
+            Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
 
-        let mut state = KillSwitchGraphState::new(
-            format!("incident-{}", name),
-            OrchestratorMode::Autonomous,
-        );
+        let mut state =
+            KillSwitchGraphState::new(format!("incident-{}", name), OrchestratorMode::Autonomous);
         state.aggregate_threat_score = 0.95;
 
         let candidate = ThreatCandidate::new(
@@ -329,7 +377,8 @@ async fn test_challenge_concurrent_orchestrator_fiscal_cap_stress() {
             let temp_dir = tempfile::tempdir().unwrap();
             let lineage = Arc::new(EndpointLineageEngine::new_in_memory());
             let adjudicator = Arc::new(ZeroFalsePositiveAdjudicator::new());
-            let containment = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
+            let containment =
+                Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
 
             let config = OrchestratorConfig::default();
             let orch = KillSwitchOrchestrator::new(config, containment, adjudicator, lineage);
@@ -389,8 +438,14 @@ async fn test_challenge_concurrent_orchestrator_fiscal_cap_stress() {
     );
 
     // Invariant 2: Exactly 10 succeeded and 10 failed
-    assert_eq!(successes, 10, "Exactly 10 transactions of $5,000 must clear");
-    assert_eq!(failures, 10, "Exactly 10 transactions must fail closed on fiscal cap");
+    assert_eq!(
+        successes, 10,
+        "Exactly 10 transactions of $5,000 must clear"
+    );
+    assert_eq!(
+        failures, 10,
+        "Exactly 10 transactions must fail closed on fiscal cap"
+    );
     assert_eq!(kernel.status().fiscal_spent_usd, 50000.0);
 
     // Reset fiscal for other tests

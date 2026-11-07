@@ -15,15 +15,15 @@
 //!      and persists every committed command to a local `fsync`-backed AOF log with BLAKE3 frame
 //!      integrity and deterministic startup replay.
 
+use hmac::{Hmac, Mac};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::{OnceLock, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use hmac::{Hmac, Mac};
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -301,7 +301,9 @@ fn try_valkey_wire_sync(endpoint: &str, resp_payload: &[u8]) -> bool {
     }
     let mut reply = [0u8; 64];
     match stream.read(&mut reply) {
-        Ok(n) if n > 0 => reply[0] == b'+' || reply[0] == b':' || reply[0] == b'$' || reply[0] == b'*',
+        Ok(n) if n > 0 => {
+            reply[0] == b'+' || reply[0] == b':' || reply[0] == b'$' || reply[0] == b'*'
+        }
         _ => false,
     }
 }
@@ -357,14 +359,18 @@ impl RaftPeerNode {
                 voter_id: self.node_id.clone(),
                 term: self.current_term,
                 vote_granted: false,
-                reason: format!("Already voted for {:?} in term {}", self.voted_for, self.current_term),
+                reason: format!(
+                    "Already voted for {:?} in term {}",
+                    self.voted_for, self.current_term
+                ),
             };
         }
 
         // Raft Section 5.4.1 Election Restriction:
         // Candidate's log must be at least as up-to-date as voter's log.
         let log_up_to_date = (req.last_log_term > self.last_log_term)
-            || (req.last_log_term == self.last_log_term && req.last_log_index >= self.last_log_index);
+            || (req.last_log_term == self.last_log_term
+                && req.last_log_index >= self.last_log_index);
 
         if !log_up_to_date {
             return RequestVoteResponse {
@@ -395,7 +401,10 @@ impl RaftPeerNode {
         entry_blake3: &str,
     ) -> Result<QuorumNodeVote, String> {
         if term < self.current_term {
-            return Err(format!("Stale leader term {} < {}", term, self.current_term));
+            return Err(format!(
+                "Stale leader term {} < {}",
+                term, self.current_term
+            ));
         }
         self.current_term = term;
         self.last_log_index = index;
@@ -437,7 +446,7 @@ struct ClusterMutableState {
     log: Vec<RaftLogEntry>,
     fiscal_spent_micro_usd: HashMap<String, u64>,
     fiscal_committed_requests: HashMap<String, (u64, u64)>, // request_id -> (log_index, spent_after)
-    checkpoints: HashMap<String, (String, String, u64)>,    // incident_id -> (json, blake3, log_idx)
+    checkpoints: HashMap<String, (String, String, u64)>, // incident_id -> (json, blake3, log_idx)
     lineage_taints: HashMap<String, ClusterLineageTaintRecord>,
     revoked_envelopes: HashSet<String>,
     aof_bytes_written: u64,

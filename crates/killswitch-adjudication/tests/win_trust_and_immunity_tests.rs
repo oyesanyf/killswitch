@@ -30,11 +30,19 @@ fn test_wintrust_cache_ttl_and_invalidation() {
 #[test]
 fn test_untrusted_writable_location_rejections() {
     // Windows temp / download directories
-    assert!(is_untrusted_writable_location("C:\\Users\\Alice\\AppData\\Local\\Temp\\dropper.exe"));
-    assert!(is_untrusted_writable_location("C:\\Users\\Alice\\Downloads\\installer.exe"));
+    assert!(is_untrusted_writable_location(
+        "C:\\Users\\Alice\\AppData\\Local\\Temp\\dropper.exe"
+    ));
+    assert!(is_untrusted_writable_location(
+        "C:\\Users\\Alice\\Downloads\\installer.exe"
+    ));
     assert!(is_untrusted_writable_location("C:\\Users\\Public\\mal.exe"));
-    assert!(is_untrusted_writable_location("C:\\ProgramData\\Temp\\tool.exe"));
-    assert!(is_untrusted_writable_location("D:\\projects\\target\\debug\\binary.exe"));
+    assert!(is_untrusted_writable_location(
+        "C:\\ProgramData\\Temp\\tool.exe"
+    ));
+    assert!(is_untrusted_writable_location(
+        "D:\\projects\\target\\debug\\binary.exe"
+    ));
 
     // Linux / macOS temp directories
     assert!(is_untrusted_writable_location("/tmp/payload"));
@@ -43,8 +51,12 @@ fn test_untrusted_writable_location_rejections() {
     assert!(is_untrusted_writable_location("/users/public/tool"));
 
     // Trusted system paths must not be marked untrusted
-    assert!(!is_untrusted_writable_location("C:\\Windows\\System32\\svchost.exe"));
-    assert!(!is_untrusted_writable_location("C:\\Program Files\\Git\\bin\\git.exe"));
+    assert!(!is_untrusted_writable_location(
+        "C:\\Windows\\System32\\svchost.exe"
+    ));
+    assert!(!is_untrusted_writable_location(
+        "C:\\Program Files\\Git\\bin\\git.exe"
+    ));
     assert!(!is_untrusted_writable_location("/bin/ls"));
     assert!(!is_untrusted_writable_location("/usr/bin/cargo"));
 }

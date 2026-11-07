@@ -3,15 +3,15 @@
 //! Enforces the fail-closed restart invariant: on daemon restart, unexpired quarantine leases
 //! are re-verified from the sealed journal and immediately re-enforced before serving any traffic.
 
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Arc;
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Arc;
 use tracing::info;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -213,11 +213,13 @@ impl QuarantineJournal {
             .map_err(|e| format!("Serialization error: {}", e))?;
 
         let target_path = self.journal_file_path();
-        let temp_path = self.state_dir.join(format!(".journal_{}.tmp", uuid::Uuid::new_v4()));
+        let temp_path = self
+            .state_dir
+            .join(format!(".journal_{}.tmp", uuid::Uuid::new_v4()));
 
         std::fs::write(&temp_path, serialized.as_bytes())
             .map_err(|e| format!("Failed to write temp journal: {}", e))?;
-        
+
         // Ensure file is synced to disk
         if let Ok(file) = std::fs::File::open(&temp_path) {
             let _ = file.sync_all();
@@ -271,16 +273,27 @@ impl QuarantineJournal {
 
     /// Gets current generation epoch for a workload.
     pub fn get_generation_epoch(&self, workload_id: &str) -> u64 {
-        self.data.read().generation_epochs.get(workload_id).copied().unwrap_or(1)
+        self.data
+            .read()
+            .generation_epochs
+            .get(workload_id)
+            .copied()
+            .unwrap_or(1)
     }
 
     /// Monotonically advances generation epoch `Gen N -> Gen N + 1`, appends record, and seals journal.
     pub fn advance_generation_epoch(&self, workload_id: &str) -> Result<(u64, u64), String> {
         let (before, after) = {
             let mut guard = self.data.write();
-            let current = guard.generation_epochs.get(workload_id).copied().unwrap_or(1);
+            let current = guard
+                .generation_epochs
+                .get(workload_id)
+                .copied()
+                .unwrap_or(1);
             let next = current + 1;
-            guard.generation_epochs.insert(workload_id.to_string(), next);
+            guard
+                .generation_epochs
+                .insert(workload_id.to_string(), next);
             let payload_digest = format!("epoch:{}->{}", current, next);
             guard.append_record("ADVANCE_EPOCH", workload_id, None, &payload_digest);
             guard.last_updated_utc = Utc::now();
@@ -405,7 +418,11 @@ mod tests {
         let signing_key = Arc::new(SigningKey::generate(&mut rng));
         let kid = "test_journal_kid_1234567890abcdef".to_string();
 
-        let journal = QuarantineJournal::new(temp_dir.path().to_path_buf(), Arc::clone(&signing_key), kid.clone());
+        let journal = QuarantineJournal::new(
+            temp_dir.path().to_path_buf(),
+            Arc::clone(&signing_key),
+            kid.clone(),
+        );
 
         // 1. Initial epoch is 1
         assert_eq!(journal.get_generation_epoch("agent-1"), 1);
@@ -431,7 +448,8 @@ mod tests {
         assert_eq!(journal.unexpired_leases().len(), 1);
 
         // 4. Reload from disk in a fresh journal instance and verify seal
-        let journal2 = QuarantineJournal::new(temp_dir.path().to_path_buf(), Arc::clone(&signing_key), kid);
+        let journal2 =
+            QuarantineJournal::new(temp_dir.path().to_path_buf(), Arc::clone(&signing_key), kid);
         assert_eq!(journal2.get_generation_epoch("agent-1"), 2);
         let loaded_leases = journal2.unexpired_leases();
         assert_eq!(loaded_leases.len(), 1);

@@ -4,11 +4,11 @@
 //! network sockets, and inter-process injection with transitive taint reachability.
 //! Uses deterministic `ProcessInstanceIdentity` BLAKE3 provenance to eliminate PID reuse hazards.
 
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::Arc;
 
 use killswitch_types::identity::ProcessInstanceIdentity;
 
@@ -132,10 +132,7 @@ impl CausalSecurityGraph {
                 .entry(parent_id.to_string())
                 .or_default()
                 .push(edge.clone());
-            self.reverse_edges
-                .entry(child_id)
-                .or_default()
-                .push(edge);
+            self.reverse_edges.entry(child_id).or_default().push(edge);
         }
     }
 
@@ -155,9 +152,17 @@ impl CausalSecurityGraph {
         self.nodes.insert(file_id.clone(), file_node);
 
         let (src, dst, kind) = if is_write {
-            (instance_id.to_string(), file_id.clone(), CausalEdgeKind::Wrote)
+            (
+                instance_id.to_string(),
+                file_id.clone(),
+                CausalEdgeKind::Wrote,
+            )
         } else {
-            (file_id.clone(), instance_id.to_string(), CausalEdgeKind::Read)
+            (
+                file_id.clone(),
+                instance_id.to_string(),
+                CausalEdgeKind::Read,
+            )
         };
 
         let edge = CausalEdge {
@@ -368,9 +373,17 @@ mod tests {
     fn test_transitive_taint_forward_propagation() {
         let graph = CausalSecurityGraph::new();
 
-        let attacker = ProcessInstanceIdentity::new(666, 1000, "malware_hash", None, None, "Session-1");
+        let attacker =
+            ProcessInstanceIdentity::new(666, 1000, "malware_hash", None, None, "Session-1");
         let dropped_file = "C:\\Temp\\payload.exe";
-        let spawned_child = ProcessInstanceIdentity::new(777, 2000, "child_hash", Some(attacker.instance_id.clone()), None, "Session-1");
+        let spawned_child = ProcessInstanceIdentity::new(
+            777,
+            2000,
+            "child_hash",
+            Some(attacker.instance_id.clone()),
+            None,
+            "Session-1",
+        );
 
         graph.record_process_spawn(None, &attacker, "evil.exe");
         graph.record_file_interaction(&attacker.instance_id, dropped_file, "file_hash_123", true);

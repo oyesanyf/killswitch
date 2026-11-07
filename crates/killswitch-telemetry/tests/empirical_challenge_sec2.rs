@@ -45,7 +45,10 @@ fn test_challenge_tokenize_mixed_quotes_and_spaces() {
     assert_eq!(tokens, vec!["sudo", "-n", "id"]);
 
     let cmd = parse_semantic_command("'s'\"u\"'d'o   -n    id");
-    assert_eq!(cmd.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+    assert_eq!(
+        cmd.privilege_class,
+        PrivilegeEquivalenceClass::RootOrAdminElevation
+    );
     assert!(cmd.is_non_interactive);
     assert_eq!(cmd.executable, "sudo");
 
@@ -54,7 +57,10 @@ fn test_challenge_tokenize_mixed_quotes_and_spaces() {
     assert_eq!(tokens2, vec!["sudo", "-n", "id"]);
 
     let cmd2 = parse_semantic_command("  \t  sudo   \t  -n   \t  id  \t ");
-    assert_eq!(cmd2.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+    assert_eq!(
+        cmd2.privilege_class,
+        PrivilegeEquivalenceClass::RootOrAdminElevation
+    );
 }
 
 #[test]
@@ -62,13 +68,22 @@ fn test_challenge_env_variable_prefixes_adversarial() {
     // Multiple env variables with quotes and special characters
     let raw = r#"FOO=1 BAR="baz qux" SUDO_ASKPASS='/bin/false' KEY_123=val456 sudo -n id"#;
     let cmd = parse_semantic_command(raw);
-    assert_eq!(cmd.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+    assert_eq!(
+        cmd.privilege_class,
+        PrivilegeEquivalenceClass::RootOrAdminElevation
+    );
     assert_eq!(cmd.executable, "sudo");
     assert_eq!(cmd.env_vars.len(), 4);
     assert_eq!(cmd.env_vars[0], ("FOO".to_string(), "1".to_string()));
     assert_eq!(cmd.env_vars[1], ("BAR".to_string(), "baz qux".to_string()));
-    assert_eq!(cmd.env_vars[2], ("SUDO_ASKPASS".to_string(), "/bin/false".to_string()));
-    assert_eq!(cmd.env_vars[3], ("KEY_123".to_string(), "val456".to_string()));
+    assert_eq!(
+        cmd.env_vars[2],
+        ("SUDO_ASKPASS".to_string(), "/bin/false".to_string())
+    );
+    assert_eq!(
+        cmd.env_vars[3],
+        ("KEY_123".to_string(), "val456".to_string())
+    );
     assert!(cmd.is_non_interactive);
 }
 
@@ -76,25 +91,40 @@ fn test_challenge_env_variable_prefixes_adversarial() {
 fn test_challenge_chained_and_nested_shells() {
     // Standard sh -c
     let cmd_sh = parse_semantic_command("sh -c \"sudo id\"");
-    assert_eq!(cmd_sh.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+    assert_eq!(
+        cmd_sh.privilege_class,
+        PrivilegeEquivalenceClass::RootOrAdminElevation
+    );
     assert_eq!(cmd_sh.executable, "sudo");
 
     // bash -c with single quotes
     let cmd_bash = parse_semantic_command("bash -c 'wsl -u root id'");
-    assert_eq!(cmd_bash.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+    assert_eq!(
+        cmd_bash.privilege_class,
+        PrivilegeEquivalenceClass::RootOrAdminElevation
+    );
     assert!(cmd_bash.is_cross_boundary);
 
     // cmd.exe /c
     let cmd_cmd = parse_semantic_command("cmd.exe /c \"runas /user:Administrator whoami\"");
-    assert_eq!(cmd_cmd.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+    assert_eq!(
+        cmd_cmd.privilege_class,
+        PrivilegeEquivalenceClass::RootOrAdminElevation
+    );
 
     // powershell.exe -Command
     let cmd_ps = parse_semantic_command("powershell.exe -Command \"sudo id\"");
-    assert_eq!(cmd_ps.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+    assert_eq!(
+        cmd_ps.privilege_class,
+        PrivilegeEquivalenceClass::RootOrAdminElevation
+    );
 
     // Nested shell: sh -c "bash -c 'sudo id'"
     let cmd_nested = parse_semantic_command("sh -c \"bash -c 'sudo id'\"");
-    assert_eq!(cmd_nested.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+    assert_eq!(
+        cmd_nested.privilege_class,
+        PrivilegeEquivalenceClass::RootOrAdminElevation
+    );
     assert_eq!(cmd_nested.executable, "sudo");
 }
 
@@ -102,48 +132,78 @@ fn test_challenge_chained_and_nested_shells() {
 fn test_challenge_target_user_delegation_variants() {
     // sudo -u username
     let cmd1 = parse_semantic_command("sudo -u www-data ls");
-    assert_eq!(cmd1.privilege_class, PrivilegeEquivalenceClass::TargetUserDelegation);
+    assert_eq!(
+        cmd1.privilege_class,
+        PrivilegeEquivalenceClass::TargetUserDelegation
+    );
     assert_eq!(cmd1.target_user.as_deref(), Some("www-data"));
 
     // sudo -u0 (root explicitly by UID)
     let cmd2 = parse_semantic_command("sudo -u0 id");
-    assert_eq!(cmd2.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+    assert_eq!(
+        cmd2.privilege_class,
+        PrivilegeEquivalenceClass::RootOrAdminElevation
+    );
 
     // sudo --user=daemon
     let cmd3 = parse_semantic_command("sudo --user=daemon cat /dev/null");
-    assert_eq!(cmd3.privilege_class, PrivilegeEquivalenceClass::TargetUserDelegation);
+    assert_eq!(
+        cmd3.privilege_class,
+        PrivilegeEquivalenceClass::TargetUserDelegation
+    );
     assert_eq!(cmd3.target_user.as_deref(), Some("daemon"));
 
     // su with non-root user
     let cmd4 = parse_semantic_command("su alice");
-    assert_eq!(cmd4.privilege_class, PrivilegeEquivalenceClass::TargetUserDelegation);
+    assert_eq!(
+        cmd4.privilege_class,
+        PrivilegeEquivalenceClass::TargetUserDelegation
+    );
     assert_eq!(cmd4.target_user.as_deref(), Some("alice"));
 
     // su - (root)
     let cmd5 = parse_semantic_command("su -");
-    assert_eq!(cmd5.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+    assert_eq!(
+        cmd5.privilege_class,
+        PrivilegeEquivalenceClass::RootOrAdminElevation
+    );
 
     // runas /user:Administrator
     let cmd6 = parse_semantic_command("runas /user:Administrator cmd.exe");
-    assert_eq!(cmd6.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+    assert_eq!(
+        cmd6.privilege_class,
+        PrivilegeEquivalenceClass::RootOrAdminElevation
+    );
 
     // runas /user:bob
     let cmd7 = parse_semantic_command("runas /user:bob calc.exe");
-    assert_eq!(cmd7.privilege_class, PrivilegeEquivalenceClass::TargetUserDelegation);
+    assert_eq!(
+        cmd7.privilege_class,
+        PrivilegeEquivalenceClass::TargetUserDelegation
+    );
     assert_eq!(cmd7.target_user.as_deref(), Some("bob"));
 
     // wsl -u root
     let cmd8 = parse_semantic_command("wsl -u root id");
-    assert_eq!(cmd8.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+    assert_eq!(
+        cmd8.privilege_class,
+        PrivilegeEquivalenceClass::RootOrAdminElevation
+    );
     assert!(cmd8.is_cross_boundary);
 
     // wsl -u 0
     let cmd9 = parse_semantic_command("wsl -u 0 whoami");
-    assert_eq!(cmd9.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+    assert_eq!(
+        cmd9.privilege_class,
+        PrivilegeEquivalenceClass::RootOrAdminElevation
+    );
 
     // wsl --user guest
     let cmd10 = parse_semantic_command("wsl --user guest bash");
-    assert_eq!(cmd10.privilege_class, PrivilegeEquivalenceClass::TargetUserDelegation);
+    assert_eq!(
+        cmd10.privilege_class,
+        PrivilegeEquivalenceClass::TargetUserDelegation
+    );
     assert!(cmd10.is_cross_boundary);
 }
 
@@ -237,7 +297,10 @@ fn test_challenge_dynamic_binary_probe_suid_and_pe_manifest() {
     let suid_probe = DynamicBinaryMetadataProbe::from_posix(0o104755, 0, 0);
     assert!(suid_probe.is_privileged_target());
     let cmd1 = parse_semantic_command_with_probe("/opt/custom/helper id", Some(&suid_probe));
-    assert_eq!(cmd1.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+    assert_eq!(
+        cmd1.privilege_class,
+        PrivilegeEquivalenceClass::RootOrAdminElevation
+    );
 
     // 2. Renamed binary with PE manifest requireAdministrator
     let pe_manifest = r#"
@@ -253,7 +316,10 @@ fn test_challenge_dynamic_binary_probe_suid_and_pe_manifest() {
         </assembly>
     "#;
     let pe_probe = DynamicBinaryMetadataProbe::from_pe_manifest(pe_manifest, &[]);
-    assert_eq!(pe_probe.elevation_requirement, ElevationRequirement::RequireAdministrator);
+    assert_eq!(
+        pe_probe.elevation_requirement,
+        ElevationRequirement::RequireAdministrator
+    );
     assert!(pe_probe.is_privileged_target());
 
     let pe_file_path = dir.path().join("renamed_tool.exe");
@@ -263,11 +329,17 @@ fn test_challenge_dynamic_binary_probe_suid_and_pe_manifest() {
     }
 
     let cmd2 = parse_semantic_command_with_probe(pe_file_path.to_str().unwrap(), Some(&pe_probe));
-    assert_eq!(cmd2.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+    assert_eq!(
+        cmd2.privilege_class,
+        PrivilegeEquivalenceClass::RootOrAdminElevation
+    );
 
     // 3. Probing directly from file bytes on disk
     let on_disk_probe = DynamicBinaryMetadataProbe::probe_path(&pe_file_path).unwrap();
-    assert_eq!(on_disk_probe.elevation_requirement, ElevationRequirement::RequireAdministrator);
+    assert_eq!(
+        on_disk_probe.elevation_requirement,
+        ElevationRequirement::RequireAdministrator
+    );
     assert!(on_disk_probe.is_privileged_target());
 }
 
@@ -282,7 +354,9 @@ fn test_challenge_bounded_agents_apc_c4_denies_elevation_without_token() {
     let mut scope = default_enterprise_apc_scope();
     scope.actions.insert("sudo -n id".to_string());
     scope.actions.insert("wsl -u root whoami".to_string());
-    scope.actions.insert("runas /user:Administrator cmd.exe".to_string());
+    scope
+        .actions
+        .insert("runas /user:Administrator cmd.exe".to_string());
     scope.actions.insert("su -".to_string());
     scope.actions.insert("doas rm /tmp/test".to_string());
     scope.actions.insert("pkexec /bin/sh".to_string());
@@ -463,7 +537,11 @@ fn test_challenge_pairwise_privileged_execution_after_confidential_read() {
     };
 
     let dec_read = pdp.evaluate(&envelope, &intent, &req_read);
-    assert!(dec_read.allowed, "Confidential read should succeed: {:?}", dec_read.reason);
+    assert!(
+        dec_read.allowed,
+        "Confidential read should succeed: {:?}",
+        dec_read.reason
+    );
 
     // 2. Step 2: Attempt privileged execution in same session (even with valid token)
     let token = ApprovalToken::issue(
@@ -507,7 +585,9 @@ fn test_challenge_pairwise_privileged_execution_after_confidential_read() {
         dec_elev.failed_condition
     );
     assert!(
-        dec_elev.reason.contains("no_privileged_execution_after_confidential_read"),
+        dec_elev
+            .reason
+            .contains("no_privileged_execution_after_confidential_read"),
         "Expected pairwise violation rule ID in reason: {}",
         dec_elev.reason
     );
@@ -803,7 +883,8 @@ fn test_challenge_adjudication_immunity_denied_patterns() {
         assert!(
             !v.is_immune(),
             "Binary '{}' must not receive blanket immunity, got {:?}",
-            name, v
+            name,
+            v
         );
     }
 }

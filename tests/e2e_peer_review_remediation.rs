@@ -25,7 +25,6 @@ pub fn constant_time_compare(a: &[u8], b: &[u8]) -> bool {
     diff == 0
 }
 
-
 // ============================================================================
 // MODULE 1: WFP FORWARD-LAYER FILTERING (R6 & WSL2 NAT DEFENSE)
 // ============================================================================
@@ -113,11 +112,15 @@ pub fn evaluate_wfp_forward_packet(
 #[test]
 fn test_wfp_forward_layer_official_guid_constants() {
     assert_eq!(
-        FWPM_LAYER_IPFORWARD_V4.to_string_guid().to_ascii_lowercase(),
+        FWPM_LAYER_IPFORWARD_V4
+            .to_string_guid()
+            .to_ascii_lowercase(),
         "444543b6-9046-4246-ab81-9b06227e243d"
     );
     assert_eq!(
-        FWPM_LAYER_IPFORWARD_V6.to_string_guid().to_ascii_lowercase(),
+        FWPM_LAYER_IPFORWARD_V6
+            .to_string_guid()
+            .to_ascii_lowercase(),
         "12fe69b5-485a-40e7-912a-82b818121294"
     );
 }
@@ -136,10 +139,16 @@ fn test_wfp_forward_layer_packet_interception_simulation() {
     };
 
     // Before quarantine: permitted
-    assert_eq!(evaluate_wfp_forward_packet(false, &wsl_packet), PacketFilterVerdict::Permit);
+    assert_eq!(
+        evaluate_wfp_forward_packet(false, &wsl_packet),
+        PacketFilterVerdict::Permit
+    );
 
     // During hermetic quarantine: blocked at IP Forward layer!
-    assert_eq!(evaluate_wfp_forward_packet(true, &wsl_packet), PacketFilterVerdict::Block);
+    assert_eq!(
+        evaluate_wfp_forward_packet(true, &wsl_packet),
+        PacketFilterVerdict::Block
+    );
 }
 
 #[test]
@@ -155,7 +164,10 @@ fn test_wfp_forward_layer_loopback_and_internal_preservation() {
     };
 
     // Loopback must ALWAYS be permitted, even during active quarantine
-    assert_eq!(evaluate_wfp_forward_packet(true, &loopback_packet), PacketFilterVerdict::Permit);
+    assert_eq!(
+        evaluate_wfp_forward_packet(true, &loopback_packet),
+        PacketFilterVerdict::Permit
+    );
 }
 
 #[test]
@@ -170,7 +182,10 @@ fn test_wfp_forward_layer_dual_stack_v4_and_v6() {
         is_wsl2_vswitch: true,
     };
 
-    assert_eq!(evaluate_wfp_forward_packet(true, &v6_packet), PacketFilterVerdict::Block);
+    assert_eq!(
+        evaluate_wfp_forward_packet(true, &v6_packet),
+        PacketFilterVerdict::Block
+    );
 }
 
 // ============================================================================
@@ -210,7 +225,11 @@ impl DynamicBinaryMetadata {
 }
 
 /// Evaluates POSIX mode bits independent of binary filename.
-pub fn probe_posix_metadata(mode: u32, file_uid: u32, capabilities_mask: u64) -> DynamicBinaryMetadata {
+pub fn probe_posix_metadata(
+    mode: u32,
+    file_uid: u32,
+    capabilities_mask: u64,
+) -> DynamicBinaryMetadata {
     let is_suid = (mode & 0o4000) != 0;
     let is_sgid = (mode & 0o2000) != 0;
     let has_linux_capabilities = capabilities_mask != 0;
@@ -228,7 +247,10 @@ pub fn probe_posix_metadata(mode: u32, file_uid: u32, capabilities_mask: u64) ->
 }
 
 /// Evaluates Windows PE manifest XML and imported DLLs independent of filename.
-pub fn probe_windows_pe_manifest(manifest_xml: &str, imported_dlls: &[&str]) -> DynamicBinaryMetadata {
+pub fn probe_windows_pe_manifest(
+    manifest_xml: &str,
+    imported_dlls: &[&str],
+) -> DynamicBinaryMetadata {
     let xml_lc = manifest_xml.to_ascii_lowercase();
     let elevation_requirement = if xml_lc.contains("requireadministrator") {
         ElevationRequirement::RequireAdministrator
@@ -303,12 +325,18 @@ fn test_dynamic_binary_probe_windows_pe_manifest() {
     "#;
 
     let meta = probe_windows_pe_manifest(manifest_admin, &["kernel32.dll", "advapi32.dll"]);
-    assert_eq!(meta.elevation_requirement, ElevationRequirement::RequireAdministrator);
+    assert_eq!(
+        meta.elevation_requirement,
+        ElevationRequirement::RequireAdministrator
+    );
     assert!(meta.is_privileged_target());
 
     let manifest_invoker = r#"<requestedExecutionLevel level="asInvoker" uiAccess="false"/>"#;
     let meta_invoker = probe_windows_pe_manifest(manifest_invoker, &["kernel32.dll"]);
-    assert_eq!(meta_invoker.elevation_requirement, ElevationRequirement::AsInvoker);
+    assert_eq!(
+        meta_invoker.elevation_requirement,
+        ElevationRequirement::AsInvoker
+    );
     assert!(!meta_invoker.is_privileged_target());
 }
 
@@ -367,7 +395,8 @@ pub fn compare_parent_child_security_context(
     let euid_transition = parent.euid != 0 && child.euid == 0;
     let capability_expansion = (child.linux_capabilities & !parent.linux_capabilities) != 0;
     let namespace_transition = parent.namespace_user_inode != child.namespace_user_inode;
-    let integrity_elevation = parent.token_integrity_rid < 0x3000 && child.token_integrity_rid >= 0x3000;
+    let integrity_elevation =
+        parent.token_integrity_rid < 0x3000 && child.token_integrity_rid >= 0x3000;
     let token_elevation_active = !parent.is_token_elevated && child.is_token_elevated;
     let session_zero_transition = parent.session_id != 0 && child.session_id == 0;
 
@@ -379,12 +408,24 @@ pub fn compare_parent_child_security_context(
         || session_zero_transition;
 
     let mut reasons = Vec::new();
-    if euid_transition { reasons.push("EUID elevated to root (0)".to_string()); }
-    if capability_expansion { reasons.push("Linux capability bitmask expanded".to_string()); }
-    if namespace_transition { reasons.push("User namespace transitioned".to_string()); }
-    if integrity_elevation { reasons.push("TokenIntegrityLevel elevated to High/System".to_string()); }
-    if token_elevation_active { reasons.push("TokenElevation active".to_string()); }
-    if session_zero_transition { reasons.push("Transitioned from interactive to Session 0".to_string()); }
+    if euid_transition {
+        reasons.push("EUID elevated to root (0)".to_string());
+    }
+    if capability_expansion {
+        reasons.push("Linux capability bitmask expanded".to_string());
+    }
+    if namespace_transition {
+        reasons.push("User namespace transitioned".to_string());
+    }
+    if integrity_elevation {
+        reasons.push("TokenIntegrityLevel elevated to High/System".to_string());
+    }
+    if token_elevation_active {
+        reasons.push("TokenElevation active".to_string());
+    }
+    if session_zero_transition {
+        reasons.push("Transitioned from interactive to Session 0".to_string());
+    }
 
     TokenDeltaVerdict {
         is_privilege_escalation,
@@ -504,7 +545,11 @@ pub fn is_immutable_os_kernel_anchor(pid: u32, name: &str) -> bool {
 /// Evaluator of developer tools and shells.
 pub fn is_developer_or_agent_runtime(name: &str) -> bool {
     let name_lc = name.trim().to_ascii_lowercase();
-    let base = name_lc.rsplit(['\\', '/']).next().unwrap_or(&name_lc).trim_end_matches(".exe");
+    let base = name_lc
+        .rsplit(['\\', '/'])
+        .next()
+        .unwrap_or(&name_lc)
+        .trim_end_matches(".exe");
 
     matches!(
         base,
@@ -527,8 +572,15 @@ pub fn is_developer_or_agent_runtime(name: &str) -> bool {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LineageImmunityVerdict {
-    ImmuneKernelAnchor { pid: u32, proc_name: String },
-    AgentRuntimeChild { ancestor_pid: u32, ancestor_name: String, depth: usize },
+    ImmuneKernelAnchor {
+        pid: u32,
+        proc_name: String,
+    },
+    AgentRuntimeChild {
+        ancestor_pid: u32,
+        ancestor_name: String,
+        depth: usize,
+    },
     NotImmune,
 }
 
@@ -611,7 +663,10 @@ fn test_ancestry_traversal_agent_runtime_child() {
 
     assert!(!verdict.is_immune());
     assert_eq!(verdict.to_veto_reason(), None); // No veto!
-    assert!(matches!(verdict, LineageImmunityVerdict::AgentRuntimeChild { .. }));
+    assert!(matches!(
+        verdict,
+        LineageImmunityVerdict::AgentRuntimeChild { .. }
+    ));
 }
 
 // ============================================================================
@@ -630,25 +685,50 @@ pub fn classify_command_privilege(command: &str) -> (PrivilegeEquivalenceClass, 
     let lower = command.trim().to_ascii_lowercase();
     let tokens: Vec<&str> = lower.split_whitespace().collect();
     if tokens.is_empty() {
-        return (PrivilegeEquivalenceClass::UnprivilegedStandard, "READ_PUBLIC");
+        return (
+            PrivilegeEquivalenceClass::UnprivilegedStandard,
+            "READ_PUBLIC",
+        );
     }
 
     let first = tokens[0].rsplit(['\\', '/']).next().unwrap_or(tokens[0]);
 
     if matches!(first, "sudo" | "su" | "doas" | "pkexec" | "runas" | "wsl") {
-        if tokens.iter().any(|t| matches!(*t, "-l" | "-v" | "-h" | "--help" | "--version" | "--status")) {
-            return (PrivilegeEquivalenceClass::PrivilegeQueryOrBenign, "READ_PUBLIC");
+        if tokens
+            .iter()
+            .any(|t| matches!(*t, "-l" | "-v" | "-h" | "--help" | "--version" | "--status"))
+        {
+            return (
+                PrivilegeEquivalenceClass::PrivilegeQueryOrBenign,
+                "READ_PUBLIC",
+            );
         }
-        if lower.contains("-u root") || lower.contains("--user root") || lower.contains("/user:administrator") || lower.contains("-u 0") {
-            return (PrivilegeEquivalenceClass::RootOrAdminElevation, "PRIVILEGED_EXECUTION");
+        if lower.contains("-u root")
+            || lower.contains("--user root")
+            || lower.contains("/user:administrator")
+            || lower.contains("-u 0")
+        {
+            return (
+                PrivilegeEquivalenceClass::RootOrAdminElevation,
+                "PRIVILEGED_EXECUTION",
+            );
         }
         if lower.contains("-u ") || lower.contains("--user ") || lower.contains("/user:") {
-            return (PrivilegeEquivalenceClass::TargetUserDelegation, "PRIVILEGED_EXECUTION");
+            return (
+                PrivilegeEquivalenceClass::TargetUserDelegation,
+                "PRIVILEGED_EXECUTION",
+            );
         }
-        return (PrivilegeEquivalenceClass::RootOrAdminElevation, "PRIVILEGED_EXECUTION");
+        return (
+            PrivilegeEquivalenceClass::RootOrAdminElevation,
+            "PRIVILEGED_EXECUTION",
+        );
     }
 
-    (PrivilegeEquivalenceClass::UnprivilegedStandard, "READ_PUBLIC")
+    (
+        PrivilegeEquivalenceClass::UnprivilegedStandard,
+        "READ_PUBLIC",
+    )
 }
 
 #[test]
@@ -692,9 +772,7 @@ fn test_bounded_agents_apc_privileged_execution_gating() {
 // MODULE 6: CONTROL PLANE MUTUAL AUTHENTICATION & LOOPBACK HARDENING (R4)
 // ============================================================================
 
-pub use killswitch_server::auth::{
-    verify_control_plane_request, AuthVerdict, TEST_MASTER_TOKEN,
-};
+pub use killswitch_server::auth::{verify_control_plane_request, AuthVerdict, TEST_MASTER_TOKEN};
 
 #[test]
 fn test_control_plane_unauthenticated_requests_return_401() {
@@ -704,24 +782,21 @@ fn test_control_plane_unauthenticated_requests_return_401() {
     assert_eq!(verdict, AuthVerdict::Unauthorized401);
 
     // Empty token
-    let verdict_empty = verify_control_plane_request(Some("   "), None, Some(100), 100, &frozen_pids);
+    let verdict_empty =
+        verify_control_plane_request(Some("   "), None, Some(100), 100, &frozen_pids);
     assert_eq!(verdict_empty, AuthVerdict::Unauthorized401);
 
     // Invalid token
-    let verdict_bad = verify_control_plane_request(Some("bad_token"), None, Some(100), 100, &frozen_pids);
+    let verdict_bad =
+        verify_control_plane_request(Some("bad_token"), None, Some(100), 100, &frozen_pids);
     assert_eq!(verdict_bad, AuthVerdict::Unauthorized401);
 }
 
 #[test]
 fn test_control_plane_authenticated_modification_success() {
     let frozen_pids = vec![];
-    let verdict = verify_control_plane_request(
-        Some(TEST_MASTER_TOKEN),
-        None,
-        Some(100),
-        100,
-        &frozen_pids,
-    );
+    let verdict =
+        verify_control_plane_request(Some(TEST_MASTER_TOKEN), None, Some(100), 100, &frozen_pids);
     assert_eq!(verdict, AuthVerdict::Authorized);
 }
 
@@ -729,13 +804,8 @@ fn test_control_plane_authenticated_modification_success() {
 fn test_control_plane_caller_pid_spoofing_detection() {
     let frozen_pids = vec![];
     // Claimed PID 100, but peer socket PID is 200
-    let verdict = verify_control_plane_request(
-        Some(TEST_MASTER_TOKEN),
-        None,
-        Some(100),
-        200,
-        &frozen_pids,
-    );
+    let verdict =
+        verify_control_plane_request(Some(TEST_MASTER_TOKEN), None, Some(100), 200, &frozen_pids);
     assert_eq!(verdict, AuthVerdict::Forbidden403PidSpoofing);
 }
 
@@ -743,13 +813,8 @@ fn test_control_plane_caller_pid_spoofing_detection() {
 fn test_control_plane_quarantined_caller_blocking() {
     let frozen_pids = vec![300];
     // Caller is currently frozen/quarantined in PID 300
-    let verdict = verify_control_plane_request(
-        Some(TEST_MASTER_TOKEN),
-        None,
-        Some(300),
-        300,
-        &frozen_pids,
-    );
+    let verdict =
+        verify_control_plane_request(Some(TEST_MASTER_TOKEN), None, Some(300), 300, &frozen_pids);
     assert_eq!(verdict, AuthVerdict::Forbidden403CallerQuarantined);
 }
 
@@ -779,14 +844,20 @@ fn test_semantic_dlp_deal_value_threshold_boundary() {
     let payload_sub = "Deal value: $999999";
     let matches_sub = scan_payload_for_semantic_entities(payload_sub);
     assert!(!matches_sub.is_empty());
-    assert_eq!(matches_sub[0].classification, DlpClassification::Confidential);
+    assert_eq!(
+        matches_sub[0].classification,
+        DlpClassification::Confidential
+    );
     assert_eq!(matches_sub[0].policy, DlpPolicy::Block);
 
     // Exactly $1,000,000 -> CrownJewel + Quarantine
     let payload_crown = "Deal value: $1000000";
     let matches_crown = scan_payload_for_semantic_entities(payload_crown);
     assert!(!matches_crown.is_empty());
-    assert_eq!(matches_crown[0].classification, DlpClassification::CrownJewel);
+    assert_eq!(
+        matches_crown[0].classification,
+        DlpClassification::CrownJewel
+    );
     assert_eq!(matches_crown[0].policy, DlpPolicy::Quarantine);
 }
 
@@ -841,7 +912,10 @@ fn test_repository_integrity_no_unsigned_root_binaries() {
                             path.display()
                         );
                         let file_bytes = std::fs::read(&path).unwrap();
-                        let file_hash = killswitch_telemetry::ring0_driver_loader::compute_sha256_hex(&file_bytes);
+                        let file_hash =
+                            killswitch_telemetry::ring0_driver_loader::compute_sha256_hex(
+                                &file_bytes,
+                            );
                         assert!(
                             manifest_content.contains(&file_hash),
                             "Binary {} (hash {}) not registered in dist/SHA256SUMS.txt",
@@ -863,11 +937,23 @@ fn test_repository_integrity_ci_workflow_present() {
         .parent()
         .unwrap();
     let ci_path = root.join(".github").join("workflows").join("ci.yml");
-    assert!(ci_path.exists(), ".github/workflows/ci.yml must exist for automated PR verification");
+    assert!(
+        ci_path.exists(),
+        ".github/workflows/ci.yml must exist for automated PR verification"
+    );
     let content = std::fs::read_to_string(&ci_path).unwrap_or_default();
-    assert!(content.contains("cargo test --workspace"), "CI must execute workspace test suite");
-    assert!(content.contains("e2e_peer_review_remediation"), "CI must execute E2E remediation suite");
-    assert!(content.contains("pull_request"), "CI must trigger on pull requests");
+    assert!(
+        content.contains("cargo test --workspace"),
+        "CI must execute workspace test suite"
+    );
+    assert!(
+        content.contains("e2e_peer_review_remediation"),
+        "CI must execute E2E remediation suite"
+    );
+    assert!(
+        content.contains("pull_request"),
+        "CI must trigger on pull requests"
+    );
 }
 
 #[test]
@@ -882,8 +968,16 @@ fn test_repository_integrity_sha256_manifest_format() {
         let content = std::fs::read_to_string(&sha_manifest).unwrap_or_default();
         for line in content.lines().filter(|l| !l.trim().is_empty()) {
             let parts: Vec<&str> = line.split_whitespace().collect();
-            assert_eq!(parts.len(), 2, "SHA256SUMS entry must be: <64-char-hash>  <filename>");
-            assert_eq!(parts[0].len(), 64, "SHA-256 hash must be exactly 64 hexadecimal characters");
+            assert_eq!(
+                parts.len(),
+                2,
+                "SHA256SUMS entry must be: <64-char-hash>  <filename>"
+            );
+            assert_eq!(
+                parts[0].len(),
+                64,
+                "SHA-256 hash must be exactly 64 hexadecimal characters"
+            );
         }
     }
 }

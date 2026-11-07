@@ -14,21 +14,21 @@
 //!    - Anti-replay nonce protection.
 //!    - Monotonic epoch advancement in signed release receipt (`epoch_after > epoch_before`).
 
-use std::sync::Arc;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use chrono::{Duration, Utc};
 use ed25519_dalek::{Signer, SigningKey};
 use rand::rngs::OsRng;
+use std::sync::Arc;
 use tempfile::tempdir;
 
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
 use killswitch_core::killchain::HostContainmentManager;
 use killswitch_server::journal::{QuarantineJournal, QuarantineLease};
 use killswitch_server::routes::build_router;
 use killswitch_server::server::ServerState;
 use killswitch_server::types::*;
-use axum::body::Body;
-use axum::http::{Request, StatusCode};
 use tower::ServiceExt;
 
 async fn body_to_bytes(body: axum::body::Body) -> axum::body::Bytes {
@@ -67,11 +67,8 @@ fn test_journal_atomic_persistence_and_epoch_monotonicity() {
     assert_eq!(journal.get_generation_epoch("workload-alpha"), 3);
 
     // Reopen journal in fresh instance from disk
-    let journal_reopened = QuarantineJournal::new(
-        temp_dir.path().to_path_buf(),
-        Arc::clone(&signing_key),
-        kid,
-    );
+    let journal_reopened =
+        QuarantineJournal::new(temp_dir.path().to_path_buf(), Arc::clone(&signing_key), kid);
     assert_eq!(journal_reopened.get_generation_epoch("workload-alpha"), 3);
 }
 
@@ -123,11 +120,8 @@ fn test_journal_detects_corrupted_trailing_bytes_and_truncation() {
     corrupt_bytes.extend_from_slice(b"\n\x00\xFF\xDEADBEEFcorrupted_trailing_data");
     std::fs::write(&file_path, corrupt_bytes).unwrap();
 
-    let journal_corrupt = QuarantineJournal::new(
-        temp_dir.path().to_path_buf(),
-        Arc::clone(&signing_key),
-        kid,
-    );
+    let journal_corrupt =
+        QuarantineJournal::new(temp_dir.path().to_path_buf(), Arc::clone(&signing_key), kid);
     assert!(
         journal_corrupt.load_and_verify().is_err(),
         "Journal with trailing garbage bytes must fail verification"
@@ -165,11 +159,8 @@ fn test_journal_detects_unauthorized_payload_tampering() {
     assert_ne!(content, tampered_content);
     std::fs::write(&file_path, tampered_content).unwrap();
 
-    let journal_tampered = QuarantineJournal::new(
-        temp_dir.path().to_path_buf(),
-        Arc::clone(&signing_key),
-        kid,
-    );
+    let journal_tampered =
+        QuarantineJournal::new(temp_dir.path().to_path_buf(), Arc::clone(&signing_key), kid);
     let verify_res = journal_tampered.load_and_verify();
     assert!(
         verify_res.is_err(),
@@ -187,11 +178,8 @@ fn test_journal_lease_expiration_filtering() {
     let signing_key = Arc::new(SigningKey::generate(&mut OsRng));
     let kid = "test_kid_m1_2_00000000000000000004".to_string();
 
-    let journal = QuarantineJournal::new(
-        temp_dir.path().to_path_buf(),
-        Arc::clone(&signing_key),
-        kid,
-    );
+    let journal =
+        QuarantineJournal::new(temp_dir.path().to_path_buf(), Arc::clone(&signing_key), kid);
 
     // 1. Unexpired lease (no expiry)
     let lease_permanent = QuarantineLease {
@@ -395,10 +383,15 @@ async fn test_cage_release_valid_quorum_and_anti_replay() {
         .unwrap();
 
     let resp1 = app.clone().oneshot(req1).await.unwrap();
-    assert_eq!(resp1.status(), StatusCode::OK, "Valid quorum release must succeed with 200 OK");
+    assert_eq!(
+        resp1.status(),
+        StatusCode::OK,
+        "Valid quorum release must succeed with 200 OK"
+    );
 
     let body_bytes = body_to_bytes(resp1.into_body()).await;
-    let receipt: CageQuarantineReleaseReceiptResponse = serde_json::from_slice(&body_bytes).unwrap();
+    let receipt: CageQuarantineReleaseReceiptResponse =
+        serde_json::from_slice(&body_bytes).unwrap();
     assert!(receipt.released);
     assert_eq!(receipt.enforcement_plane, "HOST_OS_KERNEL");
     assert_eq!(receipt.epoch_before, 1);

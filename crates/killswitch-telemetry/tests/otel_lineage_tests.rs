@@ -1,10 +1,10 @@
 //! Integration tests for 100% Data Lineage Engine (`otel_lineage.rs`, Feature 32)
 
-use std::time::Instant;
 use killswitch_telemetry::otel_lineage::{
     DlpClassification, DlpPolicy, EgressVerdict, EndpointLineageEngine, FileKey, ProcessKey,
     TaintBaggage, W3cTraceContext,
 };
+use std::time::Instant;
 
 #[test]
 fn test_t1_f32_01_composite_keys_non_colliding() {
@@ -91,8 +91,16 @@ fn test_t1_f32_04_multi_hop_dlp_fan_in_user_scenario() {
     let powershell_key = ProcessKey::new(2104, 100000, "C:\\Windows\\System32\\powershell.exe");
     let z7_key = ProcessKey::new(4812, 100100, "C:\\Program Files\\7-Zip\\7z.exe");
 
-    engine.on_process_create(None, powershell_key, "C:\\Windows\\System32\\powershell.exe");
-    engine.on_process_create(Some(powershell_key), z7_key, "C:\\Program Files\\7-Zip\\7z.exe");
+    engine.on_process_create(
+        None,
+        powershell_key,
+        "C:\\Windows\\System32\\powershell.exe",
+    );
+    engine.on_process_create(
+        Some(powershell_key),
+        z7_key,
+        "C:\\Program Files\\7-Zip\\7z.exe",
+    );
 
     // Step 3: 7z.exe reads both files and writes staging_upload.zip
     engine.on_file_read(z7_key, secret_roadmap_key);
@@ -108,7 +116,11 @@ fn test_t1_f32_04_multi_hop_dlp_fan_in_user_scenario() {
 
     // Step 4: curl.exe (5001) spawned, reads zip, and calls evaluate_egress
     let curl_key = ProcessKey::new(5001, 100200, "C:\\Windows\\System32\\curl.exe");
-    engine.on_process_create(Some(powershell_key), curl_key, "C:\\Windows\\System32\\curl.exe");
+    engine.on_process_create(
+        Some(powershell_key),
+        curl_key,
+        "C:\\Windows\\System32\\curl.exe",
+    );
     engine.on_file_read(curl_key, staging_zip_key);
 
     let verdict = engine.evaluate_egress(curl_key, "https://external-drop.example.com/upload");
@@ -128,8 +140,12 @@ fn test_t1_f32_04_multi_hop_dlp_fan_in_user_scenario() {
             assert_eq!(classification, DlpClassification::CrownJewel);
             assert_eq!(policy, DlpPolicy::Quarantine);
             assert_eq!(source_hashes.len(), 2);
-            assert!(source_hashes.contains(&"1111111111111111111111111111111111111111111111111111111111111111".to_string()));
-            assert!(source_hashes.contains(&"2222222222222222222222222222222222222222222222222222222222222222".to_string()));
+            assert!(source_hashes.contains(
+                &"1111111111111111111111111111111111111111111111111111111111111111".to_string()
+            ));
+            assert!(source_hashes.contains(
+                &"2222222222222222222222222222222222222222222222222222222222222222".to_string()
+            ));
         }
         EgressVerdict::Allow => panic!("Expected EgressVerdict::Block"),
     }
@@ -152,10 +168,10 @@ fn test_t1_f32_04_multi_hop_dlp_fan_in_user_scenario() {
 #[tokio::test]
 async fn test_t1_f32_05_adjudication_voter_integration() {
     use killswitch_adjudication::voters::{
-        AdjudicationContext, DataLineageVoter, LineageAdjudicationEvidence, LineageCausalLink,
-        OpenLineageDataset as AdjDataset, OpenLineageDatasetFacets as AdjFacets, ThreatVoter,
-        DlpClassification as AdjClass, DlpPolicy as AdjPolicy, EgressVerdict as AdjVerdict,
-        TaintBaggage as AdjBaggage,
+        AdjudicationContext, DataLineageVoter, DlpClassification as AdjClass,
+        DlpPolicy as AdjPolicy, EgressVerdict as AdjVerdict, LineageAdjudicationEvidence,
+        LineageCausalLink, OpenLineageDataset as AdjDataset, OpenLineageDatasetFacets as AdjFacets,
+        TaintBaggage as AdjBaggage, ThreatVoter,
     };
     use killswitch_types::adjudication::{EvidenceClass, ThreatCandidate, VoteAction};
 
@@ -192,7 +208,8 @@ async fn test_t1_f32_05_adjudication_voter_integration() {
         baggage: Some(AdjBaggage {
             classification: AdjClass::CrownJewel,
             policy: AdjPolicy::Quarantine,
-            source_sha256: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef".to_string(),
+            source_sha256: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+                .to_string(),
         }),
         causal_links: vec![LineageCausalLink {
             trace_id: proc_state.active_span_context.trace_id().to_string(),
@@ -204,7 +221,8 @@ async fn test_t1_f32_05_adjudication_voter_integration() {
             namespace: "file://endpoint-local".to_string(),
             name: "C:\\Users\\Alice\\crown_jewel.pdf".to_string(),
             facets: AdjFacets {
-                content_sha256: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef".to_string(),
+                content_sha256: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+                    .to_string(),
                 dlp_classification: AdjClass::CrownJewel,
             },
         }],

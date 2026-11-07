@@ -21,8 +21,7 @@ pub use binary_format::{
     inspect_binary_format_safe, BinaryFormatInfo, BinaryFormatKind, SectionInfo,
 };
 pub use engine::{
-    has_active_lotl_or_exploit_indicators, is_rea_benign_system_or_dev_process,
-    AutonomousReaEngine,
+    has_active_lotl_or_exploit_indicators, is_rea_benign_system_or_dev_process, AutonomousReaEngine,
 };
 pub use path_security::{
     detect_binary_masquerade_spoof, get_canonical_protected_binary_names,

@@ -3,12 +3,14 @@
 //! Implements a cyclic directed execution graph over `KillSwitchGraphState` with
 //! conditional routing, dynamic checkpointer integration, and BLAKE3 trace verification.
 
+use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
-use async_trait::async_trait;
 
 use killswitch_types::errors::{KillSwitchError, Result};
-use killswitch_types::graph::{GraphNodeOutput, KillSwitchGraphState, OrchestratorMode, StateCheckpointer};
+use killswitch_types::graph::{
+    GraphNodeOutput, KillSwitchGraphState, OrchestratorMode, StateCheckpointer,
+};
 
 use crate::state::{LifecycleStage, StepTransition};
 

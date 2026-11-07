@@ -186,11 +186,26 @@ mod tests {
         assert_eq!(canonicalize_jcs_string(&json!(0.0)).unwrap(), "0");
         assert_eq!(canonicalize_jcs_string(&json!(-0.0)).unwrap(), "0");
         assert_eq!(canonicalize_jcs_string(&json!(100.0)).unwrap(), "100");
-        assert_eq!(canonicalize_jcs_string(&json!(1e19)).unwrap(), "10000000000000000000");
-        assert_eq!(canonicalize_jcs_string(&json!(-1e19)).unwrap(), "-10000000000000000000");
-        assert_eq!(canonicalize_jcs_string(&json!(1e20)).unwrap(), "100000000000000000000");
-        assert_eq!(canonicalize_jcs_string(&json!(9223372036854775808.0)).unwrap(), "9223372036854775808");
-        assert_eq!(canonicalize_jcs_string(&json!(-9223372036854775808.0)).unwrap(), "-9223372036854775808");
+        assert_eq!(
+            canonicalize_jcs_string(&json!(1e19)).unwrap(),
+            "10000000000000000000"
+        );
+        assert_eq!(
+            canonicalize_jcs_string(&json!(-1e19)).unwrap(),
+            "-10000000000000000000"
+        );
+        assert_eq!(
+            canonicalize_jcs_string(&json!(1e20)).unwrap(),
+            "100000000000000000000"
+        );
+        assert_eq!(
+            canonicalize_jcs_string(&json!(9223372036854775808.0)).unwrap(),
+            "9223372036854775808"
+        );
+        assert_eq!(
+            canonicalize_jcs_string(&json!(-9223372036854775808.0)).unwrap(),
+            "-9223372036854775808"
+        );
         assert_eq!(canonicalize_jcs_string(&json!(1e21)).unwrap(), "1e+21");
         assert_eq!(canonicalize_jcs_string(&json!(1e-7)).unwrap(), "1e-7");
     }

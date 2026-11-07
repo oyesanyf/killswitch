@@ -508,8 +508,16 @@ fn test_substrate_compiler_determinism_across_all_5_formats() {
 
     let format_test_cases = [
         ("NativeCage", SubstrateFormat::NativeCage, native_cage_spec),
-        ("MicrosoftAcs", SubstrateFormat::MicrosoftAcs, microsoft_acs_spec),
-        ("LinuxFoundationAaif", SubstrateFormat::LinuxFoundationAaif, aaif_spec),
+        (
+            "MicrosoftAcs",
+            SubstrateFormat::MicrosoftAcs,
+            microsoft_acs_spec,
+        ),
+        (
+            "LinuxFoundationAaif",
+            SubstrateFormat::LinuxFoundationAaif,
+            aaif_spec,
+        ),
         ("NistOscal", SubstrateFormat::NistOscal, oscal_spec),
         ("LulaValidation", SubstrateFormat::LulaValidation, lula_spec),
     ];
@@ -552,7 +560,8 @@ fn test_substrate_compiler_determinism_across_all_5_formats() {
             assert!(
                 iter_art.verify_digest(),
                 "Digest verification failed on iteration {} for format {}",
-                iteration, name
+                iteration,
+                name
             );
         }
 
@@ -596,7 +605,8 @@ fn test_webui_safe_dom_invariant_zero_inner_html() {
             inner_html_occurrences.push((line_num + 1, trimmed.to_string()));
 
             // Determine if the occurrence is active JavaScript code vs pure comment
-            let is_comment = trimmed.starts_with("//") || trimmed.starts_with("/*") || trimmed.starts_with('*');
+            let is_comment =
+                trimmed.starts_with("//") || trimmed.starts_with("/*") || trimmed.starts_with('*');
             if !is_comment {
                 code_inner_html_occurrences.push((line_num + 1, trimmed.to_string()));
             }

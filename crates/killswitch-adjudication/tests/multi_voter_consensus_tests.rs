@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use killswitch_adjudication::consensus::MultiVoterConsensusEngine;
 use killswitch_adjudication::voters::{
     BehaviorVoter, LiveNetworkVoter, MemoryVoter, StaticArtifactVoter, ThreatIntelVoter,
@@ -7,6 +6,7 @@ use killswitch_types::adjudication::{
     calculate_consensus, corroboration_multiplier, EvidenceClass, ThreatCandidate, VoteAction,
     VoteResult,
 };
+use std::sync::Arc;
 
 #[test]
 fn test_single_voter_penalty_invariant() {

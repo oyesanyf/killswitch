@@ -160,7 +160,10 @@ async fn test_siquery_query_valid_json_csv_pretty_formats() {
         .uri("/api/siquery/query")
         .method("POST")
         .header("Content-Type", "application/json")
-        .header("Authorization", format!("Bearer {}", CHALLENGE_MASTER_TOKEN))
+        .header(
+            "Authorization",
+            format!("Bearer {}", CHALLENGE_MASTER_TOKEN),
+        )
         .body(Body::from(serde_json::to_vec(&body_json).unwrap()))
         .unwrap();
     req.extensions_mut().insert(ConnectInfo(loopback));

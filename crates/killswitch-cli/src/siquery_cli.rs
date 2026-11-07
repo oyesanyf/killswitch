@@ -26,8 +26,8 @@ pub fn handle_siquery(
     if sweep {
         println!("Executing 12-Sweep Active EDR Security and Host Audit...");
         let report = engine.run_siquery_edr_audit_sweep();
-        let formatted = serde_json::to_string_pretty(&report)
-            .context("Failed to serialize sweep report")?;
+        let formatted =
+            serde_json::to_string_pretty(&report).context("Failed to serialize sweep report")?;
         println!("{}", formatted);
         return Ok(());
     }
@@ -35,11 +35,15 @@ pub fn handle_siquery(
     if let Some(sql) = query {
         match format.to_ascii_lowercase().as_str() {
             "csv" => {
-                let csv = engine.execute_csv(&sql).map_err(|e| anyhow::anyhow!("{}", e))?;
+                let csv = engine
+                    .execute_csv(&sql)
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
                 print!("{}", csv);
             }
             "json" => {
-                let json = engine.execute_json(&sql).map_err(|e| anyhow::anyhow!("{}", e))?;
+                let json = engine
+                    .execute_json(&sql)
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
                 println!("{}", json);
             }
             _ => {
@@ -52,7 +56,9 @@ pub fn handle_siquery(
         return Ok(());
     }
 
-    println!("Usage: killswitch siquery [--query <SQL>] [--format pretty|json|csv] [--tables] [--sweep]");
+    println!(
+        "Usage: killswitch siquery [--query <SQL>] [--format pretty|json|csv] [--tables] [--sweep]"
+    );
     println!("Run 'killswitch siquery --help' for details, or '--tables' to view all available relational tables.");
     Ok(())
 }

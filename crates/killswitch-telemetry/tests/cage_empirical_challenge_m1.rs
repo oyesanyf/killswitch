@@ -13,9 +13,9 @@
 //! 5. Trace Model Checker: Independent formal verification of monotonic progression,
 //!    warrant precedence, and actuation blocking without Clear receipts.
 
-use std::sync::Arc;
 use chrono::Utc;
 use killswitch_telemetry::cage_governance::*;
+use std::sync::Arc;
 
 // ============================================================================
 // SUITE 1: SubstrateCompiler Determinism, Malformed Specs & Precedence
@@ -70,8 +70,14 @@ fn test_c1_substrate_compiler_deterministic_digest_under_key_permutations() {
         art1.substrate_contract_digest, art2.substrate_contract_digest,
         "Bitwise identical digest invariant failed under key/tool permutations"
     );
-    assert!(art1.verify_digest(), "Embedded digest verification failed for art1");
-    assert!(art2.verify_digest(), "Embedded digest verification failed for art2");
+    assert!(
+        art1.verify_digest(),
+        "Embedded digest verification failed for art1"
+    );
+    assert!(
+        art2.verify_digest(),
+        "Embedded digest verification failed for art2"
+    );
 }
 
 #[test]
@@ -102,7 +108,8 @@ fn test_c1_substrate_compiler_rejects_malformed_inputs() {
 fn test_c1_substrate_compiler_handles_empty_and_minimal_specifications() {
     // Empty JSON object should default to NativeCage with valid fallback bounds and digest
     let empty_obj = serde_json::json!({});
-    let compiled = SubstrateCompiler::detect_and_compile(&empty_obj).expect("Empty object should compile with defaults");
+    let compiled = SubstrateCompiler::detect_and_compile(&empty_obj)
+        .expect("Empty object should compile with defaults");
     assert_eq!(compiled.format, SubstrateFormat::NativeCage);
     assert_eq!(compiled.max_single_transfer_usd, 10000.0);
     assert_eq!(compiled.fiscal_cap_usd, 50000.0);
@@ -123,8 +130,12 @@ allowed_tools:
   - execute_trade
   - query_balance
 "#;
-    let compiled_yaml = SubstrateCompiler::detect_and_compile_str(yaml_valid).expect("Valid YAML must compile");
-    assert_eq!(compiled_yaml.allowed_tools, vec!["execute_trade", "query_balance"]);
+    let compiled_yaml =
+        SubstrateCompiler::detect_and_compile_str(yaml_valid).expect("Valid YAML must compile");
+    assert_eq!(
+        compiled_yaml.allowed_tools,
+        vec!["execute_trade", "query_balance"]
+    );
     assert_eq!(compiled_yaml.max_single_transfer_usd, 10000.0);
     assert!(compiled_yaml.verify_digest());
 
@@ -139,9 +150,16 @@ allowed_tools:
    - "query_balance"
    - "execute_trade"
 "#;
-    let compiled_spaced = SubstrateCompiler::detect_and_compile_str(yaml_spaced).expect("Spaced YAML must compile");
-    assert_eq!(compiled_spaced.allowed_tools, vec!["execute_trade", "query_balance"]);
-    assert_eq!(compiled_yaml.substrate_contract_digest, compiled_spaced.substrate_contract_digest);
+    let compiled_spaced =
+        SubstrateCompiler::detect_and_compile_str(yaml_spaced).expect("Spaced YAML must compile");
+    assert_eq!(
+        compiled_spaced.allowed_tools,
+        vec!["execute_trade", "query_balance"]
+    );
+    assert_eq!(
+        compiled_yaml.substrate_contract_digest,
+        compiled_spaced.substrate_contract_digest
+    );
 
     // 3. LulaValidation manifest via YAML
     let lula_yaml = r#"
@@ -153,7 +171,8 @@ metadata:
     fiscal_cap_usd: "50000.00"
     requires_warrant: "false"
 "#;
-    let compiled_lula = SubstrateCompiler::detect_and_compile_str(lula_yaml).expect("Lula YAML must compile");
+    let compiled_lula =
+        SubstrateCompiler::detect_and_compile_str(lula_yaml).expect("Lula YAML must compile");
     assert_eq!(compiled_lula.format, SubstrateFormat::LulaValidation);
     assert!(compiled_lula.verify_digest());
 }
@@ -457,7 +476,8 @@ fn test_c1_tier5_warrant_verification_and_tamper_rejection() {
                 "consensus_threshold": 0.85
             }
         ]
-    })).expect("Substrate must compile");
+    }))
+    .expect("Substrate must compile");
 
     let kernel = CageGovernanceKernel::with_substrate(contract_warrant);
     let secret = b"challenger_test_epoch_secret_32b";
@@ -566,7 +586,10 @@ fn test_c1_tier7_cbf_forward_invariance_boundaries() {
     // 1. HealthcareDoseBarrier exact single dose boundary: 100 mg max
     let dose_barrier = HealthcareDoseBarrier::new(100.0, 200.0, 0.0, 0.50);
     assert!(dose_barrier.evaluate(100.0).is_ok());
-    assert_eq!(dose_barrier.evaluate(100.001).unwrap_err().0, CTRL_CBF_DOSE_001);
+    assert_eq!(
+        dose_barrier.evaluate(100.001).unwrap_err().0,
+        CTRL_CBF_DOSE_001
+    );
 
     // 2. Discrete forward invariance boundary condition:
     // With cumulative = 90 mg, daily max = 200 mg, gamma = 0.50:
@@ -594,9 +617,7 @@ fn test_c1_atomic_fiscal_barrier_100_thread_stress_zero_overspend() {
     let mut handles = Vec::new();
     for _ in 0..num_threads {
         let b = barrier.clone();
-        handles.push(std::thread::spawn(move || {
-            b.try_spend(spend_per_thread)
-        }));
+        handles.push(std::thread::spawn(move || b.try_spend(spend_per_thread)));
     }
 
     let mut successes = 0;
@@ -613,7 +634,10 @@ fn test_c1_atomic_fiscal_barrier_100_thread_stress_zero_overspend() {
     }
 
     // Exactly 50 threads can succeed ($5,000 / $100 = 50) and exactly 50 must fail
-    assert_eq!(successes, 50, "Expected exactly 50 threads to clear fiscal cap");
+    assert_eq!(
+        successes, 50,
+        "Expected exactly 50 threads to clear fiscal cap"
+    );
     assert_eq!(refusals, 50, "Expected exactly 50 threads to be refused");
     assert_eq!(
         barrier.get_spent_usd(),
@@ -711,7 +735,10 @@ fn test_c1_evidence_writer_sequential_hash_chain_50_entries() {
     }
 
     assert_eq!(writer.count(), 50);
-    assert!(writer.verify_chain_integrity(), "50-entry hash chain must verify");
+    assert!(
+        writer.verify_chain_integrity(),
+        "50-entry hash chain must verify"
+    );
 }
 
 #[test]
@@ -744,7 +771,10 @@ fn test_c1_trace_verifier_detects_all_conformance_violations() {
     ];
     let r_bad_first = CageTraceVerifier::verify_trace_conformance(&bad_first);
     assert!(!r_bad_first.is_conformant);
-    assert!(r_bad_first.violations.iter().any(|v| v.contains("ACTION_PROPOSED_NOT_FIRST")));
+    assert!(r_bad_first
+        .violations
+        .iter()
+        .any(|v| v.contains("ACTION_PROPOSED_NOT_FIRST")));
 
     // 3. Non-monotonic step numbers
     let non_monotonic = vec![
@@ -771,7 +801,10 @@ fn test_c1_trace_verifier_detects_all_conformance_violations() {
     ];
     let r_nm = CageTraceVerifier::verify_trace_conformance(&non_monotonic);
     assert!(!r_nm.is_conformant);
-    assert!(r_nm.violations.iter().any(|v| v.contains("NON_MONOTONIC_STEP")));
+    assert!(r_nm
+        .violations
+        .iter()
+        .any(|v| v.contains("NON_MONOTONIC_STEP")));
 
     // 4. Missing warrant before CBF when warrant is required
     let warrant_violation = vec![
@@ -798,5 +831,8 @@ fn test_c1_trace_verifier_detects_all_conformance_violations() {
     ];
     let r_wv = CageTraceVerifier::verify_trace_conformance(&warrant_violation);
     assert!(!r_wv.is_conformant);
-    assert!(r_wv.violations.iter().any(|v| v.contains("WARRANT_PRECEDENCE_VIOLATION")));
+    assert!(r_wv
+        .violations
+        .iter()
+        .any(|v| v.contains("WARRANT_PRECEDENCE_VIOLATION")));
 }

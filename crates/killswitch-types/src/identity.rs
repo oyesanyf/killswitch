@@ -154,7 +154,8 @@ mod tests {
 
         // Tamper with digest
         id.start_time_100ns -= 1;
-        id.image_digest_blake3 = "0000000000000000000000000000000000000000000000000000000000000000".to_string();
+        id.image_digest_blake3 =
+            "0000000000000000000000000000000000000000000000000000000000000000".to_string();
         assert!(!id.verify_integrity());
     }
 }

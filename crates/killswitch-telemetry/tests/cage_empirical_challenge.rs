@@ -18,11 +18,10 @@ use std::sync::Arc;
 use std::thread;
 
 use killswitch_telemetry::cage_governance::{
-    global_cage_kernel, AtomicFiscalBarrier, CageDecisionReceipt, CageEvidenceWriter,
-    CageEvaluationRequest, CageTier, CageTraceVerifier, CageVerdict,
-    FinanceBoundingBarrier, GovernanceTraceEvent, GovernanceTraceEventType,
-    HealthcareDoseBarrier, SubstrateCompiler, SubstrateFormat,
-    CTRL_CBF_DOSE_001, CTRL_CBF_FINANCE_001, CTRL_CONF_001, CTRL_OPA_005,
+    global_cage_kernel, AtomicFiscalBarrier, CageDecisionReceipt, CageEvaluationRequest,
+    CageEvidenceWriter, CageTier, CageTraceVerifier, CageVerdict, FinanceBoundingBarrier,
+    GovernanceTraceEvent, GovernanceTraceEventType, HealthcareDoseBarrier, SubstrateCompiler,
+    SubstrateFormat, CTRL_CBF_DOSE_001, CTRL_CBF_FINANCE_001, CTRL_CONF_001, CTRL_OPA_005,
     FISCAL_CAP_EXCEEDED,
 };
 use killswitch_telemetry::continuous_defense::{
@@ -52,70 +51,123 @@ fn test_empirical_receipt_tampering_field_by_field_100_percent_detection() {
     );
 
     // Initial baseline must be 100% valid
-    assert!(original.verify_digest(), "Original receipt must pass verify_digest()");
-    assert!(original.verify_signature(secret), "Original receipt must pass verify_signature()");
-    assert!(original.verify_all(secret), "Original receipt must pass verify_all()");
+    assert!(
+        original.verify_digest(),
+        "Original receipt must pass verify_digest()"
+    );
+    assert!(
+        original.verify_signature(secret),
+        "Original receipt must pass verify_signature()"
+    );
+    assert!(
+        original.verify_all(secret),
+        "Original receipt must pass verify_all()"
+    );
 
     // 1. Mutate verdict: Clear -> Refuse
     let mut t_verdict = original.clone();
     t_verdict.verdict = CageVerdict::Refuse;
-    assert!(!t_verdict.verify_digest(), "Tampered verdict must be rejected by verify_digest()");
+    assert!(
+        !t_verdict.verify_digest(),
+        "Tampered verdict must be rejected by verify_digest()"
+    );
 
     // 2. Mutate rule_id
     let mut t_rule = original.clone();
     t_rule.rule_id = "MALICIOUS_BYPASS_RULE".to_string();
-    assert!(!t_rule.verify_digest(), "Tampered rule_id must be rejected by verify_digest()");
+    assert!(
+        !t_rule.verify_digest(),
+        "Tampered rule_id must be rejected by verify_digest()"
+    );
 
     // 3. Mutate tier: Tier8Fiscal -> Tier1Ftra
     let mut t_tier = original.clone();
     t_tier.tier = CageTier::Tier1Ftra;
-    assert!(!t_tier.verify_digest(), "Tampered tier must be rejected by verify_digest()");
+    assert!(
+        !t_tier.verify_digest(),
+        "Tampered tier must be rejected by verify_digest()"
+    );
 
     // 4. Mutate argument_digest
     let mut t_arg = original.clone();
-    t_arg.argument_digest = "0000000000000000000000000000000000000000000000000000000000000000".to_string();
-    assert!(!t_arg.verify_digest(), "Tampered argument_digest must be rejected by verify_digest()");
+    t_arg.argument_digest =
+        "0000000000000000000000000000000000000000000000000000000000000000".to_string();
+    assert!(
+        !t_arg.verify_digest(),
+        "Tampered argument_digest must be rejected by verify_digest()"
+    );
 
     // 5. Mutate timestamp_ms
     let mut t_time = original.clone();
     t_time.timestamp_ms += 1;
-    assert!(!t_time.verify_digest(), "Tampered timestamp_ms must be rejected by verify_digest()");
+    assert!(
+        !t_time.verify_digest(),
+        "Tampered timestamp_ms must be rejected by verify_digest()"
+    );
 
     // 6. Mutate agent_id
     let mut t_agent = original.clone();
     t_agent.agent_id = "agent-malicious-attacker".to_string();
-    assert!(!t_agent.verify_digest(), "Tampered agent_id must be rejected by verify_digest()");
+    assert!(
+        !t_agent.verify_digest(),
+        "Tampered agent_id must be rejected by verify_digest()"
+    );
 
     // 7. Mutate tool_name
     let mut t_tool = original.clone();
     t_tool.tool_name = "drop_database".to_string();
-    assert!(!t_tool.verify_digest(), "Tampered tool_name must be rejected by verify_digest()");
+    assert!(
+        !t_tool.verify_digest(),
+        "Tampered tool_name must be rejected by verify_digest()"
+    );
 
     // 8. Mutate substrate_digest
     let mut t_sub = original.clone();
-    t_sub.substrate_digest = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".to_string();
-    assert!(!t_sub.verify_digest(), "Tampered substrate_digest must be rejected by verify_digest()");
+    t_sub.substrate_digest =
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".to_string();
+    assert!(
+        !t_sub.verify_digest(),
+        "Tampered substrate_digest must be rejected by verify_digest()"
+    );
 
     // 9. Mutate receipt_id
     let mut t_rcpt_id = original.clone();
     t_rcpt_id.receipt_id = "cage-rcpt-forged-uuid-0000".to_string();
-    assert!(!t_rcpt_id.verify_digest(), "Tampered receipt_id must be rejected by verify_digest()");
+    assert!(
+        !t_rcpt_id.verify_digest(),
+        "Tampered receipt_id must be rejected by verify_digest()"
+    );
 
     // 10. Mutate sha256_digest directly (attempting to decouple digest)
     let mut t_sha = original.clone();
-    t_sha.sha256_digest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string();
-    assert!(!t_sha.verify_digest(), "Directly tampered sha256_digest must fail verify_digest()");
+    t_sha.sha256_digest =
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string();
+    assert!(
+        !t_sha.verify_digest(),
+        "Directly tampered sha256_digest must fail verify_digest()"
+    );
 
     // 11. Mutate blake3_digest directly
     let mut t_blake = original.clone();
-    t_blake.blake3_digest = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210".to_string();
-    assert!(!t_blake.verify_digest(), "Directly tampered blake3_digest must fail verify_digest()");
+    t_blake.blake3_digest =
+        "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210".to_string();
+    assert!(
+        !t_blake.verify_digest(),
+        "Directly tampered blake3_digest must fail verify_digest()"
+    );
 
     // 12. Signature forgery / key mismatch
-    assert!(!original.verify_signature(b"wrong_secret_key_for_forgery___"), "Wrong secret must fail signature verification");
+    assert!(
+        !original.verify_signature(b"wrong_secret_key_for_forgery___"),
+        "Wrong secret must fail signature verification"
+    );
     let mut t_sig = original.clone();
-    t_sig.receipt_signature = "badc0ffee0000000000000000000000000000000000000000000000000000000".to_string();
-    assert!(!t_sig.verify_signature(secret), "Corrupted signature hex must fail verify_signature()");
+    t_sig.receipt_signature =
+        "badc0ffee0000000000000000000000000000000000000000000000000000000".to_string();
+    assert!(
+        !t_sig.verify_signature(secret),
+        "Corrupted signature hex must fail verify_signature()"
+    );
 }
 
 // =========================================================================
@@ -131,55 +183,115 @@ fn test_empirical_evidence_writer_fail_closed_and_hash_chaining() {
     for i in 0..50 {
         let receipt = CageDecisionReceipt::create_and_sign(
             &format!("agent-worker-{:03}", i % 5),
-            if i % 2 == 0 { "execute_trade" } else { "query_balance" },
+            if i % 2 == 0 {
+                "execute_trade"
+            } else {
+                "query_balance"
+            },
             &format!("arg_hash_{:04}", i),
             "sub_hash_alpha",
-            if i % 7 == 0 { CageVerdict::Refuse } else { CageVerdict::Clear },
-            if i % 7 == 0 { CageTier::Tier3Opa } else { CageTier::Tier8Fiscal },
-            if i % 7 == 0 { CTRL_OPA_005 } else { "CAGE_CLEARED" },
+            if i % 7 == 0 {
+                CageVerdict::Refuse
+            } else {
+                CageVerdict::Clear
+            },
+            if i % 7 == 0 {
+                CageTier::Tier3Opa
+            } else {
+                CageTier::Tier8Fiscal
+            },
+            if i % 7 == 0 {
+                CTRL_OPA_005
+            } else {
+                "CAGE_CLEARED"
+            },
             vec!["Automated test entry".to_string()],
-            if i % 7 == 0 { Some("Single transfer limit exceeded".to_string()) } else { None },
+            if i % 7 == 0 {
+                Some("Single transfer limit exceeded".to_string())
+            } else {
+                None
+            },
             1_700_100_000 + (i as u64) * 10,
             secret,
         );
 
-        let entry = writer.append_receipt(receipt).expect("Valid receipt must append cleanly");
+        let entry = writer
+            .append_receipt(receipt)
+            .expect("Valid receipt must append cleanly");
         assert_eq!(entry.sequence_no, i);
     }
 
     assert_eq!(writer.count(), 50);
     assert_eq!(writer.len(), 50);
     assert!(!writer.is_empty());
-    assert!(writer.verify_chain_integrity(), "50-entry BLAKE3 chain must pass verify_chain_integrity()");
+    assert!(
+        writer.verify_chain_integrity(),
+        "50-entry BLAKE3 chain must pass verify_chain_integrity()"
+    );
 
     // 2. Fail-closed rejection of tampered receipts
     let bad_receipt = {
         let mut r = CageDecisionReceipt::create_and_sign(
-            "agent-bad", "execute_trade", "bad_arg", "bad_sub",
-            CageVerdict::Clear, CageTier::Tier8Fiscal, "CAGE_CLEARED", vec![], None, 1_700_200_000, secret,
+            "agent-bad",
+            "execute_trade",
+            "bad_arg",
+            "bad_sub",
+            CageVerdict::Clear,
+            CageTier::Tier8Fiscal,
+            "CAGE_CLEARED",
+            vec![],
+            None,
+            1_700_200_000,
+            secret,
         );
         r.verdict = CageVerdict::Refuse; // Tamper
         r
     };
     let append_tampered_res = writer.append_receipt(bad_receipt);
-    assert!(append_tampered_res.is_err(), "Writer must reject tampered receipt");
+    assert!(
+        append_tampered_res.is_err(),
+        "Writer must reject tampered receipt"
+    );
     let err_msg = append_tampered_res.unwrap_err();
-    assert!(err_msg.contains("TAMPERED_RECEIPT_DIGEST"), "Error must cite TAMPERED_RECEIPT_DIGEST: {}", err_msg);
+    assert!(
+        err_msg.contains("TAMPERED_RECEIPT_DIGEST"),
+        "Error must cite TAMPERED_RECEIPT_DIGEST: {}",
+        err_msg
+    );
 
     // 3. Fail-closed rejection when evidence sink is unavailable
     writer.set_available(false);
     let valid_receipt_while_unavail = CageDecisionReceipt::create_and_sign(
-        "agent-01", "query_balance", "arg_clean", "sub_clean",
-        CageVerdict::Clear, CageTier::Tier8Fiscal, "CAGE_CLEARED", vec![], None, 1_700_300_000, secret,
+        "agent-01",
+        "query_balance",
+        "arg_clean",
+        "sub_clean",
+        CageVerdict::Clear,
+        CageTier::Tier8Fiscal,
+        "CAGE_CLEARED",
+        vec![],
+        None,
+        1_700_300_000,
+        secret,
     );
     let unavail_res = writer.append_receipt(valid_receipt_while_unavail);
-    assert!(unavail_res.is_err(), "Writer must fail closed when unavailable");
+    assert!(
+        unavail_res.is_err(),
+        "Writer must fail closed when unavailable"
+    );
     let unavail_err = unavail_res.unwrap_err();
-    assert!(unavail_err.contains("CAGE_EVIDENCE_SINK_UNAVAILABLE"), "Error must cite CAGE_EVIDENCE_SINK_UNAVAILABLE: {}", unavail_err);
+    assert!(
+        unavail_err.contains("CAGE_EVIDENCE_SINK_UNAVAILABLE"),
+        "Error must cite CAGE_EVIDENCE_SINK_UNAVAILABLE: {}",
+        unavail_err
+    );
 
     // Restore availability and ensure chain is still intact
     writer.set_available(true);
-    assert!(writer.verify_chain_integrity(), "Chain must remain valid after rejected attempts");
+    assert!(
+        writer.verify_chain_integrity(),
+        "Chain must remain valid after rejected attempts"
+    );
 }
 
 // =========================================================================
@@ -191,8 +303,14 @@ fn test_empirical_trace_verifier_adversarial_rejections() {
     // 1. Empty trace rejection
     let empty_trace: Vec<GovernanceTraceEvent> = Vec::new();
     let rep_empty = CageTraceVerifier::verify_trace_conformance(&empty_trace);
-    assert!(!rep_empty.is_conformant, "Empty trace must not be conformant");
-    assert!(rep_empty.violations.iter().any(|v| v.contains("EMPTY_TRACE")));
+    assert!(
+        !rep_empty.is_conformant,
+        "Empty trace must not be conformant"
+    );
+    assert!(rep_empty
+        .violations
+        .iter()
+        .any(|v| v.contains("EMPTY_TRACE")));
 
     // 2. ActionProposed not at index 0
     let late_action_trace = vec![
@@ -219,7 +337,10 @@ fn test_empirical_trace_verifier_adversarial_rejections() {
     ];
     let rep_late = CageTraceVerifier::verify_trace_conformance(&late_action_trace);
     assert!(!rep_late.is_conformant);
-    assert!(rep_late.violations.iter().any(|v| v.contains("ACTION_PROPOSED_NOT_FIRST")));
+    assert!(rep_late
+        .violations
+        .iter()
+        .any(|v| v.contains("ACTION_PROPOSED_NOT_FIRST")));
 
     // 3. Out-of-order step sequence (step 3 followed by step 2)
     let non_monotonic_steps = vec![
@@ -257,7 +378,10 @@ fn test_empirical_trace_verifier_adversarial_rejections() {
     let rep_step = CageTraceVerifier::verify_trace_conformance(&non_monotonic_steps);
     assert!(!rep_step.is_conformant);
     assert!(!rep_step.monotonic_ordering_valid);
-    assert!(rep_step.violations.iter().any(|v| v.contains("NON_MONOTONIC_STEP")));
+    assert!(rep_step
+        .violations
+        .iter()
+        .any(|v| v.contains("NON_MONOTONIC_STEP")));
 
     // 4. Out-of-order tier progression (Tier 7 evaluated before Tier 3)
     let out_of_order_tiers = vec![
@@ -295,7 +419,10 @@ fn test_empirical_trace_verifier_adversarial_rejections() {
     let rep_tier = CageTraceVerifier::verify_trace_conformance(&out_of_order_tiers);
     assert!(!rep_tier.is_conformant);
     assert!(!rep_tier.monotonic_ordering_valid);
-    assert!(rep_tier.violations.iter().any(|v| v.contains("TRACE_OUT_OF_ORDER_TIER")));
+    assert!(rep_tier
+        .violations
+        .iter()
+        .any(|v| v.contains("TRACE_OUT_OF_ORDER_TIER")));
 
     // 5. ActuationCompleted without preceding Clear receipt
     let premature_actuation = vec![
@@ -333,7 +460,10 @@ fn test_empirical_trace_verifier_adversarial_rejections() {
     let rep_no_rcpt = CageTraceVerifier::verify_trace_conformance(&premature_actuation);
     assert!(!rep_no_rcpt.is_conformant);
     assert!(!rep_no_rcpt.actuation_receipt_valid);
-    assert!(rep_no_rcpt.violations.iter().any(|v| v.contains("ILLEGAL_ACTUATION_WITHOUT_CLEAR_RECEIPT")));
+    assert!(rep_no_rcpt
+        .violations
+        .iter()
+        .any(|v| v.contains("ILLEGAL_ACTUATION_WITHOUT_CLEAR_RECEIPT")));
 
     // 6. ActuationCompleted after Refuse receipt
     let actuation_after_refuse = vec![
@@ -381,7 +511,10 @@ fn test_empirical_trace_verifier_adversarial_rejections() {
     let rep_refuse_act = CageTraceVerifier::verify_trace_conformance(&actuation_after_refuse);
     assert!(!rep_refuse_act.is_conformant);
     assert!(!rep_refuse_act.actuation_receipt_valid);
-    assert!(rep_refuse_act.violations.iter().any(|v| v.contains("ACTUATION_AFTER_REFUSAL")));
+    assert!(rep_refuse_act
+        .violations
+        .iter()
+        .any(|v| v.contains("ACTUATION_AFTER_REFUSAL")));
 
     // 7. Warrant Precedence Violation (requires_warrant is true, but CbfVerified occurs without WarrantChecked)
     let missing_warrant_trace = vec![
@@ -419,7 +552,10 @@ fn test_empirical_trace_verifier_adversarial_rejections() {
     let rep_warrant = CageTraceVerifier::verify_trace_conformance(&missing_warrant_trace);
     assert!(!rep_warrant.is_conformant);
     assert!(!rep_warrant.warrant_precedence_valid);
-    assert!(rep_warrant.violations.iter().any(|v| v.contains("WARRANT_PRECEDENCE_VIOLATION")));
+    assert!(rep_warrant
+        .violations
+        .iter()
+        .any(|v| v.contains("WARRANT_PRECEDENCE_VIOLATION")));
 
     // 8. Warrant Precedence Violation for FiscalCommitted
     let missing_warrant_fiscal_trace = vec![
@@ -444,10 +580,14 @@ fn test_empirical_trace_verifier_adversarial_rejections() {
             details: "Fiscal committed directly".to_string(),
         },
     ];
-    let rep_warrant_fiscal = CageTraceVerifier::verify_trace_conformance(&missing_warrant_fiscal_trace);
+    let rep_warrant_fiscal =
+        CageTraceVerifier::verify_trace_conformance(&missing_warrant_fiscal_trace);
     assert!(!rep_warrant_fiscal.is_conformant);
     assert!(!rep_warrant_fiscal.warrant_precedence_valid);
-    assert!(rep_warrant_fiscal.violations.iter().any(|v| v.contains("WARRANT_PRECEDENCE_VIOLATION")));
+    assert!(rep_warrant_fiscal
+        .violations
+        .iter()
+        .any(|v| v.contains("WARRANT_PRECEDENCE_VIOLATION")));
 
     // 9. Fully valid canonical 8-tier trace with warrant check
     let canonical_valid_trace = vec![
@@ -603,7 +743,11 @@ fn test_empirical_trace_verifier_adversarial_rejections() {
         },
     ];
     let rep_canonical = CageTraceVerifier::verify_trace_conformance(&canonical_valid_trace);
-    assert!(rep_canonical.is_conformant, "Canonical 8-tier trace must be conformant: {:?}", rep_canonical.violations);
+    assert!(
+        rep_canonical.is_conformant,
+        "Canonical 8-tier trace must be conformant: {:?}",
+        rep_canonical.violations
+    );
     assert!(rep_canonical.monotonic_ordering_valid);
     assert!(rep_canonical.actuation_receipt_valid);
     assert!(rep_canonical.warrant_precedence_valid);
@@ -622,30 +766,61 @@ fn test_empirical_continuous_defense_and_canary_benign_corpus() {
     // 1. Ingested catalog must include arXiv:2606.12320 (Google CAGE)
     let rules = list_ingested_research_rules();
     assert!(
-        rules.iter().any(|r| r.arxiv_id == "2606.12320" || r.rule_id == "ARXIV-DEF-2606.12320"),
+        rules
+            .iter()
+            .any(|r| r.arxiv_id == "2606.12320" || r.rule_id == "ARXIV-DEF-2606.12320"),
         "Catalog must contain arXiv:2606.12320"
     );
 
     // 2. Paper2Agent accuracy suite across all 5 registered rules
     let suite = run_paper2agent_accuracy_suite();
     assert_eq!(suite.status, "verified");
-    assert_eq!(suite.total_rules_tested, 5, "Accuracy suite must test exactly 5 rules");
+    assert_eq!(
+        suite.total_rules_tested, 5,
+        "Accuracy suite must test exactly 5 rules"
+    );
     assert_eq!(suite.true_positive_rate_pct, 100.0, "TPR must be 100.0%");
     assert_eq!(suite.false_positive_rate_pct, 0.0, "FPR must be 0.0%");
     assert!(suite.byte_exact_parity, "Must have byte-exact parity");
-    assert!(suite.llm_fusion_consensus_passed, "LLM fusion consensus must pass");
+    assert!(
+        suite.llm_fusion_consensus_passed,
+        "LLM fusion consensus must pass"
+    );
 
     // 3. Recency gate validation
-    assert!(is_current_research_arxiv_id("2606.12320"), "2026 paper must be accepted by recency gate");
-    assert!(is_current_research_arxiv_id("2501.18492"), "2025 paper must be accepted by recency gate");
-    assert!(!is_current_research_arxiv_id("2406.12320"), "2024 paper must be rejected by recency gate");
-    assert!(!is_current_research_arxiv_id("2305.99999"), "2023 paper must be rejected by recency gate");
+    assert!(
+        is_current_research_arxiv_id("2606.12320"),
+        "2026 paper must be accepted by recency gate"
+    );
+    assert!(
+        is_current_research_arxiv_id("2501.18492"),
+        "2025 paper must be accepted by recency gate"
+    );
+    assert!(
+        !is_current_research_arxiv_id("2406.12320"),
+        "2024 paper must be rejected by recency gate"
+    );
+    assert!(
+        !is_current_research_arxiv_id("2305.99999"),
+        "2023 paper must be rejected by recency gate"
+    );
 
     // 4. Verified repository detection (valid vs blocked fake slugs / non-https schemes)
-    assert!(is_valid_verified_repo_url("https://github.com/google/cybernetic-agent-governance-engine"));
-    assert!(!is_valid_verified_repo_url("https://github.com/example/repo"), "Blocked placeholder repo must return false");
-    assert!(!is_valid_verified_repo_url("http://github.com/google/cybernetic-agent-governance-engine"), "Non-https must return false");
-    assert!(!is_valid_verified_repo_url("not_a_url"), "Malformed URL must return false");
+    assert!(is_valid_verified_repo_url(
+        "https://github.com/google/cybernetic-agent-governance-engine"
+    ));
+    assert!(
+        !is_valid_verified_repo_url("https://github.com/example/repo"),
+        "Blocked placeholder repo must return false"
+    );
+    assert!(
+        !is_valid_verified_repo_url("http://github.com/google/cybernetic-agent-governance-engine"),
+        "Non-https must return false"
+    );
+    assert!(
+        !is_valid_verified_repo_url("not_a_url"),
+        "Malformed URL must return false"
+    );
 
     // 5. Malicious CAGE boundary detection
     let engine = ContinuousDefenseEngine::new();
@@ -658,14 +833,18 @@ fn test_empirical_continuous_defense_and_canary_benign_corpus() {
     );
     assert!(!mal_verdict.is_clean, "Malicious payload must be flagged");
     assert!(
-        mal_verdict.detected_violations.iter().any(|v| v.contains("2606.12320")),
+        mal_verdict
+            .detected_violations
+            .iter()
+            .any(|v| v.contains("2606.12320")),
         "Violation must be attributed to arXiv:2606.12320"
     );
 
     // 6. CANARY BENIGN TELEMETRY CORPUS (Zero False Positives Gate)
     // 6a. All 5 ingested research defense rules must produce 0 false positives against CANARY_BENIGN_TELEMETRY_CORPUS
     for r in &rules {
-        let canary_res = killswitch_telemetry::continuous_defense::verify_rule_against_canary_benign_corpus(r);
+        let canary_res =
+            killswitch_telemetry::continuous_defense::verify_rule_against_canary_benign_corpus(r);
         assert!(
             canary_res.is_none(),
             "Rule '{}' failed canary benign gate: {:?}",
@@ -753,14 +932,20 @@ fn test_empirical_substrate_compiler_key_permutations_and_formats() {
     let c_a = SubstrateCompiler::detect_and_compile(&spec_a).unwrap();
     let c_b = SubstrateCompiler::detect_and_compile(&spec_b).unwrap();
 
-    assert_eq!(c_a.substrate_contract_digest, c_b.substrate_contract_digest, "Key permutation must yield bitwise identical digest");
+    assert_eq!(
+        c_a.substrate_contract_digest, c_b.substrate_contract_digest,
+        "Key permutation must yield bitwise identical digest"
+    );
     assert!(c_a.verify_digest());
     assert!(c_b.verify_digest());
 
     // 2. Reject non-object JSON payload
     let non_obj = serde_json::json!(["not", "an", "object"]);
     let err_non_obj = SubstrateCompiler::detect_and_compile(&non_obj);
-    assert!(err_non_obj.is_err(), "Non-object substrate specification must be rejected");
+    assert!(
+        err_non_obj.is_err(),
+        "Non-object substrate specification must be rejected"
+    );
 
     // 3. String parser handling JSON strings
     let json_str = serde_json::to_string(&spec_a).unwrap();
@@ -786,14 +971,16 @@ fn test_empirical_substrate_compiler_key_permutations_and_formats() {
     let oscal = SubstrateCompiler::detect_and_compile(&serde_json::json!({
         "oscal-version": "1.1.0",
         "component-definition": { "components": [] }
-    })).unwrap();
+    }))
+    .unwrap();
     assert_eq!(oscal.format, SubstrateFormat::NistOscal);
     assert!(oscal.verify_digest());
 
     let lula = SubstrateCompiler::detect_and_compile(&serde_json::json!({
         "kind": "LulaValidation",
         "metadata": { "name": "lula-test" }
-    })).unwrap();
+    }))
+    .unwrap();
     assert_eq!(lula.format, SubstrateFormat::LulaValidation);
     assert!(lula.verify_digest());
 }
@@ -807,7 +994,10 @@ fn test_empirical_cbf_domain_barriers_exact_invariance_boundaries() {
     // h_k = 300 - 250 = 50.
     // Invariance condition: B(x) = 0.5 * 50 - proposed = 25 - proposed >= 0
     // At proposed = 25.0: B(x) = 0.0 -> OK
-    assert!(dose_barrier.evaluate(25.0).is_ok(), "Dose barrier at exact B(x)=0 boundary must pass");
+    assert!(
+        dose_barrier.evaluate(25.0).is_ok(),
+        "Dose barrier at exact B(x)=0 boundary must pass"
+    );
 
     // At proposed = 25.001: B(x) = -0.001 < 0 -> Violation
     let res_viol = dose_barrier.evaluate(25.001);
@@ -848,9 +1038,7 @@ fn test_empirical_atomic_fiscal_barrier_50_thread_stress() {
 
     for _ in 0..thread_count {
         let b = barrier.clone();
-        handles.push(thread::spawn(move || {
-            b.try_spend(spend_per_thread)
-        }));
+        handles.push(thread::spawn(move || b.try_spend(spend_per_thread)));
     }
 
     let mut success_count = 0;
@@ -867,9 +1055,19 @@ fn test_empirical_atomic_fiscal_barrier_50_thread_stress() {
     }
 
     // Exactly 20 threads succeed ($10,000 / $500 = 20) and 30 threads fail
-    assert_eq!(success_count, 20, "Exactly 20 threads must succeed under $10k cap");
-    assert_eq!(refuse_count, 30, "Exactly 30 threads must be refused under $10k cap");
-    assert_eq!(barrier.get_spent_usd(), 10000.0, "Total spend must equal exactly $10,000");
+    assert_eq!(
+        success_count, 20,
+        "Exactly 20 threads must succeed under $10k cap"
+    );
+    assert_eq!(
+        refuse_count, 30,
+        "Exactly 30 threads must be refused under $10k cap"
+    );
+    assert_eq!(
+        barrier.get_spent_usd(),
+        10000.0,
+        "Total spend must equal exactly $10,000"
+    );
 
     // Any further spend attempt must fail closed
     assert_eq!(barrier.try_spend(0.01).unwrap_err(), FISCAL_CAP_EXCEEDED);
@@ -886,7 +1084,10 @@ fn test_empirical_cage_kernel_8_tier_adversarial_challenges() {
 
     // 1. Kernel invariant: llm_clients_in_kernel must be structurally false
     let status = kernel.status();
-    assert!(!status.llm_clients_in_kernel, "LLM clients in kernel MUST be false");
+    assert!(
+        !status.llm_clients_in_kernel,
+        "LLM clients in kernel MUST be false"
+    );
 
     // 2. All 8 canonical unverified self-authorization phrases must trigger Tier 4 CTRL_CONF_001
     let canonical_unverified_claims = [
@@ -914,7 +1115,12 @@ fn test_empirical_cage_kernel_8_tier_adversarial_challenges() {
             context: None,
         };
         let resp = kernel.evaluate(&req);
-        assert_eq!(resp.verdict, CageVerdict::Refuse, "Claim '{}' must be refused", claim);
+        assert_eq!(
+            resp.verdict,
+            CageVerdict::Refuse,
+            "Claim '{}' must be refused",
+            claim
+        );
         assert_eq!(resp.tier, CageTier::Tier4Confidence);
         assert_eq!(resp.rule_id, CTRL_CONF_001);
         assert!(resp.receipt.verify_digest());

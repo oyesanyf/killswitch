@@ -31,14 +31,12 @@ use killswitch_server::server::ServerState;
 use killswitch_telemetry::{canonicalize_jcs, canonicalize_jcs_string};
 use killswitch_types::errors::KillSwitchError;
 
-const ADVERSARIAL_MASTER_TOKEN: &str =
-    "adv_master_secret_key_9876543210_fedcba_0123456789abcdef";
+const ADVERSARIAL_MASTER_TOKEN: &str = "adv_master_secret_key_9876543210_fedcba_0123456789abcdef";
 
 fn create_test_server_state(bound_port: u16) -> Arc<ServerState> {
     std::env::set_var("KILLSWITCH_MASTER_TOKEN", ADVERSARIAL_MASTER_TOKEN);
     let temp_dir = tempfile::tempdir().unwrap();
-    let containment =
-        Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
+    let containment = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
     let state = Arc::new(ServerState::with_defaults(containment));
     state
         .active_bound_port
@@ -303,7 +301,10 @@ fn test_adversarial_jcs_large_floats_no_saturation() {
     // 9.5e18 = 9,500,000,000,000,000,000 (> 9.223e18)
     let v_9_5e18 = json!(9.5e18);
     let s_9_5e18 = canonicalize_jcs_string(&v_9_5e18).unwrap();
-    assert_ne!(s_9_5e18, I64_MAX_STR, "9.5e18 MUST NOT saturate to i64::MAX");
+    assert_ne!(
+        s_9_5e18, I64_MAX_STR,
+        "9.5e18 MUST NOT saturate to i64::MAX"
+    );
     assert_eq!(s_9_5e18, "9500000000000000000");
 
     // 1e20 = 100,000,000,000,000,000,000
@@ -420,16 +421,28 @@ fn test_adversarial_jcs_negative_large_floats() {
 fn test_residual_risk_ieee754_exact_2pow63_boundary() {
     let f_2pow63: f64 = 9223372036854775808.0;
     let i64_max_as_f64 = i64::MAX as f64;
-    assert_eq!(i64_max_as_f64, f_2pow63, "i64::MAX as f64 rounds up to 2^63");
+    assert_eq!(
+        i64_max_as_f64, f_2pow63,
+        "i64::MAX as f64 rounds up to 2^63"
+    );
 
     let val = json!(f_2pow63);
     let serialized = canonicalize_jcs_string(&val).unwrap();
-    assert_ne!(serialized, "9223372036854775807", "2^63 MUST NOT saturate to i64::MAX");
-    assert_eq!(serialized, "9223372036854775808", "2^63 MUST format exactly as '9223372036854775808'");
+    assert_ne!(
+        serialized, "9223372036854775807",
+        "2^63 MUST NOT saturate to i64::MAX"
+    );
+    assert_eq!(
+        serialized, "9223372036854775808",
+        "2^63 MUST format exactly as '9223372036854775808'"
+    );
 
     let val_neg = json!(-f_2pow63);
     let serialized_neg = canonicalize_jcs_string(&val_neg).unwrap();
-    assert_eq!(serialized_neg, "-9223372036854775808", "-2^63 MUST format exactly as '-9223372036854775808'");
+    assert_eq!(
+        serialized_neg, "-9223372036854775808",
+        "-2^63 MUST format exactly as '-9223372036854775808'"
+    );
 }
 
 /// Vector 2f: Test composite nested payload serialization and cryptographic digest stability.
@@ -472,5 +485,8 @@ fn test_adversarial_jcs_composite_payload_digest_stability() {
     hasher2.update(&canonical_bytes);
     let digest2 = format!("{:x}", hasher2.finalize());
 
-    assert_eq!(digest1, digest2, "Byte and string canonicalization digests MUST match exactly");
+    assert_eq!(
+        digest1, digest2,
+        "Byte and string canonicalization digests MUST match exactly"
+    );
 }

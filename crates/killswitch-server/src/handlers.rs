@@ -549,19 +549,26 @@ pub async fn post_health_probe(
             let bound_port = state
                 .active_bound_port
                 .load(std::sync::atomic::Ordering::SeqCst);
-            let caller_pid = match killswitch_core::peer_pid::resolve_loopback_peer_pid(addr, bound_port) {
-                Ok(pid) => pid,
-                Err(e) => {
-                    return Err(ServerError::Core(
-                        killswitch_types::errors::KillSwitchError::AuthenticationFailed(format!(
-                            "Loopback peer PID verification failed on connected socket: {}",
-                            e
-                        )),
-                    ));
-                }
-            };
+            let caller_pid =
+                match killswitch_core::peer_pid::resolve_loopback_peer_pid(addr, bound_port) {
+                    Ok(pid) => pid,
+                    Err(e) => {
+                        return Err(ServerError::Core(
+                            killswitch_types::errors::KillSwitchError::AuthenticationFailed(
+                                format!(
+                                    "Loopback peer PID verification failed on connected socket: {}",
+                                    e
+                                ),
+                            ),
+                        ));
+                    }
+                };
             let current_status = state.containment_manager.get_status();
-            let is_in_active_lease = state.journal.unexpired_leases().iter().any(|l| l.target_pid == Some(caller_pid));
+            let is_in_active_lease = state
+                .journal
+                .unexpired_leases()
+                .iter()
+                .any(|l| l.target_pid == Some(caller_pid));
             if current_status.frozen_pids.contains(&caller_pid) || is_in_active_lease {
                 return Err(ServerError::CallerQuarantined(caller_pid));
             }
@@ -4318,14 +4325,12 @@ pub async fn get_siquery_edr_status() -> Result<Json<serde_json::Value>, ServerE
         .clone();
     let telemetry = match cached {
         Some(t) => t,
-        None => {
-            tokio::task::spawn_blocking(|| {
-                let engine = killswitch_telemetry::siquery::SiqueryEngine::new();
-                engine.run_siquery_edr_audit_sweep()
-            })
-            .await
-            .map_err(|e| ServerError::Internal(format!("Sweep join error: {}", e)))?
-        }
+        None => tokio::task::spawn_blocking(|| {
+            let engine = killswitch_telemetry::siquery::SiqueryEngine::new();
+            engine.run_siquery_edr_audit_sweep()
+        })
+        .await
+        .map_err(|e| ServerError::Internal(format!("Sweep join error: {}", e)))?,
     };
     Ok(Json(telemetry))
 }

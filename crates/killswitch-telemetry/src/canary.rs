@@ -4,13 +4,13 @@
 //! (`passwords_2025.txt`, `client_billing_records.xlsx`, `id_rsa_backup`, etc.)
 //! to detect unauthorized adversary discovery, tampering, or ransomware encryption.
 
+use chrono::{DateTime, Utc};
+use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
-use chrono::{DateTime, Utc};
-use parking_lot::RwLock;
-use serde::{Deserialize, Serialize};
 
 use killswitch_types::adjudication::EvidenceClass;
 use killswitch_types::telemetry::{ThreatSeverity, ThreatSignal};
@@ -123,7 +123,10 @@ impl CanaryManager {
 
     /// Audits all registered decoy files, checking for tampering, modification, or deletion.
     /// If any tampering is detected, synthesizes a critical ThreatSignal.
-    pub fn audit_canaries(&self, trigger_pid: Option<u32>) -> (CanaryAuditReport, Option<ThreatSignal>) {
+    pub fn audit_canaries(
+        &self,
+        trigger_pid: Option<u32>,
+    ) -> (CanaryAuditReport, Option<ThreatSignal>) {
         let deployed = self.deployed.read();
         let total = deployed.len();
         let mut intact = 0;

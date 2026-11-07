@@ -31,7 +31,10 @@ pub enum PrivilegeEquivalenceClass {
 impl PrivilegeEquivalenceClass {
     /// Returns true if the command performs privileged execution (either RootOrAdminElevation or TargetUserDelegation).
     pub fn is_privileged_execution(&self) -> bool {
-        matches!(self, Self::RootOrAdminElevation | Self::TargetUserDelegation)
+        matches!(
+            self,
+            Self::RootOrAdminElevation | Self::TargetUserDelegation
+        )
     }
 
     /// Returns true if the command escalates directly to root or Administrator.
@@ -199,7 +202,12 @@ impl DynamicBinaryMetadataProbe {
         if let Ok(mut file) = std::fs::File::open(path) {
             use std::io::Read;
             let mut buffer = Vec::new();
-            if file.by_ref().take(4 * 1024 * 1024).read_to_end(&mut buffer).is_ok() {
+            if file
+                .by_ref()
+                .take(4 * 1024 * 1024)
+                .read_to_end(&mut buffer)
+                .is_ok()
+            {
                 let bytes_probe = Self::probe_bytes(&buffer);
                 if bytes_probe.elevation_requirement != ElevationRequirement::None {
                     probe.elevation_requirement = bytes_probe.elevation_requirement;
@@ -287,7 +295,9 @@ fn find_subsequence(haystack: &[u8], needle: &[u8]) -> bool {
     if needle.is_empty() || haystack.len() < needle.len() {
         return false;
     }
-    haystack.windows(needle.len()).any(|window| window == needle)
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
 }
 
 /// Structural AST representation of a parsed command line.
@@ -535,9 +545,7 @@ fn is_env_var_assignment(token: &str) -> bool {
     if let Some(eq_pos) = token.find('=') {
         if eq_pos > 0 && !token.starts_with('-') && !token.starts_with('/') {
             let name = &token[..eq_pos];
-            return name
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_');
+            return name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
         }
     }
     false
@@ -661,10 +669,22 @@ pub fn parse_semantic_command_with_probe(
                     break;
                 }
                 // Options taking an argument:
-                if (arg == "-u" || arg == "--user" || arg == "-g" || arg == "--group"
-                    || arg == "-p" || arg == "--prompt" || arg == "-C" || arg == "--close-from"
-                    || arg == "-r" || arg == "--role" || arg == "-t" || arg == "--type"
-                    || arg == "-T" || arg == "--command-timeout" || arg == "-D" || arg == "--chdir")
+                if (arg == "-u"
+                    || arg == "--user"
+                    || arg == "-g"
+                    || arg == "--group"
+                    || arg == "-p"
+                    || arg == "--prompt"
+                    || arg == "-C"
+                    || arg == "--close-from"
+                    || arg == "-r"
+                    || arg == "--role"
+                    || arg == "-t"
+                    || arg == "--type"
+                    || arg == "-T"
+                    || arg == "--command-timeout"
+                    || arg == "-D"
+                    || arg == "--chdir")
                     && i + 1 < args.len()
                 {
                     i += 2;
@@ -701,12 +721,14 @@ pub fn parse_semantic_command_with_probe(
             }
 
             // Check benign query flags ONLY if NO subcommand is being executed
-            if subcommand_idx.is_none() && args.iter().any(|a| {
-                matches!(
-                    a.as_str(),
-                    "-l" | "-v" | "-V" | "-h" | "--help" | "--version"
-                )
-            }) {
+            if subcommand_idx.is_none()
+                && args.iter().any(|a| {
+                    matches!(
+                        a.as_str(),
+                        "-l" | "-v" | "-V" | "-h" | "--help" | "--version"
+                    )
+                })
+            {
                 privilege_class = PrivilegeEquivalenceClass::PrivilegeQueryOrBenign;
             } else {
                 if let Some(ref u) = target_user {
@@ -862,7 +884,9 @@ pub fn parse_semantic_command_with_probe(
                     subcommand_idx = Some(i);
                     break;
                 }
-                if (arg == "-u" || arg == "--user" || arg == "-d" || arg == "--distribution") && i + 1 < args.len() {
+                if (arg == "-u" || arg == "--user" || arg == "-d" || arg == "--distribution")
+                    && i + 1 < args.len()
+                {
                     i += 2;
                     continue;
                 }
@@ -903,12 +927,14 @@ pub fn parse_semantic_command_with_probe(
             }
 
             // Check query flags ONLY if NO subcommand is specified
-            if subcommand_idx.is_none() && args.iter().any(|a| {
-                matches!(
-                    a.as_str(),
-                    "-l" | "--list" | "--status" | "-h" | "--help" | "--version" | "-v"
-                )
-            }) && !args.iter().any(|a| a == "-e" || a == "--exec")
+            if subcommand_idx.is_none()
+                && args.iter().any(|a| {
+                    matches!(
+                        a.as_str(),
+                        "-l" | "--list" | "--status" | "-h" | "--help" | "--version" | "-v"
+                    )
+                })
+                && !args.iter().any(|a| a == "-e" || a == "--exec")
             {
                 privilege_class = PrivilegeEquivalenceClass::PrivilegeQueryOrBenign;
             } else {
@@ -945,7 +971,8 @@ pub fn parse_semantic_command_with_probe(
                 || probe.has_linux_capabilities
                 || matches!(
                     probe.elevation_requirement,
-                    ElevationRequirement::RequireAdministrator | ElevationRequirement::HighestAvailable
+                    ElevationRequirement::RequireAdministrator
+                        | ElevationRequirement::HighestAvailable
                 )
             {
                 privilege_class = PrivilegeEquivalenceClass::RootOrAdminElevation;
@@ -997,19 +1024,29 @@ mod tests {
     #[test]
     fn test_sudo_elevation_equivalence_classes() {
         let cmd = parse_semantic_command("sudo -n id");
-        assert_eq!(cmd.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+        assert_eq!(
+            cmd.privilege_class,
+            PrivilegeEquivalenceClass::RootOrAdminElevation
+        );
         assert!(cmd.is_non_interactive);
         assert!(cmd.privilege_class.is_privileged_execution());
         assert!(cmd.privilege_class.is_root_or_admin());
 
-        let cmd_delegated = parse_semantic_command("sudo -u www-data cat /var/log/nginx/access.log");
-        assert_eq!(cmd_delegated.privilege_class, PrivilegeEquivalenceClass::TargetUserDelegation);
+        let cmd_delegated =
+            parse_semantic_command("sudo -u www-data cat /var/log/nginx/access.log");
+        assert_eq!(
+            cmd_delegated.privilege_class,
+            PrivilegeEquivalenceClass::TargetUserDelegation
+        );
         assert_eq!(cmd_delegated.target_user.as_deref(), Some("www-data"));
         assert!(cmd_delegated.privilege_class.is_privileged_execution());
         assert!(!cmd_delegated.privilege_class.is_root_or_admin());
 
         let cmd_query = parse_semantic_command("sudo -l");
-        assert_eq!(cmd_query.privilege_class, PrivilegeEquivalenceClass::PrivilegeQueryOrBenign);
+        assert_eq!(
+            cmd_query.privilege_class,
+            PrivilegeEquivalenceClass::PrivilegeQueryOrBenign
+        );
         assert!(cmd_query.privilege_class.is_benign_query());
         assert!(!cmd_query.privilege_class.is_privileged_execution());
     }
@@ -1017,59 +1054,98 @@ mod tests {
     #[test]
     fn test_wsl_elevation_and_cross_boundary() {
         let cmd_root = parse_semantic_command("wsl -u root apt-get update");
-        assert_eq!(cmd_root.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+        assert_eq!(
+            cmd_root.privilege_class,
+            PrivilegeEquivalenceClass::RootOrAdminElevation
+        );
         assert!(cmd_root.is_cross_boundary);
         assert_eq!(cmd_root.target_user.as_deref(), Some("root"));
 
         let cmd_zero = parse_semantic_command("wsl -u 0 id");
-        assert_eq!(cmd_zero.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+        assert_eq!(
+            cmd_zero.privilege_class,
+            PrivilegeEquivalenceClass::RootOrAdminElevation
+        );
         assert!(cmd_zero.is_cross_boundary);
 
         let cmd_delegated = parse_semantic_command("wsl --user guest whoami");
-        assert_eq!(cmd_delegated.privilege_class, PrivilegeEquivalenceClass::TargetUserDelegation);
+        assert_eq!(
+            cmd_delegated.privilege_class,
+            PrivilegeEquivalenceClass::TargetUserDelegation
+        );
         assert!(cmd_delegated.is_cross_boundary);
         assert_eq!(cmd_delegated.target_user.as_deref(), Some("guest"));
 
         let cmd_query = parse_semantic_command("wsl -l -v");
-        assert_eq!(cmd_query.privilege_class, PrivilegeEquivalenceClass::PrivilegeQueryOrBenign);
+        assert_eq!(
+            cmd_query.privilege_class,
+            PrivilegeEquivalenceClass::PrivilegeQueryOrBenign
+        );
         assert!(cmd_query.is_cross_boundary);
     }
 
     #[test]
     fn test_runas_and_doas_and_su() {
         let cmd_runas = parse_semantic_command("runas /user:Administrator cmd.exe");
-        assert_eq!(cmd_runas.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+        assert_eq!(
+            cmd_runas.privilege_class,
+            PrivilegeEquivalenceClass::RootOrAdminElevation
+        );
         assert_eq!(cmd_runas.target_user.as_deref(), Some("Administrator"));
 
         let cmd_runas_user = parse_semantic_command("runas /user:alice explorer.exe");
-        assert_eq!(cmd_runas_user.privilege_class, PrivilegeEquivalenceClass::TargetUserDelegation);
+        assert_eq!(
+            cmd_runas_user.privilege_class,
+            PrivilegeEquivalenceClass::TargetUserDelegation
+        );
         assert_eq!(cmd_runas_user.target_user.as_deref(), Some("alice"));
 
         let cmd_su_root = parse_semantic_command("su -");
-        assert_eq!(cmd_su_root.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+        assert_eq!(
+            cmd_su_root.privilege_class,
+            PrivilegeEquivalenceClass::RootOrAdminElevation
+        );
 
         let cmd_su_user = parse_semantic_command("su bob");
-        assert_eq!(cmd_su_user.privilege_class, PrivilegeEquivalenceClass::TargetUserDelegation);
+        assert_eq!(
+            cmd_su_user.privilege_class,
+            PrivilegeEquivalenceClass::TargetUserDelegation
+        );
         assert_eq!(cmd_su_user.target_user.as_deref(), Some("bob"));
 
         let cmd_doas = parse_semantic_command("doas rm -rf /tmp/data");
-        assert_eq!(cmd_doas.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+        assert_eq!(
+            cmd_doas.privilege_class,
+            PrivilegeEquivalenceClass::RootOrAdminElevation
+        );
 
         let cmd_pkexec = parse_semantic_command("pkexec sh");
-        assert_eq!(cmd_pkexec.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+        assert_eq!(
+            cmd_pkexec.privilege_class,
+            PrivilegeEquivalenceClass::RootOrAdminElevation
+        );
 
         let cmd_pkexec_ver = parse_semantic_command("pkexec --version");
-        assert_eq!(cmd_pkexec_ver.privilege_class, PrivilegeEquivalenceClass::PrivilegeQueryOrBenign);
+        assert_eq!(
+            cmd_pkexec_ver.privilege_class,
+            PrivilegeEquivalenceClass::PrivilegeQueryOrBenign
+        );
     }
 
     #[test]
     fn test_shell_unwrapping_and_env_prefixes() {
         let cmd_wrapped = parse_semantic_command("bash -c \"sudo id\"");
-        assert_eq!(cmd_wrapped.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+        assert_eq!(
+            cmd_wrapped.privilege_class,
+            PrivilegeEquivalenceClass::RootOrAdminElevation
+        );
         assert_eq!(cmd_wrapped.executable, "sudo");
 
         let cmd_env = parse_semantic_command("SUDO_ASKPASS=/bin/false VAR=val sudo -n id");
-        assert_eq!(cmd_env.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+        assert_eq!(
+            cmd_env.privilege_class,
+            PrivilegeEquivalenceClass::RootOrAdminElevation
+        );
         assert_eq!(cmd_env.executable, "sudo");
         assert_eq!(cmd_env.env_vars.len(), 2);
         assert!(cmd_env.is_non_interactive);
@@ -1080,23 +1156,36 @@ mod tests {
         // Probe simulates an executable renamed to "/tmp/innocent_tool" that has SUID root set
         let probe = DynamicBinaryMetadataProbe::from_posix(0o104755, 0, 0);
         let cmd = parse_semantic_command_with_probe("/tmp/innocent_tool whoami", Some(&probe));
-        assert_eq!(cmd.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+        assert_eq!(
+            cmd.privilege_class,
+            PrivilegeEquivalenceClass::RootOrAdminElevation
+        );
         assert!(cmd.privilege_class.is_privileged_execution());
 
         // Probe simulates a Windows binary with requireAdministrator PE manifest
-        let manifest = r#"<requestedExecutionLevel level="requireAdministrator" uiAccess="false"/>"#;
+        let manifest =
+            r#"<requestedExecutionLevel level="requireAdministrator" uiAccess="false"/>"#;
         let pe_probe = DynamicBinaryMetadataProbe::from_pe_manifest(manifest, &["kernel32.dll"]);
         let cmd_pe = parse_semantic_command_with_probe("custom_installer.exe /S", Some(&pe_probe));
-        assert_eq!(cmd_pe.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+        assert_eq!(
+            cmd_pe.privilege_class,
+            PrivilegeEquivalenceClass::RootOrAdminElevation
+        );
     }
 
     #[test]
     fn test_unprivileged_standard_commands() {
         let cmd_cat = parse_semantic_command("cat /tmp/test.txt");
-        assert_eq!(cmd_cat.privilege_class, PrivilegeEquivalenceClass::UnprivilegedStandard);
+        assert_eq!(
+            cmd_cat.privilege_class,
+            PrivilegeEquivalenceClass::UnprivilegedStandard
+        );
         assert!(!cmd_cat.privilege_class.is_privileged_execution());
 
         let cmd_git = parse_semantic_command("git status");
-        assert_eq!(cmd_git.privilege_class, PrivilegeEquivalenceClass::UnprivilegedStandard);
+        assert_eq!(
+            cmd_git.privilege_class,
+            PrivilegeEquivalenceClass::UnprivilegedStandard
+        );
     }
 }

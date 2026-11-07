@@ -170,7 +170,10 @@ pub fn extract_client_key(req: &Request<Body>) -> String {
         }
     }
 
-    if let Some(connect_info) = req.extensions().get::<axum::extract::ConnectInfo<std::net::SocketAddr>>() {
+    if let Some(connect_info) = req
+        .extensions()
+        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+    {
         return connect_info.0.ip().to_string();
     }
 

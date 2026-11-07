@@ -1,15 +1,14 @@
 //! Empirical Adversarial Challenge SEC-5-2: Inline Synchronous Agent Hooks,
 //! Incident A Evasion Vectors, and MCP Stdio JSON-RPC Proxy Stress Testing.
 
-use std::time::Instant;
 use killswitch_telemetry::agent_hooks::{
     clear_interceptions, evaluate_hook_synchronously, format_claude_response,
     format_copilot_response, format_cursor_response, format_mcp_error_response,
     format_opencode_response, get_recent_interceptions, parse_claude_request,
-    parse_copilot_request, parse_cursor_request, parse_mcp_call_request,
-    parse_opencode_request, HookEventType, NormalizedHookRequest, SupportedAgentKind,
-    GLOBAL_CORRELATOR,
+    parse_copilot_request, parse_cursor_request, parse_mcp_call_request, parse_opencode_request,
+    HookEventType, NormalizedHookRequest, SupportedAgentKind, GLOBAL_CORRELATOR,
 };
+use std::time::Instant;
 
 #[test]
 fn test_incident_a_claude_pre_and_post_reproduction() {
@@ -33,12 +32,24 @@ fn test_incident_a_claude_pre_and_post_reproduction() {
     let start = Instant::now();
     let pre_decision = evaluate_hook_synchronously(&pre_req);
     let duration = start.elapsed();
-    assert!(duration.as_millis() < 5, "PreToolUse evaluation must be synchronous (<5ms)");
-    assert!(!pre_decision.allowed, "sudo -n id must be denied in PreToolUse");
+    assert!(
+        duration.as_millis() < 5,
+        "PreToolUse evaluation must be synchronous (<5ms)"
+    );
+    assert!(
+        !pre_decision.allowed,
+        "sudo -n id must be denied in PreToolUse"
+    );
 
     let (exit_code, stderr) = format_claude_response(&pre_decision);
-    assert_eq!(exit_code, 2, "Claude Code PreToolUse denial must return exit code 2");
-    assert!(stderr.contains("Privileged command elevation rejected"), "Stderr must explain rejection");
+    assert_eq!(
+        exit_code, 2,
+        "Claude Code PreToolUse denial must return exit code 2"
+    );
+    assert!(
+        stderr.contains("Privileged command elevation rejected"),
+        "Stderr must explain rejection"
+    );
 
     // 2. Simulate PostToolUse observing dynamic auth denial from sudo
     let post_payload = serde_json::json!({
@@ -57,8 +68,14 @@ fn test_incident_a_claude_pre_and_post_reproduction() {
     let post_req = parse_claude_request(&post_payload, true).expect("parse claude post");
     assert_eq!(post_req.event_type, HookEventType::PostToolUse);
     let post_decision = evaluate_hook_synchronously(&post_req);
-    assert!(post_decision.allowed, "PostToolUse records dynamic denial and allows logging");
-    assert!(GLOBAL_CORRELATOR.active_denial_count() > 0, "Correlator must record dynamic denial");
+    assert!(
+        post_decision.allowed,
+        "PostToolUse records dynamic denial and allows logging"
+    );
+    assert!(
+        GLOBAL_CORRELATOR.active_denial_count() > 0,
+        "Correlator must record dynamic denial"
+    );
 
     // 3. Immediate circumvention attempt: agent tries `wsl -u root id`
     let circumvention_payload = serde_json::json!({
@@ -70,8 +87,8 @@ fn test_incident_a_claude_pre_and_post_reproduction() {
     })
     .to_string();
 
-    let circumvention_req = parse_claude_request(&circumvention_payload, false)
-        .expect("parse claude circumvention");
+    let circumvention_req =
+        parse_claude_request(&circumvention_payload, false).expect("parse claude circumvention");
     let circumvention_decision = evaluate_hook_synchronously(&circumvention_req);
     assert!(
         !circumvention_decision.allowed,
@@ -110,7 +127,10 @@ fn test_incident_a_cursor_wire_evasion() {
     assert_eq!(code, 0, "Cursor hook returns 0 exit code with json payload");
     let resp: serde_json::Value = serde_json::from_str(&stdout).expect("parse cursor stdout");
     assert_eq!(resp["permission"], "deny");
-    assert!(resp["user_message"].as_str().unwrap().contains("Containment"));
+    assert!(resp["user_message"]
+        .as_str()
+        .unwrap()
+        .contains("Containment"));
 
     // 2. Cursor afterShellExecution recording denial
     let cursor_after = serde_json::json!({
@@ -121,7 +141,8 @@ fn test_incident_a_cursor_wire_evasion() {
     })
     .to_string();
 
-    let after_req = parse_cursor_request(&cursor_after, "afterShellExecution").expect("parse cursor after");
+    let after_req =
+        parse_cursor_request(&cursor_after, "afterShellExecution").expect("parse cursor after");
     assert_eq!(after_req.event_type, HookEventType::AfterShellExecution);
     let after_decision = evaluate_hook_synchronously(&after_req);
     assert!(after_decision.allowed);
@@ -133,7 +154,8 @@ fn test_incident_a_cursor_wire_evasion() {
     })
     .to_string();
 
-    let retry_req = parse_cursor_request(&cursor_retry, "beforeShellExecution").expect("parse cursor retry");
+    let retry_req =
+        parse_cursor_request(&cursor_retry, "beforeShellExecution").expect("parse cursor retry");
     let retry_decision = evaluate_hook_synchronously(&retry_req);
     assert!(!retry_decision.allowed, "doas retry must be denied");
     let (_, retry_out) = format_cursor_response(&retry_decision);
@@ -250,7 +272,11 @@ fn test_mcp_json_rpc_proxy_stress_and_malformed() {
 
     for case in unexpected_params {
         let parsed = parse_mcp_call_request(case);
-        assert!(parsed.is_ok(), "Parser should handle non-standard params gracefully: {}", case);
+        assert!(
+            parsed.is_ok(),
+            "Parser should handle non-standard params gracefully: {}",
+            case
+        );
         let req = parsed.unwrap();
         // Evaluating should not panic
         let decision = evaluate_hook_synchronously(&req);
@@ -281,12 +307,18 @@ fn test_mcp_json_rpc_massive_payload_stress() {
     let start = Instant::now();
     let parsed = parse_mcp_call_request(&massive_json).expect("parse massive MCP request");
     let parse_duration = start.elapsed();
-    assert!(parse_duration.as_millis() < 500, "Massive parse must finish within 500ms");
+    assert!(
+        parse_duration.as_millis() < 500,
+        "Massive parse must finish within 500ms"
+    );
 
     let eval_start = Instant::now();
     let decision = evaluate_hook_synchronously(&parsed);
     let eval_duration = eval_start.elapsed();
-    assert!(eval_duration.as_millis() < 500, "Massive eval must finish within 500ms");
+    assert!(
+        eval_duration.as_millis() < 500,
+        "Massive eval must finish within 500ms"
+    );
     assert!(decision.allowed, "Clean large text should be allowed");
 
     // 2. Construct massive >4.5MB payload containing sensitive PHI/SSN entity
@@ -307,9 +339,13 @@ fn test_mcp_json_rpc_massive_payload_stress() {
     })
     .to_string();
 
-    let sensitive_parsed = parse_mcp_call_request(&sensitive_json).expect("parse sensitive massive MCP");
+    let sensitive_parsed =
+        parse_mcp_call_request(&sensitive_json).expect("parse sensitive massive MCP");
     let sensitive_decision = evaluate_hook_synchronously(&sensitive_parsed);
-    assert!(!sensitive_decision.allowed, "Massive payload with PHI/SSN must be DENIED by DLP");
+    assert!(
+        !sensitive_decision.allowed,
+        "Massive payload with PHI/SSN must be DENIED by DLP"
+    );
     assert_eq!(
         sensitive_decision.denied_by_layer.as_deref(),
         Some("Layer 3: SemanticDlpEngine")
@@ -320,12 +356,27 @@ fn test_mcp_json_rpc_massive_payload_stress() {
 fn test_mcp_unauthorized_tool_calls_and_error_formatting() {
     let unauthorized_calls = [
         ("bash", serde_json::json!({"command": "sudo rm -rf /"})),
-        ("bash", serde_json::json!({"command": "wsl -u root cat /etc/shadow"})),
+        (
+            "bash",
+            serde_json::json!({"command": "wsl -u root cat /etc/shadow"}),
+        ),
         ("read_file", serde_json::json!({"path": "/etc/shadow"})),
-        ("read_file", serde_json::json!({"path": "/workspace/confidential_payroll.xlsx", "command": "cat /workspace/confidential_payroll.xlsx"})),
-        ("auth_tool", serde_json::json!({"command": "aws configure set aws_access_key_id AKIAIOSFODNN7EXAMPLE"})),
-        ("patient_query", serde_json::json!({"query": "SELECT * FROM patients WHERE ssn = '123-45-6789' and diagnosis='severe'"})),
-        ("m_and_a_wire", serde_json::json!({"deal": "Acquisition contract value is $250,000,000.00 USD"})),
+        (
+            "read_file",
+            serde_json::json!({"path": "/workspace/confidential_payroll.xlsx", "command": "cat /workspace/confidential_payroll.xlsx"}),
+        ),
+        (
+            "auth_tool",
+            serde_json::json!({"command": "aws configure set aws_access_key_id AKIAIOSFODNN7EXAMPLE"}),
+        ),
+        (
+            "patient_query",
+            serde_json::json!({"query": "SELECT * FROM patients WHERE ssn = '123-45-6789' and diagnosis='severe'"}),
+        ),
+        (
+            "m_and_a_wire",
+            serde_json::json!({"deal": "Acquisition contract value is $250,000,000.00 USD"}),
+        ),
     ];
 
     for (tool_name, args) in unauthorized_calls {
@@ -342,7 +393,11 @@ fn test_mcp_unauthorized_tool_calls_and_error_formatting() {
 
         let req = parse_mcp_call_request(&mcp_call).expect("parse mcp call");
         let decision = evaluate_hook_synchronously(&req);
-        assert!(!decision.allowed, "Unauthorized tool call must be denied: {:?}", args);
+        assert!(
+            !decision.allowed,
+            "Unauthorized tool call must be denied: {:?}",
+            args
+        );
 
         // Format error response
         let err_json = format_mcp_error_response(&serde_json::json!(999), &decision);
@@ -506,4 +561,3 @@ fn test_compact_json_dlp_evasion_finding() {
         Some("Layer 3: SemanticDlpEngine")
     );
 }
-

@@ -34,21 +34,16 @@ use killswitch_server::server::ServerState;
 use killswitch_types::constant_time_eq;
 use killswitch_types::errors::KillSwitchError;
 use killswitch_types::identity::ProcessInstanceIdentity;
-use killswitch_types::status::{
-    AuthResult, OperatorAuthenticator, OperatorCredentials,
-};
+use killswitch_types::status::{AuthResult, OperatorAuthenticator, OperatorCredentials};
 
-const ADVERSARIAL_MASTER_TOKEN: &str =
-    "adv_master_secret_key_9876543210_fedcba_0123456789abcdef";
+const ADVERSARIAL_MASTER_TOKEN: &str = "adv_master_secret_key_9876543210_fedcba_0123456789abcdef";
 
 fn create_test_server_state() -> Arc<ServerState> {
     std::env::set_var("KILLSWITCH_MASTER_TOKEN", ADVERSARIAL_MASTER_TOKEN);
     let temp_dir = tempfile::tempdir().unwrap();
-    let containment =
-        Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
+    let containment = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
     Arc::new(ServerState::with_defaults(containment))
 }
-
 
 // ============================================================================
 // PART 1: PEER PID RESOLUTION EMPIRICAL STRESS TESTS
@@ -147,8 +142,14 @@ fn test_stress_peer_pid_closed_socket_graceful_handling() {
     // On Windows, closed/TIME_WAIT sockets may either be absent from the table (Err)
     // or report dw_owning_pid == 0 (System/Idle/unowned). Crucially, it must never panic.
     if let Ok(pid) = res {
-        println!("🔬 [EMPIRICAL] Closed/TIME_WAIT socket reported owning PID: {}", pid);
-        assert_ne!(pid, 0, "Closed/TIME_WAIT socket must never report owning PID 0 (must be Err)");
+        println!(
+            "🔬 [EMPIRICAL] Closed/TIME_WAIT socket reported owning PID: {}",
+            pid
+        );
+        assert_ne!(
+            pid, 0,
+            "Closed/TIME_WAIT socket must never report owning PID 0 (must be Err)"
+        );
     }
 }
 
@@ -335,7 +336,9 @@ fn test_stress_auth_truncated_and_boundary_tokens() {
         confirmation_phrase: None,
     };
     match auth.authenticate(&creds_31) {
-        AuthResult::Failed { attempts_remaining, .. } => {
+        AuthResult::Failed {
+            attempts_remaining, ..
+        } => {
             assert_eq!(attempts_remaining, 2, "31-char token must fail as strike 1");
         }
         other => panic!("31-char token should fail, got {:?}", other),
@@ -351,8 +354,13 @@ fn test_stress_auth_truncated_and_boundary_tokens() {
         confirmation_phrase: None,
     };
     match auth.authenticate(&creds_wrong) {
-        AuthResult::Failed { attempts_remaining, .. } => {
-            assert_eq!(attempts_remaining, 1, "Wrong 32-char token must fail as strike 2");
+        AuthResult::Failed {
+            attempts_remaining, ..
+        } => {
+            assert_eq!(
+                attempts_remaining, 1,
+                "Wrong 32-char token must fail as strike 2"
+            );
         }
         other => panic!("Wrong 32-char token should fail, got {:?}", other),
     }
@@ -367,7 +375,10 @@ fn test_stress_auth_truncated_and_boundary_tokens() {
             confirmation_phrase: None,
         };
         assert!(
-            matches!(auth.authenticate(&creds_legacy), AuthResult::Failed { .. } | AuthResult::LockedOut { .. }),
+            matches!(
+                auth.authenticate(&creds_legacy),
+                AuthResult::Failed { .. } | AuthResult::LockedOut { .. }
+            ),
             "Legacy token '{}' must strictly fail Tier 1 authentication",
             legacy
         );
@@ -420,7 +431,10 @@ fn test_stress_auth_timing_probe_distribution() {
     // Assert that mismatched tokens NEVER returned true and identical token ALWAYS returned true
     assert_eq!(hits_first, 0, "Mismatched prefix must never match");
     assert_eq!(hits_last, 0, "Mismatched suffix must never match");
-    assert_eq!(hits_same, iters, "Identical secret must match all iterations");
+    assert_eq!(
+        hits_same, iters,
+        "Identical secret must match all iterations"
+    );
 }
 
 /// 2c. Server `/disarm` API endpoint stress test:
@@ -435,10 +449,13 @@ async fn test_stress_server_disarm_endpoint_authentication() {
         .uri("/disarm")
         .method("POST")
         .header("Content-Type", "application/json")
-        .body(Body::from(serde_json::to_vec(&serde_json::json!({
-            "operator": "secops_admin",
-            "reason": "Missing token test"
-        })).unwrap()))
+        .body(Body::from(
+            serde_json::to_vec(&serde_json::json!({
+                "operator": "secops_admin",
+                "reason": "Missing token test"
+            }))
+            .unwrap(),
+        ))
         .unwrap();
 
     let resp = app.clone().oneshot(req_missing).await.unwrap();
@@ -453,11 +470,14 @@ async fn test_stress_server_disarm_endpoint_authentication() {
         .uri("/disarm")
         .method("POST")
         .header("Content-Type", "application/json")
-        .body(Body::from(serde_json::to_vec(&serde_json::json!({
-            "operator": "secops_admin",
-            "reason": "Truncated token test",
-            "token": "0123456789abcdef0123456789abcde"
-        })).unwrap()))
+        .body(Body::from(
+            serde_json::to_vec(&serde_json::json!({
+                "operator": "secops_admin",
+                "reason": "Truncated token test",
+                "token": "0123456789abcdef0123456789abcde"
+            }))
+            .unwrap(),
+        ))
         .unwrap();
 
     let resp_trunc = app.clone().oneshot(req_trunc).await.unwrap();
@@ -472,11 +492,14 @@ async fn test_stress_server_disarm_endpoint_authentication() {
         .uri("/disarm")
         .method("POST")
         .header("Content-Type", "application/json")
-        .body(Body::from(serde_json::to_vec(&serde_json::json!({
-            "operator": "secops_admin",
-            "reason": "Authorized test disarm",
-            "token": ADVERSARIAL_MASTER_TOKEN
-        })).unwrap()))
+        .body(Body::from(
+            serde_json::to_vec(&serde_json::json!({
+                "operator": "secops_admin",
+                "reason": "Authorized test disarm",
+                "token": ADVERSARIAL_MASTER_TOKEN
+            }))
+            .unwrap(),
+        ))
         .unwrap();
 
     let resp_valid = app.oneshot(req_valid).await.unwrap();
@@ -503,11 +526,14 @@ async fn test_stress_substrate_quarantine_missing_headers() {
         .method("POST")
         .header("Content-Type", "application/json")
         .header("X-CAGE-Signer-Kid", "fake-kid-001")
-        .body(Body::from(serde_json::to_vec(&serde_json::json!({
-            "workload_id": "agent-001",
-            "trigger_reason": "Anomaly detected",
-            "nonce": "nonce-001"
-        })).unwrap()))
+        .body(Body::from(
+            serde_json::to_vec(&serde_json::json!({
+                "workload_id": "agent-001",
+                "trigger_reason": "Anomaly detected",
+                "nonce": "nonce-001"
+            }))
+            .unwrap(),
+        ))
         .unwrap();
 
     let resp = app.clone().oneshot(req).await.unwrap();
@@ -523,11 +549,14 @@ async fn test_stress_substrate_quarantine_missing_headers() {
         .method("POST")
         .header("Content-Type", "application/json")
         .header("X-CAGE-Quarantine-Assertion", "fake-sig")
-        .body(Body::from(serde_json::to_vec(&serde_json::json!({
-            "workload_id": "agent-001",
-            "trigger_reason": "Anomaly detected",
-            "nonce": "nonce-002"
-        })).unwrap()))
+        .body(Body::from(
+            serde_json::to_vec(&serde_json::json!({
+                "workload_id": "agent-001",
+                "trigger_reason": "Anomaly detected",
+                "nonce": "nonce-002"
+            }))
+            .unwrap(),
+        ))
         .unwrap();
 
     let resp2 = app.oneshot(req2).await.unwrap();
@@ -618,14 +647,7 @@ fn test_stress_process_instance_job_object_confinement() {
     );
 
     // Attack 3: Adding a fake job_object_id to an uncontained process
-    let uncontained = ProcessInstanceIdentity::new(
-        pid,
-        start_time,
-        digest,
-        None,
-        None,
-        session,
-    );
+    let uncontained = ProcessInstanceIdentity::new(pid, start_time, digest, None, None, session);
     assert!(uncontained.verify_integrity());
 
     let mut tampered_added = uncontained.clone();

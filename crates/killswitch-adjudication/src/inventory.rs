@@ -24,11 +24,22 @@ fn init_protected_local_binary_hashes() -> DashSet<String> {
     // Enforces symlink rejection and blocks binaries in untrusted writable locations
     if let Ok(raw_exe) = std::env::current_exe() {
         if let Ok(exe_path) = raw_exe.canonicalize() {
-            let is_untrusted = crate::win_trust::is_untrusted_writable_location(&exe_path.to_string_lossy());
-            if !raw_exe.is_symlink() && !exe_path.is_symlink() && !is_untrusted && exe_path.is_file() {
+            let is_untrusted =
+                crate::win_trust::is_untrusted_writable_location(&exe_path.to_string_lossy());
+            if !raw_exe.is_symlink()
+                && !exe_path.is_symlink()
+                && !is_untrusted
+                && exe_path.is_file()
+            {
                 if let Ok(bytes) = std::fs::read(&exe_path) {
-                    let digest = blake3::hash(&bytes).to_hex().to_string().to_ascii_lowercase();
-                    debug!("Protected inventory: registered self executable hash {}", digest);
+                    let digest = blake3::hash(&bytes)
+                        .to_hex()
+                        .to_string()
+                        .to_ascii_lowercase();
+                    debug!(
+                        "Protected inventory: registered self executable hash {}",
+                        digest
+                    );
                     set.insert(digest);
                 }
                 if let Some(parent) = exe_path.parent() {
@@ -45,7 +56,10 @@ fn init_protected_local_binary_hashes() -> DashSet<String> {
                                 if let Ok(meta) = p.metadata() {
                                     if meta.len() > 0 && meta.len() <= 64 * 1024 * 1024 {
                                         if let Ok(bytes) = std::fs::read(&p) {
-                                            let digest = blake3::hash(&bytes).to_hex().to_string().to_ascii_lowercase();
+                                            let digest = blake3::hash(&bytes)
+                                                .to_hex()
+                                                .to_string()
+                                                .to_ascii_lowercase();
                                             set.insert(digest);
                                         }
                                     }
@@ -64,8 +78,14 @@ fn init_protected_local_binary_hashes() -> DashSet<String> {
         if let Ok(path) = which_tool(tool) {
             if path.is_file() {
                 if let Ok(bytes) = std::fs::read(&path) {
-                    let digest = blake3::hash(&bytes).to_hex().to_string().to_ascii_lowercase();
-                    debug!("Protected inventory: registered toolchain {} hash {}", tool, digest);
+                    let digest = blake3::hash(&bytes)
+                        .to_hex()
+                        .to_string()
+                        .to_ascii_lowercase();
+                    debug!(
+                        "Protected inventory: registered toolchain {} hash {}",
+                        tool, digest
+                    );
                     set.insert(digest);
                 }
             }
@@ -91,7 +111,10 @@ fn init_protected_local_binary_hashes() -> DashSet<String> {
                         if let Ok(meta) = exe.metadata() {
                             if meta.len() > 0 && meta.len() <= 32 * 1024 * 1024 {
                                 if let Ok(bytes) = std::fs::read(exe) {
-                                    let digest = blake3::hash(&bytes).to_hex().to_string().to_ascii_lowercase();
+                                    let digest = blake3::hash(&bytes)
+                                        .to_hex()
+                                        .to_string()
+                                        .to_ascii_lowercase();
                                     set.insert(digest);
                                 }
                             }

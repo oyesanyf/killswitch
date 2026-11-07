@@ -1,6 +1,4 @@
-use killswitch_telemetry::phaselock::{
-    PerPidPhaseLockMonitor, PhaseLockManager, PhaseSpaceConfig,
-};
+use killswitch_telemetry::phaselock::{PerPidPhaseLockMonitor, PhaseLockManager, PhaseSpaceConfig};
 use killswitch_types::telemetry::{SecurityEvent, TelemetryEventKind};
 
 #[test]
@@ -65,7 +63,10 @@ fn test_t1_f16_04_chaotic_burst_injection_positive_divergence() {
         }
     }
 
-    assert!(detected, "Chaotic breakout should be detected on high-entropy burst");
+    assert!(
+        detected,
+        "Chaotic breakout should be detected on high-entropy burst"
+    );
 }
 
 #[test]

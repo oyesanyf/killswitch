@@ -15,7 +15,9 @@ pub enum ServerError {
     #[error("Anti-lockout defense active: {0}s remaining")]
     LockoutActive(u64),
 
-    #[error("Caller PID {0} is quarantined/frozen and forbidden from invoking containment controls")]
+    #[error(
+        "Caller PID {0} is quarantined/frozen and forbidden from invoking containment controls"
+    )]
     CallerQuarantined(u32),
 
     #[error("Caller PID spoofing detected: claimed PID {claimed} does not match authenticated peer PID {actual}")]

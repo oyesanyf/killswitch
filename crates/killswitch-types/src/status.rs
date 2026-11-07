@@ -15,9 +15,13 @@ pub const DEFAULT_CONTROL_PORT: u16 = 3030; // Local HTTP API & WebUI control po
 pub const KILLCHAIN_ISOLATE_CONFIRMATION_PHRASE: &str = "CONFIRM ISOLATE";
 pub const KILLCHAIN_RESTORE_CONFIRMATION_PHRASE: &str = "CONFIRM RESTORE";
 
-#[deprecated(note = "Deprecated as auth credentials; use high-entropy CSPRNG master tokens >=32 chars. Retained for UI confirmation phrases.")]
+#[deprecated(
+    note = "Deprecated as auth credentials; use high-entropy CSPRNG master tokens >=32 chars. Retained for UI confirmation phrases."
+)]
 pub const KILLCHAIN_ISOLATE_TOKEN: &str = KILLCHAIN_ISOLATE_CONFIRMATION_PHRASE;
-#[deprecated(note = "Deprecated as auth credentials; use high-entropy CSPRNG master tokens >=32 chars. Retained for UI confirmation phrases.")]
+#[deprecated(
+    note = "Deprecated as auth credentials; use high-entropy CSPRNG master tokens >=32 chars. Retained for UI confirmation phrases."
+)]
 pub const KILLCHAIN_RESTORE_TOKEN: &str = KILLCHAIN_RESTORE_CONFIRMATION_PHRASE;
 pub const MAX_FAILED_ATTEMPTS: u32 = 3;
 pub const LOCKOUT_DURATION_SECS: u64 = 300; // 5 minutes
@@ -561,10 +565,7 @@ pub enum AuthResult {
         locked_until: DateTime<Utc>,
     },
     /// Caller PID is invalid or currently frozen under containment (Anti-Hijacking defense).
-    CallerQuarantined {
-        caller_pid: u32,
-        reason: String,
-    },
+    CallerQuarantined { caller_pid: u32, reason: String },
 }
 
 impl AuthResult {
@@ -657,7 +658,9 @@ impl LockoutState {
                 locked_until,
             }
         } else {
-            let remaining = self.max_failed_attempts.saturating_sub(self.failed_attempts);
+            let remaining = self
+                .max_failed_attempts
+                .saturating_sub(self.failed_attempts);
             AuthResult::Failed {
                 reason: "Invalid credentials".to_string(),
                 attempts_remaining: remaining,
@@ -747,7 +750,10 @@ pub trait NetworkIsolator: Send + Sync {
     fn restore_quarantine(&self, receipt: &IsolationReceipt) -> Result<(), KillSwitchError>;
 
     /// Terminate active TCP connections.
-    fn reset_tcp_connections(&self, target_ips: Option<&[IpAddr]>) -> Result<usize, KillSwitchError>;
+    fn reset_tcp_connections(
+        &self,
+        target_ips: Option<&[IpAddr]>,
+    ) -> Result<usize, KillSwitchError>;
 }
 
 /// Trait implemented by native process freezing engines (Windows NtSuspendProcess & Linux SIGSTOP).

@@ -16,20 +16,18 @@ use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use killswitch_core::wfp::{
-    WfpGuid,
-    FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_CONNECT_V6,
+    WfpGuid, FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_CONNECT_V6,
     FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6,
-    FWPM_LAYER_DATAGRAM_DATA_V4, FWPM_LAYER_DATAGRAM_DATA_V6,
-    FWPM_LAYER_INBOUND_ICMP_ERROR_V4, FWPM_LAYER_INBOUND_ICMP_ERROR_V6,
-    FWPM_LAYER_INBOUND_IPPACKET_V4, FWPM_LAYER_INBOUND_IPPACKET_V6,
-    FWPM_LAYER_INBOUND_MAC_FRAME_ETHERNET, FWPM_LAYER_INBOUND_MAC_FRAME_NATIVE,
-    FWPM_LAYER_INBOUND_TRANSPORT_V4, FWPM_LAYER_INBOUND_TRANSPORT_V6,
-    FWPM_LAYER_IPFORWARD_V4, FWPM_LAYER_IPFORWARD_V6,
-    FWPM_LAYER_IPFORWARD_V4_SDK, FWPM_LAYER_IPFORWARD_V6_SDK,
-    FWPM_LAYER_OUTBOUND_ICMP_ERROR_V4, FWPM_LAYER_OUTBOUND_ICMP_ERROR_V6,
-    FWPM_LAYER_OUTBOUND_IPPACKET_V4, FWPM_LAYER_OUTBOUND_IPPACKET_V6,
-    FWPM_LAYER_OUTBOUND_MAC_FRAME_ETHERNET, FWPM_LAYER_OUTBOUND_MAC_FRAME_NATIVE,
-    FWPM_LAYER_OUTBOUND_TRANSPORT_V4, FWPM_LAYER_OUTBOUND_TRANSPORT_V6,
+    FWPM_LAYER_DATAGRAM_DATA_V4, FWPM_LAYER_DATAGRAM_DATA_V6, FWPM_LAYER_INBOUND_ICMP_ERROR_V4,
+    FWPM_LAYER_INBOUND_ICMP_ERROR_V6, FWPM_LAYER_INBOUND_IPPACKET_V4,
+    FWPM_LAYER_INBOUND_IPPACKET_V6, FWPM_LAYER_INBOUND_MAC_FRAME_ETHERNET,
+    FWPM_LAYER_INBOUND_MAC_FRAME_NATIVE, FWPM_LAYER_INBOUND_TRANSPORT_V4,
+    FWPM_LAYER_INBOUND_TRANSPORT_V6, FWPM_LAYER_IPFORWARD_V4, FWPM_LAYER_IPFORWARD_V4_SDK,
+    FWPM_LAYER_IPFORWARD_V6, FWPM_LAYER_IPFORWARD_V6_SDK, FWPM_LAYER_OUTBOUND_ICMP_ERROR_V4,
+    FWPM_LAYER_OUTBOUND_ICMP_ERROR_V6, FWPM_LAYER_OUTBOUND_IPPACKET_V4,
+    FWPM_LAYER_OUTBOUND_IPPACKET_V6, FWPM_LAYER_OUTBOUND_MAC_FRAME_ETHERNET,
+    FWPM_LAYER_OUTBOUND_MAC_FRAME_NATIVE, FWPM_LAYER_OUTBOUND_TRANSPORT_V4,
+    FWPM_LAYER_OUTBOUND_TRANSPORT_V6,
 };
 use killswitch_telemetry::semantic_command::{
     parse_semantic_command, tokenize_command, PrivilegeEquivalenceClass,
@@ -368,32 +366,47 @@ fn test_challenge_env_unnesting_dash_s_concatenated_defect() {
 fn test_challenge_env_unnesting_comprehensive_split_string_variants() {
     // 1. --split-string with equals and trailing outer args
     let cmd1 = parse_semantic_command(r#"/usr/bin/env --split-string="sudo id" -a -b"#);
-    assert_eq!(cmd1.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+    assert_eq!(
+        cmd1.privilege_class,
+        PrivilegeEquivalenceClass::RootOrAdminElevation
+    );
     assert_eq!(cmd1.executable, "sudo");
     assert_eq!(cmd1.args, vec!["id", "-a", "-b"]);
 
     // 2. -S with equals sign: env -S="sudo id"
     let cmd2 = parse_semantic_command(r#"env -S="sudo id""#);
-    assert_eq!(cmd2.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+    assert_eq!(
+        cmd2.privilege_class,
+        PrivilegeEquivalenceClass::RootOrAdminElevation
+    );
     assert_eq!(cmd2.executable, "sudo");
     assert_eq!(cmd2.args, vec!["id"]);
 
     // 3. -S with nested env options: env -S "-i sudo id"
     let cmd3 = parse_semantic_command(r#"env -S "-i sudo id""#);
-    assert_eq!(cmd3.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+    assert_eq!(
+        cmd3.privilege_class,
+        PrivilegeEquivalenceClass::RootOrAdminElevation
+    );
     assert_eq!(cmd3.executable, "sudo");
     assert_eq!(cmd3.args, vec!["id"]);
 
     // 4. --split-string with nested env vars: env --split-string="VAR=1 sudo id"
     let cmd4 = parse_semantic_command(r#"env --split-string="VAR=1 sudo id""#);
-    assert_eq!(cmd4.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+    assert_eq!(
+        cmd4.privilege_class,
+        PrivilegeEquivalenceClass::RootOrAdminElevation
+    );
     assert_eq!(cmd4.executable, "sudo");
     assert_eq!(cmd4.args, vec!["id"]);
     assert!(cmd4.env_vars.iter().any(|(k, v)| k == "VAR" && v == "1"));
 
     // 5. Cross-boundary elevation via split-string: env --split-string="wsl -u root id"
     let cmd5 = parse_semantic_command(r#"env --split-string="wsl -u root id""#);
-    assert_eq!(cmd5.privilege_class, PrivilegeEquivalenceClass::RootOrAdminElevation);
+    assert_eq!(
+        cmd5.privilege_class,
+        PrivilegeEquivalenceClass::RootOrAdminElevation
+    );
     assert_eq!(cmd5.executable, "wsl");
     assert_eq!(cmd5.target_user.as_deref(), Some("root"));
     assert!(cmd5.is_cross_boundary);
@@ -411,8 +424,7 @@ fn test_challenge_windows_quoted_path_backslashes() {
         "Tokens length must be 2: executable path and --check flag"
     );
     assert_eq!(
-        tokens[0],
-        r#"C:\Program Files\App\updater.exe"#,
+        tokens[0], r#"C:\Program Files\App\updater.exe"#,
         "Backslashes in Windows file paths inside quotes MUST NOT be stripped"
     );
     assert_eq!(tokens[1], "--check");
@@ -421,8 +433,7 @@ fn test_challenge_windows_quoted_path_backslashes() {
     let win_cmd2 = r#""C:\Users\Admin\AppData\Local\Temp\agent.exe" -arg1 -arg2"#;
     let tokens2 = tokenize_command(win_cmd2);
     assert_eq!(
-        tokens2[0],
-        r#"C:\Users\Admin\AppData\Local\Temp\agent.exe"#,
+        tokens2[0], r#"C:\Users\Admin\AppData\Local\Temp\agent.exe"#,
         "Deeply nested backslashes in quotes must be preserved"
     );
 

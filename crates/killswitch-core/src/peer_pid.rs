@@ -9,12 +9,15 @@
 //! This prevents caller process anti-hijacking bypasses where an attacker or rogue
 //! quarantined process supplies a false `caller_pid` in request JSON.
 
-use std::net::SocketAddr;
 use killswitch_types::errors::KillSwitchError;
+use std::net::SocketAddr;
 
 /// Resolves the actual OS process ID owning a local loopback TCP client socket.
 #[cfg(windows)]
-pub fn resolve_loopback_peer_pid(peer_addr: SocketAddr, bound_port: u16) -> Result<u32, KillSwitchError> {
+pub fn resolve_loopback_peer_pid(
+    peer_addr: SocketAddr,
+    bound_port: u16,
+) -> Result<u32, KillSwitchError> {
     const AF_INET: u32 = 2;
     const AF_INET6: u32 = 23;
     const TCP_TABLE_OWNER_PID_ALL: i32 = 5;
@@ -62,7 +65,9 @@ pub fn resolve_loopback_peer_pid(peer_addr: SocketAddr, bound_port: u16) -> Resu
                 SocketAddr::new(std::net::IpAddr::V4(v4), v6.port())
             } else {
                 match v6.ip().to_canonical() {
-                    std::net::IpAddr::V4(v4) => SocketAddr::new(std::net::IpAddr::V4(v4), v6.port()),
+                    std::net::IpAddr::V4(v4) => {
+                        SocketAddr::new(std::net::IpAddr::V4(v4), v6.port())
+                    }
                     std::net::IpAddr::V6(_) => peer_addr,
                 }
             }
@@ -117,7 +122,8 @@ pub fn resolve_loopback_peer_pid(peer_addr: SocketAddr, bound_port: u16) -> Resu
                 }
                 let num_entries = std::ptr::read_unaligned(buf.as_ptr() as *const u32) as usize;
                 let rows_ptr = buf.as_ptr().add(4) as *const MibTcpRowOwnerPid;
-                let max_rows = (buf.len().saturating_sub(4)) / std::mem::size_of::<MibTcpRowOwnerPid>();
+                let max_rows =
+                    (buf.len().saturating_sub(4)) / std::mem::size_of::<MibTcpRowOwnerPid>();
                 let count = num_entries.min(max_rows);
 
                 for i in 0..count {
@@ -137,69 +143,68 @@ pub fn resolve_loopback_peer_pid(peer_addr: SocketAddr, bound_port: u16) -> Resu
                 }
             }
         }
-        SocketAddr::V6(_) => {
-            unsafe {
-                let mut retries = 0;
-                let mut buf;
-                loop {
-                    let mut size: u32 = 0;
-                    let res = GetExtendedTcpTable(
-                        std::ptr::null_mut(),
-                        &mut size,
-                        0,
-                        AF_INET6,
-                        TCP_TABLE_OWNER_PID_ALL,
-                        0,
-                    );
-                    if (res != 0 && res != ERROR_INSUFFICIENT_BUFFER) || size == 0 {
-                        return Err(KillSwitchError::NativeOsError(
-                            "Failed to query GetExtendedTcpTable size for IPv6".to_string(),
-                        ));
-                    }
-                    let alloc_size = (size as usize).saturating_add(4096);
-                    let mut curr_size: u32 = alloc_size as u32;
-                    buf = vec![0u8; alloc_size];
-                    let ret = GetExtendedTcpTable(
-                        buf.as_mut_ptr(),
-                        &mut curr_size,
-                        0,
-                        AF_INET6,
-                        TCP_TABLE_OWNER_PID_ALL,
-                        0,
-                    );
-                    if ret == 0 {
-                        break;
-                    } else if ret == ERROR_INSUFFICIENT_BUFFER && retries < 3 {
-                        retries += 1;
-                        continue;
-                    } else {
-                        return Err(KillSwitchError::NativeOsError(format!(
-                            "Failed to read GetExtendedTcpTable for IPv6 (code {})",
-                            ret
-                        )));
-                    }
+        SocketAddr::V6(_) => unsafe {
+            let mut retries = 0;
+            let mut buf;
+            loop {
+                let mut size: u32 = 0;
+                let res = GetExtendedTcpTable(
+                    std::ptr::null_mut(),
+                    &mut size,
+                    0,
+                    AF_INET6,
+                    TCP_TABLE_OWNER_PID_ALL,
+                    0,
+                );
+                if (res != 0 && res != ERROR_INSUFFICIENT_BUFFER) || size == 0 {
+                    return Err(KillSwitchError::NativeOsError(
+                        "Failed to query GetExtendedTcpTable size for IPv6".to_string(),
+                    ));
                 }
-                let num_entries = std::ptr::read_unaligned(buf.as_ptr() as *const u32) as usize;
-                let rows_ptr = buf.as_ptr().add(4) as *const MibTcp6RowOwnerPid;
-                let max_rows = (buf.len().saturating_sub(4)) / std::mem::size_of::<MibTcp6RowOwnerPid>();
-                let count = num_entries.min(max_rows);
+                let alloc_size = (size as usize).saturating_add(4096);
+                let mut curr_size: u32 = alloc_size as u32;
+                buf = vec![0u8; alloc_size];
+                let ret = GetExtendedTcpTable(
+                    buf.as_mut_ptr(),
+                    &mut curr_size,
+                    0,
+                    AF_INET6,
+                    TCP_TABLE_OWNER_PID_ALL,
+                    0,
+                );
+                if ret == 0 {
+                    break;
+                } else if ret == ERROR_INSUFFICIENT_BUFFER && retries < 3 {
+                    retries += 1;
+                    continue;
+                } else {
+                    return Err(KillSwitchError::NativeOsError(format!(
+                        "Failed to read GetExtendedTcpTable for IPv6 (code {})",
+                        ret
+                    )));
+                }
+            }
+            let num_entries = std::ptr::read_unaligned(buf.as_ptr() as *const u32) as usize;
+            let rows_ptr = buf.as_ptr().add(4) as *const MibTcp6RowOwnerPid;
+            let max_rows =
+                (buf.len().saturating_sub(4)) / std::mem::size_of::<MibTcp6RowOwnerPid>();
+            let count = num_entries.min(max_rows);
 
-                for i in 0..count {
-                    let row = std::ptr::read_unaligned(rows_ptr.add(i));
-                    let lport = u16::from_be((row.dw_local_port & 0xFFFF) as u16);
-                    let rport = u16::from_be((row.dw_remote_port & 0xFFFF) as u16);
-                    if lport == peer_port && (rport == bound_port || bound_port == 0) {
-                        if row.dw_owning_pid == 0 {
-                            return Err(KillSwitchError::NativeOsError(format!(
+            for i in 0..count {
+                let row = std::ptr::read_unaligned(rows_ptr.add(i));
+                let lport = u16::from_be((row.dw_local_port & 0xFFFF) as u16);
+                let rport = u16::from_be((row.dw_remote_port & 0xFFFF) as u16);
+                if lport == peer_port && (rport == bound_port || bound_port == 0) {
+                    if row.dw_owning_pid == 0 {
+                        return Err(KillSwitchError::NativeOsError(format!(
                                 "Socket matching peer port {} -> server port {} is closed/unowned (PID 0)",
                                 peer_port, bound_port
                             )));
-                        }
-                        return Ok(row.dw_owning_pid);
                     }
+                    return Ok(row.dw_owning_pid);
                 }
             }
-        }
+        },
     }
 
     Err(KillSwitchError::NativeOsError(format!(
@@ -209,14 +214,19 @@ pub fn resolve_loopback_peer_pid(peer_addr: SocketAddr, bound_port: u16) -> Resu
 }
 
 #[cfg(target_os = "linux")]
-pub fn resolve_loopback_peer_pid(peer_addr: SocketAddr, bound_port: u16) -> Result<u32, KillSwitchError> {
+pub fn resolve_loopback_peer_pid(
+    peer_addr: SocketAddr,
+    bound_port: u16,
+) -> Result<u32, KillSwitchError> {
     let normalized_peer_addr = match peer_addr {
         SocketAddr::V6(ref v6) => {
             if let Some(v4) = v6.ip().to_ipv4_mapped() {
                 SocketAddr::new(std::net::IpAddr::V4(v4), v6.port())
             } else {
                 match v6.ip().to_canonical() {
-                    std::net::IpAddr::V4(v4) => SocketAddr::new(std::net::IpAddr::V4(v4), v6.port()),
+                    std::net::IpAddr::V4(v4) => {
+                        SocketAddr::new(std::net::IpAddr::V4(v4), v6.port())
+                    }
                     std::net::IpAddr::V6(_) => peer_addr,
                 }
             }
@@ -259,7 +269,10 @@ pub fn resolve_loopback_peer_pid(peer_addr: SocketAddr, bound_port: u16) -> Resu
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
-pub fn resolve_loopback_peer_pid(_peer_addr: SocketAddr, _bound_port: u16) -> Result<u32, KillSwitchError> {
+pub fn resolve_loopback_peer_pid(
+    _peer_addr: SocketAddr,
+    _bound_port: u16,
+) -> Result<u32, KillSwitchError> {
     Err(KillSwitchError::NativeOsError(
         "Loopback peer PID resolution is not supported on this platform (fail-closed)".to_string(),
     ))
@@ -287,9 +300,17 @@ mod tests {
 
         // Now resolve peer PID from the client's local address
         let resolved_pid = resolve_loopback_peer_pid(client_local_addr, server_port);
-        assert!(resolved_pid.is_ok(), "Failed to resolve PID: {:?}", resolved_pid);
+        assert!(
+            resolved_pid.is_ok(),
+            "Failed to resolve PID: {:?}",
+            resolved_pid
+        );
         let pid = resolved_pid.unwrap();
-        assert_eq!(pid, std::process::id(), "Resolved PID should match current test runner process");
+        assert_eq!(
+            pid,
+            std::process::id(),
+            "Resolved PID should match current test runner process"
+        );
 
         drop(client);
         drop(server_stream);

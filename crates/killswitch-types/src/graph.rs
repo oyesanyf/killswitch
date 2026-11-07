@@ -268,14 +268,20 @@ pub struct GraphNodeOutput {
 #[async_trait::async_trait]
 pub trait GraphNode: Send + Sync {
     fn id(&self) -> GraphNodeId;
-    async fn execute(&self, state: &KillSwitchGraphState) -> Result<GraphNodeOutput, KillSwitchError>;
+    async fn execute(
+        &self,
+        state: &KillSwitchGraphState,
+    ) -> Result<GraphNodeOutput, KillSwitchError>;
 }
 
 /// Persistent checkpointer trait for saving and resuming graph states.
 #[async_trait::async_trait]
 pub trait StateCheckpointer: Send + Sync {
     async fn save_checkpoint(&self, state: &KillSwitchGraphState) -> Result<(), KillSwitchError>;
-    async fn load_checkpoint(&self, incident_id: &str) -> Result<Option<KillSwitchGraphState>, KillSwitchError>;
+    async fn load_checkpoint(
+        &self,
+        incident_id: &str,
+    ) -> Result<Option<KillSwitchGraphState>, KillSwitchError>;
     async fn list_checkpoints(&self) -> Result<Vec<String>, KillSwitchError>;
 }
 

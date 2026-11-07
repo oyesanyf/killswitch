@@ -6,9 +6,7 @@
 use chrono::{DateTime, Utc};
 use killswitch_types::{
     errors::{KillSwitchError, Result},
-    status::{
-        IsolationReceipt, KillChainHistoryEntry, KillChainStatus, ProcessIsolationState,
-    },
+    status::{IsolationReceipt, KillChainHistoryEntry, KillChainStatus, ProcessIsolationState},
 };
 use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
@@ -266,11 +264,9 @@ impl StateLedger {
     /// Atomically commits snapshot to disk via temp file + fsync + rename.
     pub fn commit_to_disk(&self) -> Result<()> {
         if let Some(parent) = self.file_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|source| {
-                KillSwitchError::LedgerIoError {
-                    path: parent.to_path_buf(),
-                    source,
-                }
+            std::fs::create_dir_all(parent).map_err(|source| KillSwitchError::LedgerIoError {
+                path: parent.to_path_buf(),
+                source,
             })?;
         }
 
@@ -292,11 +288,12 @@ impl StateLedger {
                     source,
                 })?;
 
-            file.write_all(serialized.as_bytes())
-                .map_err(|source| KillSwitchError::LedgerIoError {
+            file.write_all(serialized.as_bytes()).map_err(|source| {
+                KillSwitchError::LedgerIoError {
                     path: temp_path.clone(),
                     source,
-                })?;
+                }
+            })?;
 
             file.sync_all()
                 .map_err(|source| KillSwitchError::LedgerIoError {
@@ -475,7 +472,11 @@ mod tests {
         let state_file = dir.path().join("killchain_state.json");
 
         // Write a corrupted/tampered file
-        std::fs::write(&state_file, b"{\"schema_version\": 1, \"corrupted_json\": true").unwrap();
+        std::fs::write(
+            &state_file,
+            b"{\"schema_version\": 1, \"corrupted_json\": true",
+        )
+        .unwrap();
 
         // open_or_init must detect corruption and re-initialize clean state
         let ledger = StateLedger::open_or_init(Some(dir.path())).unwrap();

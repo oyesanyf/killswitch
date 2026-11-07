@@ -36,41 +36,14 @@ pub mod tamper_and_process_killswitch;
 pub mod watchdog;
 
 // Re-exports for clean ergonomics
-pub use sensitive_paths::{
-    classify_sensitive_system_path, normalize_path_for_inspection, scan_for_sensitive_system_path,
-    scan_json_for_sensitive_path, SensitiveCredentialStoreKind,
-};
 pub use agent_hooks::{
     clear_interceptions, evaluate_hook_synchronously, format_claude_response,
     format_copilot_response, format_cursor_response, format_mcp_error_response,
-    format_opencode_response, get_recent_interceptions, install_agent_hooks,
-    parse_claude_request, parse_copilot_request, parse_cursor_request,
-    parse_mcp_call_request, parse_opencode_request, record_interception_event,
-    snapshot_interceptions, AgentInterceptionRecord, HookEvaluationDecision,
-    HookEventType, NormalizedHookRequest, SupportedAgentKind,
+    format_opencode_response, get_recent_interceptions, install_agent_hooks, parse_claude_request,
+    parse_copilot_request, parse_cursor_request, parse_mcp_call_request, parse_opencode_request,
+    record_interception_event, snapshot_interceptions, AgentInterceptionRecord,
+    HookEvaluationDecision, HookEventType, NormalizedHookRequest, SupportedAgentKind,
     AGENT_INTERCEPTION_CAPACITY, AGENT_INTERCEPTION_EVENTS, GLOBAL_CORRELATOR,
-};
-pub use siquery::{
-    record_live_file_event, register_lineage_file_events_hook, register_lineage_open_files_hook,
-    FileEventRecord, LineageFileEventsHook, LineageOpenFilesHook, SiqueryEngine, SiqueryRow,
-    LIVE_FILE_EVENTS, SIQUERY_LAST_TELEMETRY,
-};
-pub use semantic_dlp::{
-    luhn_check, query_recent_semantic_events, record_semantic_event,
-    scan_payload_for_semantic_entities, volatile_scrub_bytes, GlinerSpanMatch,
-    GlinerSpanNerEngine, PresidioGlinerPiiZeroGuard, RedactXStructuredValidator,
-    SemanticDlpClassification, SemanticDlpEngine, SemanticDlpEntity, SemanticDlpRecord,
-    SemanticDlpVerdict, SemanticEntityKind, SemanticEntityMatch, SemanticSensitivityLevel,
-    ZkBftQuarantineProof, LIVE_SEMANTIC_DLP_EVENTS, MAX_LIVE_SEMANTIC_EVENTS,
-};
-pub use circumvention::{
-    classify_denial_pattern, evaluate_denial_outcome, is_cross_boundary_invocation,
-    observe_denial, CircumventionAlert, DenialPatternKind, DynamicDenialSignal,
-    TemporalCircumventionCorrelator, TemporalCircumventionEngine,
-};
-pub use semantic_command::{
-    parse_semantic_command, parse_semantic_command_with_probe, tokenize_command,
-    DynamicBinaryMetadataProbe, ElevationRequirement, PrivilegeEquivalenceClass, SemanticCommand,
 };
 pub use attack::{
     AttackGraphMatcher, AttackPattern, AttackSequenceEvaluation, AttackStage, ProcessTimelineEvent,
@@ -85,7 +58,7 @@ pub use bounded_agents_apc::{
 };
 pub use cage_governance::{
     export_cage_governance_trace_v1, global_cage_kernel, AtomicFiscalBarrier, CageDecisionReceipt,
-    CageEvidenceEntry, CageEvidenceWriter, CageEvaluationRequest, CageEvaluationResponse,
+    CageEvaluationRequest, CageEvaluationResponse, CageEvidenceEntry, CageEvidenceWriter,
     CageGovernanceKernel, CageKernelStatusReport, CageTier, CageTraceVerifier, CageVerdict,
     CageWarrantToken, CompiledSubstrateArtifact, Cumulative24hTracker, FinanceBoundingBarrier,
     GovernanceTraceEvent, GovernanceTraceEventType, HealthcareDoseBarrier, HitlConsensusApproval,
@@ -95,9 +68,13 @@ pub use cage_governance::{
     CTRL_STPA_UCA3, CTRL_STPA_UCA4, CTRL_WARRANT_INVALID, CTRL_WARRANT_REQUIRED,
     FISCAL_CAP_EXCEEDED,
 };
-pub use jcs::{canonicalize_jcs, canonicalize_jcs_string, JcsError};
 pub use canary::{CanaryAuditReport, CanaryDecoyFile, CanaryManager};
 pub use causal::{CausalEdge, CausalEdgeKind, CausalNodeType, CausalSecurityGraph};
+pub use circumvention::{
+    classify_denial_pattern, evaluate_denial_outcome, is_cross_boundary_invocation, observe_denial,
+    CircumventionAlert, DenialPatternKind, DynamicDenialSignal, TemporalCircumventionCorrelator,
+    TemporalCircumventionEngine,
+};
 pub use continuous_defense::{
     canonical_research_rule_id, clear_all_ingested_research_rules,
     detect_verified_code_repo_from_texts, global_continuous_defense, is_current_research_arxiv_id,
@@ -124,11 +101,12 @@ pub use edr_behavioral::{
     OsSensorMechanism, ProcessLineageNode, StatefulProcessLineageTree, WelfordBaselineMetric,
 };
 pub use honeytokens::{HoneytokenManager, HoneytokenRecord, HoneytokenType, NativeEphemeralTrap};
+pub use jcs::{canonicalize_jcs, canonicalize_jcs_string, JcsError};
 pub use octopus::{
-    validate_egress_url, validate_sandbox_path, ArmContainmentRing, ArmRingConfig,
-    ArmRingRegistry, ArmState, BehavioralBreakoutVerdict, BreakoutDefenseCoordinator,
-    CapabilityToken, DataBreakoutVerdict, HomologicalAuditReport, HomologicalBoundaryAuditor,
-    MeshGuard, MeshWatchOutSignal, OperationalContainmentVerdict, TechnicalBreakoutVerdict,
+    validate_egress_url, validate_sandbox_path, ArmContainmentRing, ArmRingConfig, ArmRingRegistry,
+    ArmState, BehavioralBreakoutVerdict, BreakoutDefenseCoordinator, CapabilityToken,
+    DataBreakoutVerdict, HomologicalAuditReport, HomologicalBoundaryAuditor, MeshGuard,
+    MeshWatchOutSignal, OperationalContainmentVerdict, TechnicalBreakoutVerdict,
     UnifiedBreakoutEvaluation, VerifiedMeshMessage,
 };
 pub use oso_aws_containment::{
@@ -148,6 +126,16 @@ pub use phaselock::{
     compute_shannon_entropy, compute_syscall_phase_metric, PerPidPhaseLockMonitor,
     PhaseLockManager, PhaseSpaceConfig, PhaseSpaceVerdict,
 };
+pub use rate_limit_backoff::{
+    calculate_exponential_backoff_ms, global_agent_velocity_limiter, global_rate_limit_ensemble,
+    global_rete_engine, rfc6298_next_rto_ms, rfc6298_rto_after_attempts_ms, rfc9002_next_pto_ms,
+    AgentCallRecord, AgentSessionWindow, AgentVelocityRateLimiter, AgentVelocityVerdict,
+    BackoffEvaluationReport, CorrelatedEvidenceBundle, CurveFitResult, DeterministicPhysicsVoter,
+    EdrAction, GenerativeLlmVoter, GoogleApiBackoffAnalyzer, HarEntrySample, HarFlowFact,
+    NetworkProtocol, OpenJevDecisionVoter, OsqueryProcessFact, RateLimitAllowlist,
+    RateLimitReleaseEntry, RateLimitVoterEnsemble, ReaBinaryFact, ReteEngine, VoterConsensus,
+    VoterVerdict,
+};
 pub use ring0_driver_loader::{
     build_canonical_ebpf_elf_object, build_canonical_signed_pe_sys_image, compute_sha256_hex,
     global_ring0_manager, query_live_host_ring0_inventory, verify_linux_ebpf_elf_binary,
@@ -162,15 +150,26 @@ pub use rl_traffic::{
     RlEmpiricalBenchmarkReport, RlPolicyPersistenceSnapshot, RlTrafficAction, RlTrafficDecision,
     RlTrafficLearner, TrafficFeatureVector, RL_ENVIRONMENT_BACKEND_LABEL,
 };
-pub use rate_limit_backoff::{
-    calculate_exponential_backoff_ms, global_agent_velocity_limiter, global_rate_limit_ensemble,
-    global_rete_engine, rfc6298_next_rto_ms, rfc6298_rto_after_attempts_ms, rfc9002_next_pto_ms,
-    AgentCallRecord, AgentSessionWindow, AgentVelocityRateLimiter, AgentVelocityVerdict,
-    BackoffEvaluationReport, CorrelatedEvidenceBundle, CurveFitResult, DeterministicPhysicsVoter,
-    EdrAction, GenerativeLlmVoter, GoogleApiBackoffAnalyzer, HarEntrySample, HarFlowFact,
-    NetworkProtocol, OpenJevDecisionVoter, OsqueryProcessFact, RateLimitAllowlist,
-    RateLimitReleaseEntry, RateLimitVoterEnsemble, ReaBinaryFact, ReteEngine, VoterConsensus,
-    VoterVerdict,
+pub use semantic_command::{
+    parse_semantic_command, parse_semantic_command_with_probe, tokenize_command,
+    DynamicBinaryMetadataProbe, ElevationRequirement, PrivilegeEquivalenceClass, SemanticCommand,
+};
+pub use semantic_dlp::{
+    luhn_check, query_recent_semantic_events, record_semantic_event,
+    scan_payload_for_semantic_entities, volatile_scrub_bytes, GlinerSpanMatch, GlinerSpanNerEngine,
+    PresidioGlinerPiiZeroGuard, RedactXStructuredValidator, SemanticDlpClassification,
+    SemanticDlpEngine, SemanticDlpEntity, SemanticDlpRecord, SemanticDlpVerdict,
+    SemanticEntityKind, SemanticEntityMatch, SemanticSensitivityLevel, ZkBftQuarantineProof,
+    LIVE_SEMANTIC_DLP_EVENTS, MAX_LIVE_SEMANTIC_EVENTS,
+};
+pub use sensitive_paths::{
+    classify_sensitive_system_path, normalize_path_for_inspection, scan_for_sensitive_system_path,
+    scan_json_for_sensitive_path, SensitiveCredentialStoreKind,
+};
+pub use siquery::{
+    record_live_file_event, register_lineage_file_events_hook, register_lineage_open_files_hook,
+    FileEventRecord, LineageFileEventsHook, LineageOpenFilesHook, SiqueryEngine, SiqueryRow,
+    LIVE_FILE_EVENTS, SIQUERY_LAST_TELEMETRY,
 };
 pub use tamper_and_process_killswitch::{
     begin_database_maintenance_lease, compute_hardened_console_mode,

@@ -2,7 +2,6 @@
 
 #![allow(clippy::await_holding_lock)]
 
-use std::sync::Arc;
 use killswitch_adjudication::ZeroFalsePositiveAdjudicator;
 use killswitch_core::killchain::HostContainmentManager;
 use killswitch_orchestrator::checkpointer::DurableFileCheckpointer;
@@ -13,17 +12,16 @@ use killswitch_telemetry::otel_lineage::{
     DlpClassification, DlpPolicy, EndpointLineageEngine, FileKey, ProcessKey,
 };
 use killswitch_telemetry::{
-    global_cage_kernel, CageTier, CageTraceVerifier, CageVerdict,
-    CTRL_CONF_001, CTRL_CONSENSUS_REQUIRED, CTRL_FTRA_001, CTRL_OPA_005,
-    CTRL_STPA_UCA1, FISCAL_CAP_EXCEEDED,
+    global_cage_kernel, CageTier, CageTraceVerifier, CageVerdict, CTRL_CONF_001,
+    CTRL_CONSENSUS_REQUIRED, CTRL_FTRA_001, CTRL_OPA_005, CTRL_STPA_UCA1, FISCAL_CAP_EXCEEDED,
 };
 use killswitch_types::adjudication::ThreatCandidate;
 use killswitch_types::errors::KillSwitchError;
 use killswitch_types::graph::{
-    ApprovalDecision, GraphNodeId, KillSwitchGraphState, OperatorApprovalState,
-    OrchestratorMode, StateCheckpointer,
+    ApprovalDecision, GraphNodeId, KillSwitchGraphState, OperatorApprovalState, OrchestratorMode,
+    StateCheckpointer,
 };
-
+use std::sync::Arc;
 
 static FISCAL_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -62,9 +60,12 @@ async fn test_ollama_400ms_timeout_fallback() {
     assert_eq!(res.forensic_verdict, "CONFIRM_CONTAINMENT");
     assert!(res.confidence >= 0.90);
     // Timeout deadline is 400ms, should complete in ~400-800ms
-    assert!(elapsed.as_millis() < 1500, "Ollama probe exceeded allowable timeout threshold: {:?}ms", elapsed.as_millis());
+    assert!(
+        elapsed.as_millis() < 1500,
+        "Ollama probe exceeded allowable timeout threshold: {:?}ms",
+        elapsed.as_millis()
+    );
 }
-
 
 #[test]
 fn test_blake3_trace_chain_integrity_and_tamper_detection() {
@@ -98,7 +99,10 @@ fn test_blake3_trace_chain_integrity_and_tamper_detection() {
 
     // Tamper with step 1's input digest
     state.execution_trace[1].input_digest = "tampered_digest".to_string();
-    assert!(!state.verify_trace_chain(), "Trace chain must fail verification when step is tampered");
+    assert!(
+        !state.verify_trace_chain(),
+        "Trace chain must fail verification when step is tampered"
+    );
 }
 
 #[tokio::test]
@@ -206,8 +210,14 @@ async fn test_autonomous_dlp_lineage_trigger_in_orchestrator() {
     assert_eq!(t4.from_stage, LifecycleStage::LineageTrigger);
 
     let state = orch.get_state().await;
-    assert!(!state.active_threats.is_empty(), "DLP trigger must identify threat candidate");
-    assert_eq!(state.metadata.get("lineage_classification").unwrap(), "CrownJewel");
+    assert!(
+        !state.active_threats.is_empty(),
+        "DLP trigger must identify threat candidate"
+    );
+    assert_eq!(
+        state.metadata.get("lineage_classification").unwrap(),
+        "CrownJewel"
+    );
     assert_eq!(state.metadata.get("lineage_policy").unwrap(), "Quarantine");
 }
 
@@ -235,17 +245,21 @@ async fn test_manual_mode_pause_and_operator_approval() {
         "Active encryption",
         0.95,
         killswitch_types::adjudication::EvidenceClass::Behavior,
-    )).await.unwrap();
+    ))
+    .await
+    .unwrap();
 
     let state = orch.get_state().await;
     assert_eq!(state.mode, OrchestratorMode::Manual);
 
     // Advance to Decide node
     for _ in 0..6 {
-
         let t = orch.step().await.unwrap();
         if t.from_stage == LifecycleStage::Decide {
-            assert!(t.is_paused, "Manual mode without approval must be paused at Decide");
+            assert!(
+                t.is_paused,
+                "Manual mode without approval must be paused at Decide"
+            );
             break;
         }
     }
@@ -257,7 +271,9 @@ async fn test_manual_mode_pause_and_operator_approval() {
         confirmation_token: "CONFIRM ISOLATE".to_string(),
         timestamp: chrono::Utc::now().to_rfc3339(),
         comments: Some("Threat verified".to_string()),
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
 
     let post_approval_state = orch.get_state().await;
     assert!(post_approval_state.operator_approval.is_some());
@@ -284,16 +300,51 @@ fn test_zero_os_subprocess_spawning_in_orchestrator() {
 
     for path in &files {
         let content = std::fs::read_to_string(path).unwrap();
-        assert!(!content.contains("Command::new(\"netsh"), "Forbidden netsh command in {:?}", path);
-        assert!(!content.contains("Command::new(\"iptables"), "Forbidden iptables command in {:?}", path);
-        assert!(!content.contains("Command::new(\"nft"), "Forbidden nft command in {:?}", path);
-        assert!(!content.contains("Command::new(\"taskkill"), "Forbidden taskkill command in {:?}", path);
-        assert!(!content.contains("Command::new(\"kill"), "Forbidden kill command in {:?}", path);
-        assert!(!content.contains("Command::new(\"powershell"), "Forbidden powershell command in {:?}", path);
-        assert!(!content.contains("Command::new(\"cmd"), "Forbidden cmd command in {:?}", path);
-        assert!(!content.contains("Command::new(\"sc.exe"), "Forbidden sc.exe command in {:?}", path);
+        assert!(
+            !content.contains("Command::new(\"netsh"),
+            "Forbidden netsh command in {:?}",
+            path
+        );
+        assert!(
+            !content.contains("Command::new(\"iptables"),
+            "Forbidden iptables command in {:?}",
+            path
+        );
+        assert!(
+            !content.contains("Command::new(\"nft"),
+            "Forbidden nft command in {:?}",
+            path
+        );
+        assert!(
+            !content.contains("Command::new(\"taskkill"),
+            "Forbidden taskkill command in {:?}",
+            path
+        );
+        assert!(
+            !content.contains("Command::new(\"kill"),
+            "Forbidden kill command in {:?}",
+            path
+        );
+        assert!(
+            !content.contains("Command::new(\"powershell"),
+            "Forbidden powershell command in {:?}",
+            path
+        );
+        assert!(
+            !content.contains("Command::new(\"cmd"),
+            "Forbidden cmd command in {:?}",
+            path
+        );
+        assert!(
+            !content.contains("Command::new(\"sc.exe"),
+            "Forbidden sc.exe command in {:?}",
+            path
+        );
     }
-    assert!(!files.is_empty(), "Must scan at least one .rs file in killswitch-orchestrator");
+    assert!(
+        !files.is_empty(),
+        "Must scan at least one .rs file in killswitch-orchestrator"
+    );
 }
 
 #[tokio::test]
@@ -325,7 +376,9 @@ async fn test_orchestrator_correlates_conformal_and_continuous_defense() {
         0.90,
         killswitch_types::adjudication::EvidenceClass::Behavior,
     );
-    candidate.command_line = Some("curl --unix-socket /var/run/docker.sock http://localhost/containers/create".to_string());
+    candidate.command_line = Some(
+        "curl --unix-socket /var/run/docker.sock http://localhost/containers/create".to_string(),
+    );
     orch.submit_threat(candidate).await.unwrap();
 
     // Step 1: Ingest -> Correlate
@@ -347,8 +400,14 @@ async fn test_orchestrator_correlates_conformal_and_continuous_defense() {
         .unwrap()
         .parse()
         .unwrap();
-    assert!(hits >= 1, "CorrelateNode must record continuous defense & conformal hit");
-    assert!(sources >= 4, "CorrelateNode must report calibrated conformal sources");
+    assert!(
+        hits >= 1,
+        "CorrelateNode must record continuous defense & conformal hit"
+    );
+    assert!(
+        sources >= 4,
+        "CorrelateNode must report calibrated conformal sources"
+    );
 }
 
 // =============================================================================
@@ -456,13 +515,23 @@ async fn test_cage_pep_clears_containment_and_records_receipt_in_state() {
         .metadata
         .get("cage_receipt_digest")
         .expect("CAGE decision receipt digest must be recorded in state metadata");
-    assert_eq!(receipt_digest.len(), 64, "Receipt digest must be 64-character hex");
-    assert_eq!(state.metadata.get("cage_last_verdict").map(|s| s.as_str()), Some("Clear"));
+    assert_eq!(
+        receipt_digest.len(),
+        64,
+        "Receipt digest must be 64-character hex"
+    );
+    assert_eq!(
+        state.metadata.get("cage_last_verdict").map(|s| s.as_str()),
+        Some("Clear")
+    );
     assert!(state.metadata.contains_key("cage_signature"));
     assert!(state.metadata.contains_key("cage_substrate_digest"));
 
     // BLAKE3 trace chain must remain valid
-    assert!(state.verify_trace_chain(), "Cryptographic execution trace chain must be intact");
+    assert!(
+        state.verify_trace_chain(),
+        "Cryptographic execution trace chain must be intact"
+    );
 }
 
 #[tokio::test]
@@ -555,7 +624,11 @@ async fn test_cage_decision_receipt_persisted_in_checkpoint_and_blake3_trace() {
     checkpointer.save_checkpoint(&state).await.unwrap();
 
     // Load from checkpoint
-    let loaded = checkpointer.load_checkpoint(&state.incident_id).await.unwrap().expect("checkpoint must exist");
+    let loaded = checkpointer
+        .load_checkpoint(&state.incident_id)
+        .await
+        .unwrap()
+        .expect("checkpoint must exist");
     assert_eq!(
         loaded.metadata.get("cage_receipt_digest"),
         state.metadata.get("cage_receipt_digest")
@@ -596,7 +669,11 @@ async fn test_cage_pep_refuses_tier3_transfer_cap_ctrl_opa_005() {
 
     match err {
         KillSwitchError::GraphHalted(msg) => {
-            assert!(msg.contains(CTRL_OPA_005), "Error must cite CTRL_OPA_005: {}", msg);
+            assert!(
+                msg.contains(CTRL_OPA_005),
+                "Error must cite CTRL_OPA_005: {}",
+                msg
+            );
         }
         other => panic!("Expected GraphHalted error, got: {:?}", other),
     }
@@ -639,7 +716,10 @@ async fn test_cage_pep_refuses_tier3_forbidden_tool() {
     }
 
     assert_eq!(state.metadata.get("cage_last_verdict").unwrap(), "Refuse");
-    assert_eq!(state.metadata.get("cage_rule_id").unwrap(), "CTRL_OPA_FORBIDDEN_TOOL");
+    assert_eq!(
+        state.metadata.get("cage_rule_id").unwrap(),
+        "CTRL_OPA_FORBIDDEN_TOOL"
+    );
 }
 
 #[tokio::test]
@@ -752,7 +832,10 @@ async fn test_cage_pep_refuses_tier6_consensus_missing_approval() {
     }
 
     assert_eq!(state.metadata.get("cage_last_verdict").unwrap(), "Refuse");
-    assert_eq!(state.metadata.get("cage_rule_id").unwrap(), CTRL_CONSENSUS_REQUIRED);
+    assert_eq!(
+        state.metadata.get("cage_rule_id").unwrap(),
+        CTRL_CONSENSUS_REQUIRED
+    );
 }
 
 #[tokio::test]
@@ -833,7 +916,12 @@ async fn test_cage_pep_refuses_tier8_fiscal_cap_exceeded() {
         if let Err(ref e) = res {
             println!("Tranche {} failed: {:?}", i, e);
         }
-        assert!(res.is_ok(), "Tranche {} of $10,000 must clear: {:?}", i, res.as_ref().err());
+        assert!(
+            res.is_ok(),
+            "Tranche {} of $10,000 must clear: {:?}",
+            i,
+            res.as_ref().err()
+        );
     }
 
     // Sixth spend of $1,000 breaches the $50,000 cumulative fiscal cap ($50,000 + $1,000 = $51,000 > $50,000)
@@ -978,7 +1066,8 @@ async fn test_containment_actuation_strictly_blocked_on_cage_refusal() {
         0.90,
         killswitch_types::adjudication::EvidenceClass::Behavior,
     );
-    candidate.command_line = Some("process.exe --note authorized_by_admin --skip_checks".to_string());
+    candidate.command_line =
+        Some("process.exe --note authorized_by_admin --skip_checks".to_string());
     orch.submit_threat(candidate).await.unwrap();
 
     // Advance to Contain stage
@@ -993,7 +1082,10 @@ async fn test_containment_actuation_strictly_blocked_on_cage_refusal() {
 
     // Step 7: Stepping ContainNode MUST fail closed via CAGE PEP refusal
     let res = orch.step().await;
-    assert!(res.is_err(), "CAGE refusal must halt orchestrator transition with an error");
+    assert!(
+        res.is_err(),
+        "CAGE refusal must halt orchestrator transition with an error"
+    );
     match res.unwrap_err() {
         KillSwitchError::GraphHalted(msg) => {
             assert!(
@@ -1015,8 +1107,14 @@ async fn test_containment_actuation_strictly_blocked_on_cage_refusal() {
         !containment.get_status().isolated,
         "Containment manager must report host is NOT isolated"
     );
-    assert_eq!(state.metadata.get("cage_last_verdict").map(|s| s.as_str()), Some("Refuse"));
-    assert_eq!(state.metadata.get("cage_rule_id").map(|s| s.as_str()), Some(CTRL_CONF_001));
+    assert_eq!(
+        state.metadata.get("cage_last_verdict").map(|s| s.as_str()),
+        Some("Refuse")
+    );
+    assert_eq!(
+        state.metadata.get("cage_rule_id").map(|s| s.as_str()),
+        Some(CTRL_CONF_001)
+    );
 }
 
 #[tokio::test]
@@ -1047,13 +1145,20 @@ async fn test_cage_receipt_tamper_detection_in_orchestrator() {
 
     // Tamper with decision digest
     let mut tampered = receipt.clone();
-    tampered.decision_digest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string();
-    assert!(!tampered.verify_digest(), "Tampered decision digest must fail verification");
+    tampered.decision_digest =
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string();
+    assert!(
+        !tampered.verify_digest(),
+        "Tampered decision digest must fail verification"
+    );
 
     // Tamper with timestamp
     let mut tampered_time = receipt.clone();
     tampered_time.timestamp_ms += 1000;
-    assert!(!tampered_time.verify_digest(), "Tampered timestamp must fail verification");
+    assert!(
+        !tampered_time.verify_digest(),
+        "Tampered timestamp must fail verification"
+    );
 }
 
 #[tokio::test]
@@ -1075,8 +1180,9 @@ async fn test_trace_verifier_validates_cage_governance_traces() {
     assert_eq!(resp.verdict, CageVerdict::Clear);
 
     let report = CageTraceVerifier::verify_trace_conformance(&resp.governance_trace);
-    assert!(report.is_conformant, "Valid trace must pass model checker: {:?}", report.violations);
+    assert!(
+        report.is_conformant,
+        "Valid trace must pass model checker: {:?}",
+        report.violations
+    );
 }
-
-
-

@@ -1,10 +1,10 @@
 //! Integration tests for Breakout Defense, Mathematical SSRF, and Safe Path Sandboxing (Feature 21)
 
-use std::path::Path;
 use killswitch_telemetry::octopus::breakout::{
     validate_egress_url, validate_sandbox_path, BreakoutDefenseCoordinator,
 };
 use killswitch_types::KillSwitchError;
+use std::path::Path;
 
 #[test]
 fn test_t1_f21_01_4_category_breakout_defense() {

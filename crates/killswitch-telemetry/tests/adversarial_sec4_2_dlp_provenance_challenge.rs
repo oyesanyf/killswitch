@@ -14,13 +14,12 @@
 //!    - dist/SHA256SUMS.txt format
 //!    - .github/workflows/ci.yml jobs and validity
 
-use std::path::Path;
 use killswitch_telemetry::otel_lineage::{DlpClassification, DlpPolicy};
 use killswitch_telemetry::semantic_dlp::{
-    luhn_check, volatile_scrub_bytes,
-    PresidioGlinerPiiZeroGuard, RedactXStructuredValidator,
+    luhn_check, volatile_scrub_bytes, PresidioGlinerPiiZeroGuard, RedactXStructuredValidator,
     SemanticDlpEngine, SemanticEntityKind,
 };
+use std::path::Path;
 
 // ============================================================================
 // MODULE 1: DEAL VALUE THRESHOLD BOUNDARY & STRESS TESTS
@@ -41,7 +40,10 @@ fn test_deal_value_boundary_exactly_999999() {
     let payload_no_comma = "Acquisition deal value: $999999 payable at closing";
     let matches_nc = engine.scan_payload(payload_no_comma);
     assert!(!matches_nc.is_empty());
-    assert_eq!(matches_nc[0].classification, DlpClassification::Confidential);
+    assert_eq!(
+        matches_nc[0].classification,
+        DlpClassification::Confidential
+    );
     assert_eq!(matches_nc[0].policy, DlpPolicy::Block);
 }
 
@@ -50,7 +52,10 @@ fn test_deal_value_boundary_exactly_1000000() {
     let engine = SemanticDlpEngine::new();
     let payload = "Acquisition deal value: $1,000,000 payable at closing";
     let matches = engine.scan_payload(payload);
-    assert!(!matches.is_empty(), "Should detect deal value for $1,000,000");
+    assert!(
+        !matches.is_empty(),
+        "Should detect deal value for $1,000,000"
+    );
     let entity = &matches[0];
     assert_eq!(entity.kind, SemanticEntityKind::DealValue);
     assert_eq!(entity.classification, DlpClassification::CrownJewel);
@@ -81,7 +86,10 @@ fn test_deal_value_large_deals_45m_and_12_5m() {
     let matches_12_5m = engine.scan_payload(payload_12_5m);
     assert!(!matches_12_5m.is_empty(), "Must detect $12.5M deal value");
     assert_eq!(matches_12_5m[0].kind, SemanticEntityKind::DealValue);
-    assert_eq!(matches_12_5m[0].classification, DlpClassification::CrownJewel);
+    assert_eq!(
+        matches_12_5m[0].classification,
+        DlpClassification::CrownJewel
+    );
     assert_eq!(matches_12_5m[0].policy, DlpPolicy::Quarantine);
 }
 
@@ -100,7 +108,10 @@ fn test_deal_value_currency_symbols_euro_and_pound() {
     let payload_euro_low = "Acquisition transaction value: €850,000";
     let matches_el = engine.scan_payload(payload_euro_low);
     assert!(!matches_el.is_empty());
-    assert_eq!(matches_el[0].classification, DlpClassification::Confidential);
+    assert_eq!(
+        matches_el[0].classification,
+        DlpClassification::Confidential
+    );
     assert_eq!(matches_el[0].policy, DlpPolicy::Block);
 
     // Pound above threshold: £2,500,000 -> CrownJewel, Quarantine
@@ -144,8 +155,14 @@ fn test_defect_1_usd_currency_code_currently_unmatched() {
 
     let payload_sep_word = "Acquisition transaction value: USD 4.2 million payable at close";
     let matches_sep_word = engine.scan_payload(payload_sep_word);
-    assert!(!matches_sep_word.is_empty(), "USD 4.2 million must be detected");
-    assert_eq!(matches_sep_word[0].classification, DlpClassification::CrownJewel);
+    assert!(
+        !matches_sep_word.is_empty(),
+        "USD 4.2 million must be detected"
+    );
+    assert_eq!(
+        matches_sep_word[0].classification,
+        DlpClassification::CrownJewel
+    );
     assert_eq!(matches_sep_word[0].policy, DlpPolicy::Quarantine);
 }
 
@@ -275,10 +292,13 @@ fn test_phi_medical_context_detection_and_quarantine() {
     let engine = SemanticDlpEngine::new();
 
     // Valid SSN with medical context -> PhiMedicalRecord, CrownJewel, Quarantine
-    let medical_payload = "Patient John Doe medical record: SSN 219-45-6789, diagnosis: hypertension";
+    let medical_payload =
+        "Patient John Doe medical record: SSN 219-45-6789, diagnosis: hypertension";
     let matches = engine.scan_payload(medical_payload);
     assert!(!matches.is_empty(), "Must detect SSN in medical context");
-    let ssn_match = matches.iter().find(|m| m.kind == SemanticEntityKind::PhiMedicalRecord);
+    let ssn_match = matches
+        .iter()
+        .find(|m| m.kind == SemanticEntityKind::PhiMedicalRecord);
     assert!(ssn_match.is_some(), "Must match PhiMedicalRecord");
     let m = ssn_match.unwrap();
     assert_eq!(m.classification, DlpClassification::CrownJewel);
@@ -448,8 +468,14 @@ fn test_presidio_zero_pii_scrubbing_and_commitment() {
     assert!(!scrubbed.contains("4532015112830366"), "PAN must be purged");
 
     // Verify format <ZK_PII:TYPE:HASH8>
-    assert!(scrubbed.contains("<ZK_PII:SSN:"), "Must contain ZK SSN commitment");
-    assert!(scrubbed.contains("<ZK_PII:PAN:"), "Must contain ZK PAN commitment");
+    assert!(
+        scrubbed.contains("<ZK_PII:SSN:"),
+        "Must contain ZK SSN commitment"
+    );
+    assert!(
+        scrubbed.contains("<ZK_PII:PAN:"),
+        "Must contain ZK PAN commitment"
+    );
 
     // Verify commitment hash format: exactly 8 hex chars
     if let Some(idx) = scrubbed.find("<ZK_PII:SSN:") {
@@ -510,10 +536,7 @@ fn test_provenance_dist_sha256sums_exists_and_valid() {
         .parent()
         .unwrap();
     let manifest_path = root.join("dist").join("SHA256SUMS.txt");
-    assert!(
-        manifest_path.exists(),
-        "dist/SHA256SUMS.txt must exist"
-    );
+    assert!(manifest_path.exists(), "dist/SHA256SUMS.txt must exist");
 
     let content = std::fs::read_to_string(&manifest_path).expect("Failed to read SHA256SUMS.txt");
     let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();

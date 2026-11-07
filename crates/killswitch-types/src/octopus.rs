@@ -219,7 +219,9 @@ impl ArmEpoch {
 
     /// Checks if a message bearing generation `msg_epoch` is currently valid.
     pub fn is_epoch_valid(&self, msg_epoch: u64) -> bool {
-        !self.is_severed && msg_epoch == self.generation && !self.revoked_epochs.contains(&msg_epoch)
+        !self.is_severed
+            && msg_epoch == self.generation
+            && !self.revoked_epochs.contains(&msg_epoch)
     }
 }
 
@@ -261,7 +263,14 @@ impl ArmMessage {
         let prov = self
             .provenance
             .iter()
-            .map(|h| format!("{}/{:?}/{}", h.arm_id.to_ascii_lowercase(), h.role, h.generation))
+            .map(|h| {
+                format!(
+                    "{}/{:?}/{}",
+                    h.arm_id.to_ascii_lowercase(),
+                    h.role,
+                    h.generation
+                )
+            })
             .collect::<Vec<_>>()
             .join(",");
         format!(
@@ -407,7 +416,9 @@ mod tests {
         assert!(res.unwrap_err().contains("LAW1_STICKY_TAINT_VETO"));
 
         // Untrusted message can reach Worker (AnomalyDetection)
-        assert!(msg.validate_lateral_movement(&ArmRole::AnomalyDetection).is_ok());
+        assert!(msg
+            .validate_lateral_movement(&ArmRole::AnomalyDetection)
+            .is_ok());
     }
 
     #[test]

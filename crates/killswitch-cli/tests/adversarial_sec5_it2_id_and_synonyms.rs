@@ -18,9 +18,8 @@
 
 use killswitch_telemetry::agent_hooks::{
     clear_interceptions, evaluate_hook_synchronously, format_mcp_error_response,
-    parse_claude_request, parse_copilot_request, parse_cursor_request,
-    parse_mcp_call_request, parse_opencode_request, HookEvaluationDecision,
-    GLOBAL_CORRELATOR,
+    parse_claude_request, parse_copilot_request, parse_cursor_request, parse_mcp_call_request,
+    parse_opencode_request, HookEvaluationDecision, GLOBAL_CORRELATOR,
 };
 
 // ============================================================================
@@ -61,7 +60,8 @@ fn test_jsonrpc_id_preservation_string_types() {
             req.rpc_id.as_ref().unwrap_or(&serde_json::Value::Null),
             &decision,
         );
-        let resp_val: serde_json::Value = serde_json::from_str(&resp_str).expect("parse json response");
+        let resp_val: serde_json::Value =
+            serde_json::from_str(&resp_str).expect("parse json response");
         assert_eq!(
             resp_val["id"],
             serde_json::Value::String(s.to_string()),
@@ -110,7 +110,8 @@ fn test_jsonrpc_id_preservation_large_and_negative_integers() {
             req.rpc_id.as_ref().unwrap_or(&serde_json::Value::Null),
             &decision,
         );
-        let resp_val: serde_json::Value = serde_json::from_str(&resp_str).expect("parse json response");
+        let resp_val: serde_json::Value =
+            serde_json::from_str(&resp_str).expect("parse json response");
         assert_eq!(
             resp_val["id"],
             serde_json::json!(num),
@@ -146,7 +147,10 @@ fn test_jsonrpc_id_preservation_null_and_missing() {
         &null_dec,
     );
     let null_val: serde_json::Value = serde_json::from_str(&null_resp).unwrap();
-    assert!(null_val["id"].is_null(), "Explicit null ID must remain null");
+    assert!(
+        null_val["id"].is_null(),
+        "Explicit null ID must remain null"
+    );
 
     // 2. Missing ID (JSON-RPC Notification)
     let notif_payload = serde_json::json!({
@@ -231,7 +235,10 @@ fn test_mcp_error_response_strict_jsonrpc_2_0_spec_compliance() {
         "JSON-RPC 2.0 §5.1 requires integer error code in 'error.code'"
     );
     assert!(
-        val["error"].get("message").and_then(|m| m.as_str()).is_some(),
+        val["error"]
+            .get("message")
+            .and_then(|m| m.as_str())
+            .is_some(),
         "JSON-RPC 2.0 §5.1 requires string error message in 'error.message'"
     );
 }
@@ -247,9 +254,15 @@ fn test_claude_wire_format_tool_name_synonyms() {
 
     for key in tool_name_variants {
         let mut map = serde_json::Map::new();
-        map.insert(key.to_string(), serde_json::Value::String("Bash".to_string()));
+        map.insert(
+            key.to_string(),
+            serde_json::Value::String("Bash".to_string()),
+        );
         let mut input = serde_json::Map::new();
-        input.insert("command".to_string(), serde_json::Value::String("sudo rm -rf /".to_string()));
+        input.insert(
+            "command".to_string(),
+            serde_json::Value::String("sudo rm -rf /".to_string()),
+        );
         map.insert("tool_input".to_string(), serde_json::Value::Object(input));
 
         let raw = serde_json::Value::Object(map).to_string();
@@ -278,9 +291,15 @@ fn test_claude_wire_format_argument_synonyms() {
 
     for key in arg_variants {
         let mut map = serde_json::Map::new();
-        map.insert("tool_name".to_string(), serde_json::Value::String("Bash".to_string()));
+        map.insert(
+            "tool_name".to_string(),
+            serde_json::Value::String("Bash".to_string()),
+        );
         let mut input = serde_json::Map::new();
-        input.insert("command".to_string(), serde_json::Value::String("sudo rm -rf /".to_string()));
+        input.insert(
+            "command".to_string(),
+            serde_json::Value::String("sudo rm -rf /".to_string()),
+        );
         map.insert(key.to_string(), serde_json::Value::Object(input));
 
         let raw = serde_json::Value::Object(map).to_string();
@@ -309,8 +328,14 @@ fn test_cursor_wire_format_synonyms() {
     let tool_variants = ["tool_name", "name", "tool"];
     for key in tool_variants {
         let mut map = serde_json::Map::new();
-        map.insert(key.to_string(), serde_json::Value::String("terminal".to_string()));
-        map.insert("command".to_string(), serde_json::Value::String("sudo rm -rf /".to_string()));
+        map.insert(
+            key.to_string(),
+            serde_json::Value::String("terminal".to_string()),
+        );
+        map.insert(
+            "command".to_string(),
+            serde_json::Value::String("sudo rm -rf /".to_string()),
+        );
         let raw = serde_json::Value::Object(map).to_string();
 
         let parsed = parse_cursor_request(&raw, "beforeShellExecution").expect("parse cursor");
@@ -327,7 +352,10 @@ fn test_cursor_wire_format_synonyms() {
     for key in arg_variants {
         let mut map = serde_json::Map::new();
         let mut inner = serde_json::Map::new();
-        inner.insert("command".to_string(), serde_json::Value::String("sudo rm -rf /".to_string()));
+        inner.insert(
+            "command".to_string(),
+            serde_json::Value::String("sudo rm -rf /".to_string()),
+        );
         map.insert(key.to_string(), serde_json::Value::Object(inner));
         let raw = serde_json::Value::Object(map).to_string();
 
@@ -347,9 +375,15 @@ fn test_copilot_wire_format_synonyms() {
     let tool_variants = ["tool", "tool_name", "name"];
     for key in tool_variants {
         let mut map = serde_json::Map::new();
-        map.insert(key.to_string(), serde_json::Value::String("terminal.execute".to_string()));
+        map.insert(
+            key.to_string(),
+            serde_json::Value::String("terminal.execute".to_string()),
+        );
         let mut p = serde_json::Map::new();
-        p.insert("command".to_string(), serde_json::Value::String("sudo rm -rf /".to_string()));
+        p.insert(
+            "command".to_string(),
+            serde_json::Value::String("sudo rm -rf /".to_string()),
+        );
         map.insert("parameters".to_string(), serde_json::Value::Object(p));
         let raw = serde_json::Value::Object(map).to_string();
 
@@ -366,9 +400,15 @@ fn test_copilot_wire_format_synonyms() {
     let param_variants = ["parameters", "arguments", "args", "tool_input"];
     for key in param_variants {
         let mut map = serde_json::Map::new();
-        map.insert("tool".to_string(), serde_json::Value::String("terminal.execute".to_string()));
+        map.insert(
+            "tool".to_string(),
+            serde_json::Value::String("terminal.execute".to_string()),
+        );
         let mut inner = serde_json::Map::new();
-        inner.insert("command".to_string(), serde_json::Value::String("sudo rm -rf /".to_string()));
+        inner.insert(
+            "command".to_string(),
+            serde_json::Value::String("sudo rm -rf /".to_string()),
+        );
         map.insert(key.to_string(), serde_json::Value::Object(inner));
         let raw = serde_json::Value::Object(map).to_string();
 
@@ -388,9 +428,15 @@ fn test_opencode_wire_format_synonyms() {
     let arg_variants = ["args", "arguments", "parameters", "tool_input"];
     for key in arg_variants {
         let mut map = serde_json::Map::new();
-        map.insert("tool".to_string(), serde_json::Value::String("bash".to_string()));
+        map.insert(
+            "tool".to_string(),
+            serde_json::Value::String("bash".to_string()),
+        );
         let mut inner = serde_json::Map::new();
-        inner.insert("command".to_string(), serde_json::Value::String("sudo rm -rf /".to_string()));
+        inner.insert(
+            "command".to_string(),
+            serde_json::Value::String("sudo rm -rf /".to_string()),
+        );
         map.insert(key.to_string(), serde_json::Value::Object(inner));
         let raw = serde_json::Value::Object(map).to_string();
 
@@ -475,15 +521,27 @@ fn test_tool_response_synonyms_incident_a_correlation() {
     for (idx, resp_key) in response_synonyms.iter().enumerate() {
         let session = format!("session-resp-synonym-{idx}");
         let mut map = serde_json::Map::new();
-        map.insert("tool_name".to_string(), serde_json::Value::String("Bash".to_string()));
+        map.insert(
+            "tool_name".to_string(),
+            serde_json::Value::String("Bash".to_string()),
+        );
         let mut input = serde_json::Map::new();
-        input.insert("command".to_string(), serde_json::Value::String("sudo -n id".to_string()));
+        input.insert(
+            "command".to_string(),
+            serde_json::Value::String("sudo -n id".to_string()),
+        );
         map.insert("tool_input".to_string(), serde_json::Value::Object(input));
-        map.insert("session_id".to_string(), serde_json::Value::String(session.clone()));
+        map.insert(
+            "session_id".to_string(),
+            serde_json::Value::String(session.clone()),
+        );
 
         let mut resp_obj = serde_json::Map::new();
         resp_obj.insert("exit_code".to_string(), serde_json::json!(1));
-        resp_obj.insert("stderr".to_string(), serde_json::json!("sudo: a password is required"));
+        resp_obj.insert(
+            "stderr".to_string(),
+            serde_json::json!("sudo: a password is required"),
+        );
         map.insert(resp_key.to_string(), serde_json::Value::Object(resp_obj));
 
         let raw = serde_json::Value::Object(map).to_string();
@@ -536,7 +594,9 @@ fn test_sensitive_path_guard_synonym_variations() {
             key
         );
         assert!(
-            decision.rationale.contains("sensitive system credential store"),
+            decision
+                .rationale
+                .contains("sensitive system credential store"),
             "Rationale must mention sensitive store for synonym '{}'",
             key
         );

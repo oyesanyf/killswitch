@@ -103,7 +103,9 @@ pub fn classify_action_class(action: &str) -> &'static str {
     if sem.privilege_class.is_privileged_execution() {
         return "PRIVILEGED_EXECUTION";
     }
-    if sem.privilege_class == crate::semantic_command::PrivilegeEquivalenceClass::PrivilegeQueryOrBenign {
+    if sem.privilege_class
+        == crate::semantic_command::PrivilegeEquivalenceClass::PrivilegeQueryOrBenign
+    {
         return "READ_PUBLIC";
     }
 
@@ -280,7 +282,8 @@ impl ApcScope {
 
     /// Checks whether a data classification is permitted by $D$.
     pub fn allows_classification(&self, classification: &str) -> bool {
-        self.data_classifications.contains("*") || self.data_classifications.contains(classification)
+        self.data_classifications.contains("*")
+            || self.data_classifications.contains(classification)
     }
 
     /// Computes the discrete blast-radius cardinality $|\text{Reach}(\mathcal{S})| = |R| \times |A| \times |D|$ (Thm. 4.6).
@@ -558,7 +561,10 @@ impl AuthorizationEnvelope {
         signing_key: &[u8],
     ) -> Result<Self, String> {
         if !self.verify_seal(signing_key) {
-            return Err("PARENT_SEAL_INVALID: Cannot delegate from an unverified parent envelope".to_string());
+            return Err(
+                "PARENT_SEAL_INVALID: Cannot delegate from an unverified parent envelope"
+                    .to_string(),
+            );
         }
         let next_hop = self.hop_index + 1;
         if next_hop > self.budget_spec.max_delegation_depth {
@@ -655,12 +661,7 @@ impl CompositionChecker {
         if self.enforce_cross_session_lineage {
             let lin_map = self.principal_lineage_history.lock().unwrap();
             if let Some(history) = lin_map.get(root_principal_id) {
-                Self::verify_against_history(
-                    scope,
-                    history,
-                    &candidate,
-                    "CROSS_SESSION_LINEAGE",
-                )?;
+                Self::verify_against_history(scope, history, &candidate, "CROSS_SESSION_LINEAGE")?;
             }
         }
 
@@ -1469,7 +1470,10 @@ mod tests {
         assert!(!narrowed.allows_resource("ungranted/secret"));
         assert!(narrowed.allows_action("read_confidential"));
         assert!(!narrowed.allows_action("exec_shell"));
-        assert_eq!(narrowed.pairwise_restrictions.len(), parent.pairwise_restrictions.len() + 1);
+        assert_eq!(
+            narrowed.pairwise_restrictions.len(),
+            parent.pairwise_restrictions.len() + 1
+        );
         assert_eq!(narrowed.ktuple_restrictions.len(), 1);
         assert!(narrowed.blast_radius() <= parent.blast_radius());
     }
@@ -1749,7 +1753,10 @@ mod tests {
         );
 
         let mut action_map = BTreeMap::new();
-        action_map.insert("sudo -n id".to_string(), BTreeSet::from(["system/kernel".to_string()]));
+        action_map.insert(
+            "sudo -n id".to_string(),
+            BTreeSet::from(["system/kernel".to_string()]),
+        );
         let intent = IntentSpec {
             intent_id: "intent-elevate".to_string(),
             intended_actions: BTreeSet::new(),
@@ -1778,8 +1785,13 @@ mod tests {
 
         let dec_denied = pdp.evaluate(&env, &intent, &req_no_tok);
         assert!(!dec_denied.allowed);
-        assert_eq!(dec_denied.failed_condition.as_deref(), Some("C4_APPROVAL_MISSING"));
-        assert!(dec_denied.reason.contains("Privileged execution attempt requires elevation ApprovalToken"));
+        assert_eq!(
+            dec_denied.failed_condition.as_deref(),
+            Some("C4_APPROVAL_MISSING")
+        );
+        assert!(dec_denied
+            .reason
+            .contains("Privileged execution attempt requires elevation ApprovalToken"));
 
         // Present valid elevation ApprovalToken -> ALLOWED
         let token = ApprovalToken::issue(
@@ -1799,7 +1811,11 @@ mod tests {
         };
 
         let dec_allowed = pdp.evaluate(&env, &intent, &req_with_tok);
-        assert!(dec_allowed.allowed, "Privileged execution with valid token must be allowed: {:?}", dec_allowed);
+        assert!(
+            dec_allowed.allowed,
+            "Privileged execution with valid token must be allowed: {:?}",
+            dec_allowed
+        );
     }
 
     #[test]
@@ -1824,8 +1840,14 @@ mod tests {
         );
 
         let mut action_map = BTreeMap::new();
-        action_map.insert("read_confidential".to_string(), BTreeSet::from(["docs/*".to_string()]));
-        action_map.insert("sudo -n id".to_string(), BTreeSet::from(["system/kernel".to_string()]));
+        action_map.insert(
+            "read_confidential".to_string(),
+            BTreeSet::from(["docs/*".to_string()]),
+        );
+        action_map.insert(
+            "sudo -n id".to_string(),
+            BTreeSet::from(["system/kernel".to_string()]),
+        );
         let intent = IntentSpec {
             intent_id: "intent-pw".to_string(),
             intended_actions: BTreeSet::new(),
@@ -1885,6 +1907,8 @@ mod tests {
         let dec2 = pdp.evaluate(&env, &intent, &req2);
         assert!(!dec2.allowed);
         assert_eq!(dec2.failed_condition.as_deref(), Some("C2_COMPOSITION"));
-        assert!(dec2.reason.contains("no_privileged_execution_after_confidential_read"));
+        assert!(dec2
+            .reason
+            .contains("no_privileged_execution_after_confidential_read"));
     }
 }

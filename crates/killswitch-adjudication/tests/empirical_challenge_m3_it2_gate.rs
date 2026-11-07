@@ -121,9 +121,15 @@ fn test_adversarial_pe_fuzzing_zero_panics_and_clean_errors() {
 
     // Test 2: Adversarial e_lfanew pointers
     let test_lfanew_offsets: Vec<u32> = vec![
-        0, 1, 63, // Under minimum 64
-        64, 100, // Valid range but buffer too small for PE signature
-        0x0001_0000, 0x7FFF_FFFF, 0xFFFF_FFFC, 0xFFFF_FFFF,
+        0,
+        1,
+        63, // Under minimum 64
+        64,
+        100, // Valid range but buffer too small for PE signature
+        0x0001_0000,
+        0x7FFF_FFFF,
+        0xFFFF_FFFC,
+        0xFFFF_FFFF,
     ];
     for lfanew in test_lfanew_offsets {
         let mut buf = vec![0u8; 128];
@@ -131,11 +137,22 @@ fn test_adversarial_pe_fuzzing_zero_panics_and_clean_errors() {
         buf[1] = b'Z';
         buf[0x3C..0x40].copy_from_slice(&lfanew.to_le_bytes());
         let res = inspect_binary_format_safe(&buf);
-        assert!(res.is_err(), "Adversarial e_lfanew 0x{:x} must fail", lfanew);
+        assert!(
+            res.is_err(),
+            "Adversarial e_lfanew 0x{:x} must fail",
+            lfanew
+        );
     }
 
     // Test 3: Corrupt PE signatures
-    let bad_signatures = [b"NE\0\0", b"LE\0\0", b"PE\0\x01", b"PE\x01\0", b"\0\0\0\0", b"DEAD"];
+    let bad_signatures = [
+        b"NE\0\0",
+        b"LE\0\0",
+        b"PE\0\x01",
+        b"PE\x01\0",
+        b"\0\0\0\0",
+        b"DEAD",
+    ];
     for sig in bad_signatures {
         let mut buf = vec![0u8; 256];
         buf[0] = b'M';
@@ -150,7 +167,8 @@ fn test_adversarial_pe_fuzzing_zero_panics_and_clean_errors() {
     // Test 4: Section count boundary and bomb rejection
     // Section count = 96 (boundary: maximum allowed)
     let pe_valid_boundary = make_pe64_test_buffer(96, false);
-    let info = inspect_binary_format_safe(&pe_valid_boundary).expect("96 sections is valid boundary");
+    let info =
+        inspect_binary_format_safe(&pe_valid_boundary).expect("96 sections is valid boundary");
     assert_eq!(info.section_count, 96);
     assert_eq!(info.kind, BinaryFormatKind::Pe64);
 
@@ -179,7 +197,10 @@ fn test_adversarial_pe_fuzzing_zero_panics_and_clean_errors() {
     pe_oob_raw[sec_off + 20..sec_off + 24].copy_from_slice(&0x7FFF_0000u32.to_le_bytes());
     pe_oob_raw[sec_off + 16..sec_off + 20].copy_from_slice(&0x1000u32.to_le_bytes());
     let info_oob = inspect_binary_format_safe(&pe_oob_raw).expect("Should parse headers safely");
-    assert_eq!(info_oob.sections[0].entropy, 0.0, "OOB raw data should yield 0.0 entropy without panic");
+    assert_eq!(
+        info_oob.sections[0].entropy, 0.0,
+        "OOB raw data should yield 0.0 entropy without panic"
+    );
 }
 
 // ============================================================================
@@ -220,7 +241,8 @@ fn test_adversarial_elf_fuzzing_zero_panics_and_clean_errors() {
 
     // Test 4: ELF Section count boundary and bomb rejection
     let elf_valid_boundary = make_elf64_test_buffer(96, false);
-    let info = inspect_binary_format_safe(&elf_valid_boundary).expect("96 sections is valid boundary");
+    let info =
+        inspect_binary_format_safe(&elf_valid_boundary).expect("96 sections is valid boundary");
     assert_eq!(info.section_count, 96);
     assert_eq!(info.kind, BinaryFormatKind::Elf64);
 
@@ -252,12 +274,21 @@ fn test_adversarial_masquerade_spoof_escalation_across_platforms() {
     let protected_targets = [
         ("svchost.exe", b"MZ_malformed_trash_payload".as_slice()),
         ("lsass.exe", b"MZ\0\0\0\0\0\0_bad_header".as_slice()),
-        ("explorer.exe", b"\x7fELF_linux_binary_posing_as_explorer".as_slice()),
+        (
+            "explorer.exe",
+            b"\x7fELF_linux_binary_posing_as_explorer".as_slice(),
+        ),
         ("cargo.exe", b"NOT_EVEN_AN_EXECUTABLE_FILE".as_slice()),
         ("systemd", b"MZ_windows_binary_posing_as_systemd".as_slice()),
         ("sshd", b"\x7fELF\x01\x01_corrupt_elf32_header".as_slice()),
-        ("launchd", b"RANDOM_CORRUPT_BYTES_FOR_MACOS_DAEMON".as_slice()),
-        ("WindowServer", b"MZ_windows_binary_posing_as_windowserver".as_slice()),
+        (
+            "launchd",
+            b"RANDOM_CORRUPT_BYTES_FOR_MACOS_DAEMON".as_slice(),
+        ),
+        (
+            "WindowServer",
+            b"MZ_windows_binary_posing_as_windowserver".as_slice(),
+        ),
     ];
 
     for (target_name, corrupt_payload) in protected_targets {
@@ -352,7 +383,10 @@ fn test_adversarial_resource_bounds_huge_sparse_files() {
         BinaryTrustVerdict::UntrustedWritableLocation { reason, .. } => {
             assert!(reason.contains("exceeds maximum allowed size"));
         }
-        other => panic!("Expected UntrustedIoError or UntrustedWritableLocation, got {:?}", other),
+        other => panic!(
+            "Expected UntrustedIoError or UntrustedWritableLocation, got {:?}",
+            other
+        ),
     }
 
     // Case B: Massive 2.5 GiB sparse file (10x MAX_REA_FILE_BYTES)
@@ -380,7 +414,10 @@ fn test_adversarial_resource_bounds_huge_sparse_files() {
         BinaryTrustVerdict::UntrustedWritableLocation { reason, .. } => {
             assert!(reason.contains("exceeds maximum allowed size"));
         }
-        other => panic!("Expected UntrustedIoError or UntrustedWritableLocation, got {:?}", other),
+        other => panic!(
+            "Expected UntrustedIoError or UntrustedWritableLocation, got {:?}",
+            other
+        ),
     }
 
     // Case C: String extraction bounds under adversarial 1,000,000 byte continuous character payload

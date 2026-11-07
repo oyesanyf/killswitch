@@ -686,10 +686,7 @@ static WIN32_SCM_STATUS_HANDLE: std::sync::atomic::AtomicPtr<core::ffi::c_void> 
 static WIN32_SCM_STOP_FLAG: AtomicBool = AtomicBool::new(false);
 
 #[cfg(target_os = "windows")]
-unsafe extern "system" fn win32_service_main(
-    _argc: u32,
-    _argv: *mut windows_sys::core::PWSTR,
-) {
+unsafe extern "system" fn win32_service_main(_argc: u32, _argv: *mut windows_sys::core::PWSTR) {
     use windows_sys::Win32::Foundation::NO_ERROR;
     use windows_sys::Win32::System::Services::*;
 
@@ -872,7 +869,9 @@ impl WindowsServiceManager {
             std::thread::sleep(Duration::from_millis(50));
         }
 
-        info!("🚨 [WINDOWS-DAEMON] Standalone daemon stopping: executing unconditional host disarm");
+        info!(
+            "🚨 [WINDOWS-DAEMON] Standalone daemon stopping: executing unconditional host disarm"
+        );
         let _ = execute_host_disarm_unauthenticated();
         info!("🟢 [WINDOWS-DAEMON] Clean standalone daemon shutdown complete");
         Ok(())
@@ -908,11 +907,7 @@ impl NativeServiceManager for WindowsServiceManager {
         };
 
         unsafe {
-            let scm = OpenSCManagerW(
-                std::ptr::null(),
-                std::ptr::null(),
-                SC_MANAGER_ALL_ACCESS,
-            );
+            let scm = OpenSCManagerW(std::ptr::null(), std::ptr::null(), SC_MANAGER_ALL_ACCESS);
             if scm.is_null() {
                 let err = windows_sys::Win32::Foundation::GetLastError();
                 return Err(ServiceError::InstallFailed(
@@ -978,11 +973,7 @@ impl NativeServiceManager for WindowsServiceManager {
         let name_w = to_wide(service_name);
 
         unsafe {
-            let scm = OpenSCManagerW(
-                std::ptr::null(),
-                std::ptr::null(),
-                SC_MANAGER_CONNECT,
-            );
+            let scm = OpenSCManagerW(std::ptr::null(), std::ptr::null(), SC_MANAGER_CONNECT);
             if scm.is_null() {
                 let err = windows_sys::Win32::Foundation::GetLastError();
                 return Err(ServiceError::UninstallFailed(
@@ -1045,11 +1036,7 @@ impl NativeServiceManager for WindowsServiceManager {
         let name_w = to_wide(service_name);
 
         unsafe {
-            let scm = OpenSCManagerW(
-                std::ptr::null(),
-                std::ptr::null(),
-                SC_MANAGER_CONNECT,
-            );
+            let scm = OpenSCManagerW(std::ptr::null(), std::ptr::null(), SC_MANAGER_CONNECT);
             if scm.is_null() {
                 let err = windows_sys::Win32::Foundation::GetLastError();
                 return Err(ServiceError::StartFailed(
@@ -1100,11 +1087,7 @@ impl NativeServiceManager for WindowsServiceManager {
         let name_w = to_wide(service_name);
 
         unsafe {
-            let scm = OpenSCManagerW(
-                std::ptr::null(),
-                std::ptr::null(),
-                SC_MANAGER_CONNECT,
-            );
+            let scm = OpenSCManagerW(std::ptr::null(), std::ptr::null(), SC_MANAGER_CONNECT);
             if scm.is_null() {
                 let err = windows_sys::Win32::Foundation::GetLastError();
                 return Err(ServiceError::StopFailed(
@@ -1156,11 +1139,7 @@ impl NativeServiceManager for WindowsServiceManager {
         let name_w = to_wide(service_name);
 
         unsafe {
-            let scm = OpenSCManagerW(
-                std::ptr::null(),
-                std::ptr::null(),
-                SC_MANAGER_CONNECT,
-            );
+            let scm = OpenSCManagerW(std::ptr::null(), std::ptr::null(), SC_MANAGER_CONNECT);
             if scm.is_null() {
                 let err = windows_sys::Win32::Foundation::GetLastError();
                 return Err(ServiceError::QueryFailed(
@@ -1169,11 +1148,7 @@ impl NativeServiceManager for WindowsServiceManager {
                 ));
             }
 
-            let service = OpenServiceW(
-                scm,
-                name_w.as_ptr(),
-                SERVICE_QUERY_STATUS,
-            );
+            let service = OpenServiceW(scm, name_w.as_ptr(), SERVICE_QUERY_STATUS);
 
             if service.is_null() {
                 let err = windows_sys::Win32::Foundation::GetLastError();
@@ -1269,7 +1244,9 @@ impl NativeServiceManager for WindowsServiceManager {
 
         // 4. Invoke StartServiceCtrlDispatcherW
         let ok = unsafe {
-            windows_sys::Win32::System::Services::StartServiceCtrlDispatcherW(dispatch_table.as_ptr())
+            windows_sys::Win32::System::Services::StartServiceCtrlDispatcherW(
+                dispatch_table.as_ptr(),
+            )
         };
 
         if ok == 0 {
@@ -1501,13 +1478,19 @@ mod tests {
         let linux_mgr = LinuxServiceManager::new();
         linux_mgr.request_stop();
         let res = linux_mgr.run_service_daemon();
-        assert!(res.is_ok(), "Linux daemon must cleanly exit on stop request");
+        assert!(
+            res.is_ok(),
+            "Linux daemon must cleanly exit on stop request"
+        );
 
         // 2. macOS daemon cancellation
         let mac_mgr = MacOsServiceManager::new();
         mac_mgr.request_stop();
         let mac_res = mac_mgr.run_service_daemon();
-        assert!(mac_res.is_ok(), "macOS daemon must cleanly exit on stop request");
+        assert!(
+            mac_res.is_ok(),
+            "macOS daemon must cleanly exit on stop request"
+        );
 
         // 3. Windows daemon cancellation or console fallback
         #[cfg(target_os = "windows")]
@@ -1515,7 +1498,10 @@ mod tests {
             let win_mgr = WindowsServiceManager::new();
             win_mgr.request_stop();
             let win_res = win_mgr.run_service_daemon();
-            assert!(win_res.is_ok(), "Windows daemon must cleanly exit on stop request");
+            assert!(
+                win_res.is_ok(),
+                "Windows daemon must cleanly exit on stop request"
+            );
         }
 
         // 4. Global shutdown hook

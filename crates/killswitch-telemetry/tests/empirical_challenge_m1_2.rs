@@ -13,16 +13,16 @@
 //!    - Rapid concurrent dose accumulation and thread safety.
 //!    - 5-state verdict lattice serialization, aliases, and equivalence invariants.
 
-use std::sync::Arc;
-use std::thread;
 use killswitch_telemetry::{
-    canonicalize_jcs, canonicalize_jcs_string,
     cage_governance::{
         CageEvaluationRequest, CageEvaluationResponse, CageGovernanceKernel, CageVerdict,
-        Cumulative24hTracker, KeyedCumulative24hTracker, HealthcareDoseBarrier, CTRL_CBF_DOSE_001,
+        Cumulative24hTracker, HealthcareDoseBarrier, KeyedCumulative24hTracker, CTRL_CBF_DOSE_001,
     },
+    canonicalize_jcs, canonicalize_jcs_string,
 };
 use serde_json::{json, Value};
+use std::sync::Arc;
+use std::thread;
 
 // ============================================================================
 // SUITE 1: RFC 8785 JCS Canonicalization Stress Tests
@@ -38,7 +38,10 @@ fn test_jcs_ieee754_float_zero_and_negative_zero() {
     let res_neg_zero = canonicalize_jcs_string(&val_neg_zero).unwrap();
 
     assert_eq!(res_zero, "0", "0.0 must serialize to '0'");
-    assert_eq!(res_neg_zero, "0", "-0.0 must serialize to '0' per RFC 8785 Section 3.2.2.3");
+    assert_eq!(
+        res_neg_zero, "0",
+        "-0.0 must serialize to '0' per RFC 8785 Section 3.2.2.3"
+    );
 }
 
 #[test]
@@ -46,14 +49,17 @@ fn test_jcs_ieee754_non_finite_rejection() {
     // RFC 8785 Section 3.2.2.3: NaN, Infinity, -Infinity must be rejected
     // serde_json does not allow building NaN/Infinity directly via json! macro,
     // so we construct a Value::Number from raw float if possible or test JcsError
-    let nan_val = Value::Number(serde_json::Number::from_f64(f64::NAN).unwrap_or_else(|| {
-        serde_json::Number::from(0)
-    }));
+    let nan_val = Value::Number(
+        serde_json::Number::from_f64(f64::NAN).unwrap_or_else(|| serde_json::Number::from(0)),
+    );
     // If serde_json prevented NaN, it's already safe at JSON layer.
     // If it allowed it, canonicalize_jcs must return an error.
     if let Value::Number(ref n) = nan_val {
         if n.as_f64().map_or(false, |f| !f.is_finite()) {
-            assert!(canonicalize_jcs(&nan_val).is_err(), "NaN must return JcsError::NonFiniteNumber");
+            assert!(
+                canonicalize_jcs(&nan_val).is_err(),
+                "NaN must return JcsError::NonFiniteNumber"
+            );
         }
     }
 }
@@ -117,7 +123,10 @@ fn test_jcs_utf16_surrogate_pair_vs_code_point_key_ordering() {
         "\u{10000}": "astral_10000"
     });
     let canonical = canonicalize_jcs_string(&val).unwrap();
-    let expected = format!(r#"{{"{}":"astral_10000","{}":"bmp_e000"}}"#, "\u{10000}", "\u{E000}");
+    let expected = format!(
+        r#"{{"{}":"astral_10000","{}":"bmp_e000"}}"#,
+        "\u{10000}", "\u{E000}"
+    );
     assert_eq!(
         canonical, expected,
         "U+10000 (lead surrogate 0xD800) must sort before U+E000 (0xE000) under UTF-16 code unit order"
@@ -175,7 +184,10 @@ fn test_jcs_whitespace_elimination_outside_strings() {
     }"#;
     let parsed: Value = serde_json::from_str(raw).unwrap();
     let canonical = canonicalize_jcs_string(&parsed).unwrap();
-    assert_eq!(canonical, r#"{"count":42,"list":[1,2,"  spaced  "],"status":"ACTIVE"}"#);
+    assert_eq!(
+        canonical,
+        r#"{"count":42,"list":[1,2,"  spaced  "],"status":"ACTIVE"}"#
+    );
 }
 
 #[test]
@@ -241,11 +253,11 @@ fn test_cbf_24h_sliding_window_monotonic_decay() {
     let t0 = 100_000_000u64;
 
     // Record 10.0 mg every 6 hours across a 24-hour cycle
-    tracker.record(t0, 10.0);            // 0h
-    tracker.record(t0 + h6, 10.0);       // 6h
-    tracker.record(t0 + 2 * h6, 10.0);   // 12h
-    tracker.record(t0 + 3 * h6, 10.0);   // 18h
-    tracker.record(t0 + 4 * h6, 10.0);   // 24h
+    tracker.record(t0, 10.0); // 0h
+    tracker.record(t0 + h6, 10.0); // 6h
+    tracker.record(t0 + 2 * h6, 10.0); // 12h
+    tracker.record(t0 + 3 * h6, 10.0); // 18h
+    tracker.record(t0 + 4 * h6, 10.0); // 24h
 
     // At 24h: all 5 events are within the [t0, t0 + 24h] window
     assert_eq!(tracker.get_cumulative_24h(t0 + 4 * h6), 50.0);
@@ -275,7 +287,11 @@ fn test_cbf_zero_and_negative_amounts_ignored() {
     tracker.record(t0, -10.0);
     tracker.record(t0, -100.5);
 
-    assert_eq!(tracker.get_cumulative_24h(t0), 0.0, "Zero and negative amounts must not accumulate");
+    assert_eq!(
+        tracker.get_cumulative_24h(t0),
+        0.0,
+        "Zero and negative amounts must not accumulate"
+    );
 
     tracker.record(t0, 25.0);
     assert_eq!(tracker.get_cumulative_24h(t0), 25.0);
@@ -291,7 +307,11 @@ fn test_keyed_cbf_tracker_workload_isolation() {
 
     assert_eq!(keyed.get_cumulative_24h("agent_alpha", t0), 100.0);
     assert_eq!(keyed.get_cumulative_24h("agent_beta", t0), 250.0);
-    assert_eq!(keyed.get_cumulative_24h("agent_gamma", t0), 0.0, "Unseen agent must return 0.0");
+    assert_eq!(
+        keyed.get_cumulative_24h("agent_gamma", t0),
+        0.0,
+        "Unseen agent must return 0.0"
+    );
 
     // Advance time past 24h for agent_alpha
     let t_past = t0 + 86_400_001;
@@ -455,8 +475,12 @@ fn test_cbf_concurrent_dose_burst_barrier_behavior() {
         }));
     }
 
-    let results: Vec<CageEvaluationResponse> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+    let results: Vec<CageEvaluationResponse> =
+        handles.into_iter().map(|h| h.join().unwrap()).collect();
     let cleared_count = results.iter().filter(|r| r.verdict.is_allowed()).count();
     let refused_count = results.iter().filter(|r| r.verdict.is_denied()).count();
-    eprintln!("Concurrent dose burst (10 x 40.0 mg, cap 200.0 mg): cleared={}, refused={}", cleared_count, refused_count);
+    eprintln!(
+        "Concurrent dose burst (10 x 40.0 mg, cap 200.0 mg): cleared={}, refused={}",
+        cleared_count, refused_count
+    );
 }

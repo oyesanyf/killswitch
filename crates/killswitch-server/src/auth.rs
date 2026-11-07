@@ -66,14 +66,20 @@ pub fn extract_token_from_headers(headers: &HeaderMap) -> Option<String> {
         }
     }
 
-    if let Some(token) = headers.get(DEFAULT_CONTROL_PLANE_HEADER).and_then(|h| h.to_str().ok()) {
+    if let Some(token) = headers
+        .get(DEFAULT_CONTROL_PLANE_HEADER)
+        .and_then(|h| h.to_str().ok())
+    {
         let t = token.trim();
         if !t.is_empty() {
             return Some(t.to_string());
         }
     }
 
-    if let Some(token) = headers.get("x-killswitch-token").and_then(|h| h.to_str().ok()) {
+    if let Some(token) = headers
+        .get("x-killswitch-token")
+        .and_then(|h| h.to_str().ok())
+    {
         let t = token.trim();
         if !t.is_empty() {
             return Some(t.to_string());
@@ -176,7 +182,9 @@ pub fn verify_control_plane_auth(
     }
 
     // 3. Resolve peer socket PID and detect spoofing
-    let bound_port = state.active_bound_port.load(std::sync::atomic::Ordering::SeqCst);
+    let bound_port = state
+        .active_bound_port
+        .load(std::sync::atomic::Ordering::SeqCst);
     let actual_peer_pid = if let Some(ConnectInfo(addr)) = connect_info {
         resolve_loopback_peer_pid(*addr, bound_port).ok()
     } else {

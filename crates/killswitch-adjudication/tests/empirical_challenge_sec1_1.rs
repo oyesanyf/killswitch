@@ -15,17 +15,13 @@ use killswitch_adjudication::binary_probe::{
     inspect_binary_metadata, inspect_binary_metadata_from_bytes, DynamicBinaryMetadata,
     ElevationRequirement,
 };
-use killswitch_adjudication::immunity::{
-    inspect_process_lineage, LineageImmunityVerdict,
-};
+use killswitch_adjudication::immunity::{inspect_process_lineage, LineageImmunityVerdict};
 use killswitch_adjudication::token_delta::{
     evaluate_security_context_delta, observe_parent_child_token_delta,
     query_process_security_context, ProcessSecurityContext, SecurityContextDelta,
 };
 use killswitch_core::freeze::NativeProcessFreezer;
-use killswitch_core::killchain::{
-    is_developer_or_agent_runtime, is_immutable_os_kernel_pid,
-};
+use killswitch_core::killchain::{is_developer_or_agent_runtime, is_immutable_os_kernel_pid};
 use killswitch_types::adjudication::{EvidenceClass, ThreatCandidate, VetoReason};
 use killswitch_types::{KillSwitchError, ProcessFreezer};
 
@@ -130,10 +126,7 @@ fn test_challenge_synthetic_pe_as_invoker_not_privileged() {
     pe.extend_from_slice(manifest);
 
     let meta = inspect_binary_metadata_from_bytes(&pe);
-    assert_eq!(
-        meta.elevation_requirement,
-        ElevationRequirement::AsInvoker
-    );
+    assert_eq!(meta.elevation_requirement, ElevationRequirement::AsInvoker);
     assert!(
         !meta.is_privileged_target(),
         "PE with asInvoker must NOT be flagged as privileged target"
@@ -195,21 +188,42 @@ fn test_challenge_renamed_binaries_on_disk() {
 
     // Test 1: Renamed to innocent .txt
     let path_txt = dir.path().join("benign_notes.txt");
-    File::create(&path_txt).unwrap().write_all(&priv_pe).unwrap();
+    File::create(&path_txt)
+        .unwrap()
+        .write_all(&priv_pe)
+        .unwrap();
     let meta_txt = inspect_binary_metadata(&path_txt).expect("inspect metadata");
-    assert_eq!(meta_txt.elevation_requirement, ElevationRequirement::RequireAdministrator);
-    assert!(meta_txt.is_privileged_target(), "Renamed .txt file must be detected as privileged");
+    assert_eq!(
+        meta_txt.elevation_requirement,
+        ElevationRequirement::RequireAdministrator
+    );
+    assert!(
+        meta_txt.is_privileged_target(),
+        "Renamed .txt file must be detected as privileged"
+    );
 
     // Test 2: Renamed to extensionless file
     let path_no_ext = dir.path().join("innocent_worker");
-    File::create(&path_no_ext).unwrap().write_all(&priv_pe).unwrap();
+    File::create(&path_no_ext)
+        .unwrap()
+        .write_all(&priv_pe)
+        .unwrap();
     let meta_no_ext = inspect_binary_metadata(&path_no_ext).expect("inspect metadata");
-    assert_eq!(meta_no_ext.elevation_requirement, ElevationRequirement::RequireAdministrator);
-    assert!(meta_no_ext.is_privileged_target(), "Extensionless file must be detected as privileged");
+    assert_eq!(
+        meta_no_ext.elevation_requirement,
+        ElevationRequirement::RequireAdministrator
+    );
+    assert!(
+        meta_no_ext.is_privileged_target(),
+        "Extensionless file must be detected as privileged"
+    );
 
     // Test 3: Renamed to .pdf
     let path_pdf = dir.path().join("invoice.pdf");
-    File::create(&path_pdf).unwrap().write_all(&priv_pe).unwrap();
+    File::create(&path_pdf)
+        .unwrap()
+        .write_all(&priv_pe)
+        .unwrap();
     let meta_pdf = inspect_binary_metadata(&path_pdf).expect("inspect metadata");
     assert!(meta_pdf.is_privileged_target());
 
@@ -223,7 +237,10 @@ fn test_challenge_renamed_binaries_on_disk() {
     benign_pe.extend_from_slice(br#"<requestedExecutionLevel level="asInvoker" />"#);
 
     let path_sudo = dir.path().join("sudo.exe");
-    File::create(&path_sudo).unwrap().write_all(&benign_pe).unwrap();
+    File::create(&path_sudo)
+        .unwrap()
+        .write_all(&benign_pe)
+        .unwrap();
     let meta_sudo = inspect_binary_metadata(&path_sudo).expect("inspect metadata");
     assert!(
         !meta_sudo.is_privileged_target(),
@@ -314,31 +331,58 @@ fn test_challenge_non_canonical_suid_and_capabilities() {
 #[test]
 fn test_challenge_linux_euid_synthetic_contexts() {
     // 1. Escalated EUID: 1000 -> 0
-    let p1 = ProcessSecurityContext { euid: 1000, ..Default::default() };
-    let c1 = ProcessSecurityContext { euid: 0, ..Default::default() };
+    let p1 = ProcessSecurityContext {
+        euid: 1000,
+        ..Default::default()
+    };
+    let c1 = ProcessSecurityContext {
+        euid: 0,
+        ..Default::default()
+    };
     let deltas1 = evaluate_security_context_delta(&p1, &c1);
     assert_eq!(
         deltas1,
-        vec![SecurityContextDelta::LinuxEuidEscalation { parent_euid: 1000, child_euid: 0 }]
+        vec![SecurityContextDelta::LinuxEuidEscalation {
+            parent_euid: 1000,
+            child_euid: 0
+        }]
     );
     assert!(deltas1[0].is_privilege_escalation());
 
     // 2. Same unprivileged EUID: 1000 -> 1000
-    let p2 = ProcessSecurityContext { euid: 1000, ..Default::default() };
-    let c2 = ProcessSecurityContext { euid: 1000, ..Default::default() };
+    let p2 = ProcessSecurityContext {
+        euid: 1000,
+        ..Default::default()
+    };
+    let c2 = ProcessSecurityContext {
+        euid: 1000,
+        ..Default::default()
+    };
     let deltas2 = evaluate_security_context_delta(&p2, &c2);
     assert_eq!(deltas2, vec![SecurityContextDelta::CleanIdentityPreserved]);
     assert!(!deltas2[0].is_privilege_escalation());
 
     // 3. Same Root EUID: 0 -> 0
-    let p3 = ProcessSecurityContext { euid: 0, ..Default::default() };
-    let c3 = ProcessSecurityContext { euid: 0, ..Default::default() };
+    let p3 = ProcessSecurityContext {
+        euid: 0,
+        ..Default::default()
+    };
+    let c3 = ProcessSecurityContext {
+        euid: 0,
+        ..Default::default()
+    };
     let deltas3 = evaluate_security_context_delta(&p3, &c3);
     assert_eq!(deltas3, vec![SecurityContextDelta::CleanIdentityPreserved]);
 
     // 4. De-escalated EUID (dropping privs): 0 -> 1000
-    let p4 = ProcessSecurityContext { euid: 0, ..Default::default() };
-    let c4 = ProcessSecurityContext { euid: 1000, ..Default::default() };
+    let p4 = ProcessSecurityContext {
+        euid: 0,
+        ..Default::default()
+    };
+    let c4 = ProcessSecurityContext {
+        euid: 1000,
+        ..Default::default()
+    };
     let deltas4 = evaluate_security_context_delta(&p4, &c4);
     assert_eq!(
         deltas4,
@@ -347,8 +391,14 @@ fn test_challenge_linux_euid_synthetic_contexts() {
     );
 
     // 5. Lateral unprivileged user switch: 1000 -> 1001
-    let p5 = ProcessSecurityContext { euid: 1000, ..Default::default() };
-    let c5 = ProcessSecurityContext { euid: 1001, ..Default::default() };
+    let p5 = ProcessSecurityContext {
+        euid: 1000,
+        ..Default::default()
+    };
+    let c5 = ProcessSecurityContext {
+        euid: 1001,
+        ..Default::default()
+    };
     let deltas5 = evaluate_security_context_delta(&p5, &c5);
     assert_eq!(
         deltas5,
@@ -360,48 +410,90 @@ fn test_challenge_linux_euid_synthetic_contexts() {
 #[test]
 fn test_challenge_windows_token_integrity_synthetic_contexts() {
     // 1. Medium (0x2000) -> High (0x3000)
-    let p1 = ProcessSecurityContext { integrity_rid: 0x2000, ..Default::default() };
-    let c1 = ProcessSecurityContext { integrity_rid: 0x3000, ..Default::default() };
+    let p1 = ProcessSecurityContext {
+        integrity_rid: 0x2000,
+        ..Default::default()
+    };
+    let c1 = ProcessSecurityContext {
+        integrity_rid: 0x3000,
+        ..Default::default()
+    };
     let deltas1 = evaluate_security_context_delta(&p1, &c1);
-    assert!(deltas1.contains(&SecurityContextDelta::WindowsIntegrityEscalation {
-        parent_rid: 0x2000,
-        child_rid: 0x3000,
-    }));
+    assert!(
+        deltas1.contains(&SecurityContextDelta::WindowsIntegrityEscalation {
+            parent_rid: 0x2000,
+            child_rid: 0x3000,
+        })
+    );
     assert!(deltas1.iter().any(|d| d.is_privilege_escalation()));
 
     // 2. Medium (0x2000) -> System (0x4000)
-    let p2 = ProcessSecurityContext { integrity_rid: 0x2000, ..Default::default() };
-    let c2 = ProcessSecurityContext { integrity_rid: 0x4000, ..Default::default() };
+    let p2 = ProcessSecurityContext {
+        integrity_rid: 0x2000,
+        ..Default::default()
+    };
+    let c2 = ProcessSecurityContext {
+        integrity_rid: 0x4000,
+        ..Default::default()
+    };
     let deltas2 = evaluate_security_context_delta(&p2, &c2);
-    assert!(deltas2.contains(&SecurityContextDelta::WindowsIntegrityEscalation {
-        parent_rid: 0x2000,
-        child_rid: 0x4000,
-    }));
+    assert!(
+        deltas2.contains(&SecurityContextDelta::WindowsIntegrityEscalation {
+            parent_rid: 0x2000,
+            child_rid: 0x4000,
+        })
+    );
 
     // 3. Low (0x1000) -> High (0x3000)
-    let p3 = ProcessSecurityContext { integrity_rid: 0x1000, ..Default::default() };
-    let c3 = ProcessSecurityContext { integrity_rid: 0x3000, ..Default::default() };
+    let p3 = ProcessSecurityContext {
+        integrity_rid: 0x1000,
+        ..Default::default()
+    };
+    let c3 = ProcessSecurityContext {
+        integrity_rid: 0x3000,
+        ..Default::default()
+    };
     let deltas3 = evaluate_security_context_delta(&p3, &c3);
-    assert!(deltas3.contains(&SecurityContextDelta::WindowsIntegrityEscalation {
-        parent_rid: 0x1000,
-        child_rid: 0x3000,
-    }));
+    assert!(
+        deltas3.contains(&SecurityContextDelta::WindowsIntegrityEscalation {
+            parent_rid: 0x1000,
+            child_rid: 0x3000,
+        })
+    );
 
     // 4. Low (0x1000) -> Medium (0x2000): Not high integrity escalation
-    let p4 = ProcessSecurityContext { integrity_rid: 0x1000, ..Default::default() };
-    let c4 = ProcessSecurityContext { integrity_rid: 0x2000, ..Default::default() };
+    let p4 = ProcessSecurityContext {
+        integrity_rid: 0x1000,
+        ..Default::default()
+    };
+    let c4 = ProcessSecurityContext {
+        integrity_rid: 0x2000,
+        ..Default::default()
+    };
     let deltas4 = evaluate_security_context_delta(&p4, &c4);
     assert_eq!(deltas4, vec![SecurityContextDelta::CleanIdentityPreserved]);
 
     // 5. High (0x3000) -> High (0x3000): Clean
-    let p5 = ProcessSecurityContext { integrity_rid: 0x3000, ..Default::default() };
-    let c5 = ProcessSecurityContext { integrity_rid: 0x3000, ..Default::default() };
+    let p5 = ProcessSecurityContext {
+        integrity_rid: 0x3000,
+        ..Default::default()
+    };
+    let c5 = ProcessSecurityContext {
+        integrity_rid: 0x3000,
+        ..Default::default()
+    };
     let deltas5 = evaluate_security_context_delta(&p5, &c5);
     assert_eq!(deltas5, vec![SecurityContextDelta::CleanIdentityPreserved]);
 
     // 6. High (0x3000) -> Medium (0x2000): Integrity drop is clean
-    let p6 = ProcessSecurityContext { integrity_rid: 0x3000, ..Default::default() };
-    let c6 = ProcessSecurityContext { integrity_rid: 0x2000, ..Default::default() };
+    let p6 = ProcessSecurityContext {
+        integrity_rid: 0x3000,
+        ..Default::default()
+    };
+    let c6 = ProcessSecurityContext {
+        integrity_rid: 0x2000,
+        ..Default::default()
+    };
     let deltas6 = evaluate_security_context_delta(&p6, &c6);
     assert_eq!(deltas6, vec![SecurityContextDelta::CleanIdentityPreserved]);
 }
@@ -409,42 +501,78 @@ fn test_challenge_windows_token_integrity_synthetic_contexts() {
 #[test]
 fn test_challenge_windows_token_elevation_and_session0() {
     // 1. TokenElevation delta: false -> true
-    let p1 = ProcessSecurityContext { is_elevated: false, ..Default::default() };
-    let c1 = ProcessSecurityContext { is_elevated: true, ..Default::default() };
+    let p1 = ProcessSecurityContext {
+        is_elevated: false,
+        ..Default::default()
+    };
+    let c1 = ProcessSecurityContext {
+        is_elevated: true,
+        ..Default::default()
+    };
     let deltas1 = evaluate_security_context_delta(&p1, &c1);
     assert!(deltas1.contains(&SecurityContextDelta::WindowsTokenElevation));
 
     // 2. Both elevated: true -> true: No delta
-    let p2 = ProcessSecurityContext { is_elevated: true, ..Default::default() };
-    let c2 = ProcessSecurityContext { is_elevated: true, ..Default::default() };
+    let p2 = ProcessSecurityContext {
+        is_elevated: true,
+        ..Default::default()
+    };
+    let c2 = ProcessSecurityContext {
+        is_elevated: true,
+        ..Default::default()
+    };
     let deltas2 = evaluate_security_context_delta(&p2, &c2);
     assert_eq!(deltas2, vec![SecurityContextDelta::CleanIdentityPreserved]);
 
     // 3. Session 1 -> Session 0: Service isolation crossing
-    let p3 = ProcessSecurityContext { session_id: 1, ..Default::default() };
-    let c3 = ProcessSecurityContext { session_id: 0, ..Default::default() };
+    let p3 = ProcessSecurityContext {
+        session_id: 1,
+        ..Default::default()
+    };
+    let c3 = ProcessSecurityContext {
+        session_id: 0,
+        ..Default::default()
+    };
     let deltas3 = evaluate_security_context_delta(&p3, &c3);
-    assert!(deltas3.contains(&SecurityContextDelta::WindowsSession0Transition {
-        parent_session: 1,
-    }));
+    assert!(
+        deltas3.contains(&SecurityContextDelta::WindowsSession0Transition { parent_session: 1 })
+    );
 
     // 4. Session 2 (RDP/secondary user) -> Session 0
-    let p4 = ProcessSecurityContext { session_id: 2, ..Default::default() };
-    let c4 = ProcessSecurityContext { session_id: 0, ..Default::default() };
+    let p4 = ProcessSecurityContext {
+        session_id: 2,
+        ..Default::default()
+    };
+    let c4 = ProcessSecurityContext {
+        session_id: 0,
+        ..Default::default()
+    };
     let deltas4 = evaluate_security_context_delta(&p4, &c4);
-    assert!(deltas4.contains(&SecurityContextDelta::WindowsSession0Transition {
-        parent_session: 2,
-    }));
+    assert!(
+        deltas4.contains(&SecurityContextDelta::WindowsSession0Transition { parent_session: 2 })
+    );
 
     // 5. Session 0 -> Session 0: Clean service child
-    let p5 = ProcessSecurityContext { session_id: 0, ..Default::default() };
-    let c5 = ProcessSecurityContext { session_id: 0, ..Default::default() };
+    let p5 = ProcessSecurityContext {
+        session_id: 0,
+        ..Default::default()
+    };
+    let c5 = ProcessSecurityContext {
+        session_id: 0,
+        ..Default::default()
+    };
     let deltas5 = evaluate_security_context_delta(&p5, &c5);
     assert_eq!(deltas5, vec![SecurityContextDelta::CleanIdentityPreserved]);
 
     // 6. Session 1 -> Session 1: Clean desktop child
-    let p6 = ProcessSecurityContext { session_id: 1, ..Default::default() };
-    let c6 = ProcessSecurityContext { session_id: 1, ..Default::default() };
+    let p6 = ProcessSecurityContext {
+        session_id: 1,
+        ..Default::default()
+    };
+    let c6 = ProcessSecurityContext {
+        session_id: 1,
+        ..Default::default()
+    };
     let deltas6 = evaluate_security_context_delta(&p6, &c6);
     assert_eq!(deltas6, vec![SecurityContextDelta::CleanIdentityPreserved]);
 }
@@ -463,12 +591,12 @@ fn test_challenge_simultaneous_multi_vector_escalation() {
 
     let child = ProcessSecurityContext {
         pid: 101,
-        euid: 0,                                 // EUID escalation
-        capabilities: 0x00200080,               // CapEff expansion
+        euid: 0,                                                // EUID escalation
+        capabilities: 0x00200080,                               // CapEff expansion
         namespaces: HashMap::from([("mnt".to_string(), 1002)]), // Namespace divergence
-        integrity_rid: 0x3000,                  // Integrity escalation
-        is_elevated: true,                      // TokenElevation
-        session_id: 0,                          // Session 0 transition
+        integrity_rid: 0x3000,                                  // Integrity escalation
+        is_elevated: true,                                      // TokenElevation
+        session_id: 0,                                          // Session 0 transition
     };
 
     let deltas = evaluate_security_context_delta(&parent, &child);
@@ -477,20 +605,24 @@ fn test_challenge_simultaneous_multi_vector_escalation() {
         parent_euid: 1000,
         child_euid: 0,
     }));
-    assert!(deltas.contains(&SecurityContextDelta::LinuxCapabilityExpansion {
-        added_capabilities: 0x00200080,
-    }));
-    assert!(deltas.contains(&SecurityContextDelta::LinuxNamespaceTransition {
-        namespaces: vec!["mnt".to_string()],
-    }));
-    assert!(deltas.contains(&SecurityContextDelta::WindowsIntegrityEscalation {
-        parent_rid: 0x2000,
-        child_rid: 0x3000,
-    }));
+    assert!(
+        deltas.contains(&SecurityContextDelta::LinuxCapabilityExpansion {
+            added_capabilities: 0x00200080,
+        })
+    );
+    assert!(
+        deltas.contains(&SecurityContextDelta::LinuxNamespaceTransition {
+            namespaces: vec!["mnt".to_string()],
+        })
+    );
+    assert!(
+        deltas.contains(&SecurityContextDelta::WindowsIntegrityEscalation {
+            parent_rid: 0x2000,
+            child_rid: 0x3000,
+        })
+    );
     assert!(deltas.contains(&SecurityContextDelta::WindowsTokenElevation));
-    assert!(deltas.contains(&SecurityContextDelta::WindowsSession0Transition {
-        parent_session: 1,
-    }));
+    assert!(deltas.contains(&SecurityContextDelta::WindowsSession0Transition { parent_session: 1 }));
 
     // Every delta is confirmed as privilege escalation
     assert!(deltas.iter().all(|d| d.is_privilege_escalation()));
@@ -515,7 +647,10 @@ fn test_challenge_live_process_security_context_query_boundaries() {
 
     // 3. Parent-child token delta on current process vs itself must yield clean identity
     let self_deltas = observe_parent_child_token_delta(cur_pid, cur_pid);
-    assert_eq!(self_deltas, vec![SecurityContextDelta::CleanIdentityPreserved]);
+    assert_eq!(
+        self_deltas,
+        vec![SecurityContextDelta::CleanIdentityPreserved]
+    );
 }
 
 // =============================================================================
@@ -718,7 +853,9 @@ async fn test_challenge_agent_child_process_adjudication_not_vetoed_at_layer1() 
         0.99,
         EvidenceClass::Behavior,
     );
-    let kernel_result = adjudicator.adjudicate_threat_candidate(&kernel_candidate, None).await;
+    let kernel_result = adjudicator
+        .adjudicate_threat_candidate(&kernel_candidate, None)
+        .await;
     assert!(kernel_result.is_vetoed());
     assert_eq!(kernel_result.confidence(), 0.0);
 
@@ -732,10 +869,13 @@ async fn test_challenge_agent_child_process_adjudication_not_vetoed_at_layer1() 
         0.90,
         EvidenceClass::Behavior,
     );
-    let child_result = adjudicator.adjudicate_threat_candidate(&child_candidate, None).await;
+    let child_result = adjudicator
+        .adjudicate_threat_candidate(&child_candidate, None)
+        .await;
 
     // It should NOT be vetoed under CriticalSystemPid
-    if let killswitch_types::adjudication::AdjudicationResult::Vetoed { reason, .. } = child_result {
+    if let killswitch_types::adjudication::AdjudicationResult::Vetoed { reason, .. } = child_result
+    {
         assert_ne!(
             reason,
             VetoReason::CriticalSystemPid,
@@ -806,7 +946,10 @@ fn test_challenge_hardlinks_on_disk() {
     priv_pe[0x41] = b'E';
     priv_pe.extend_from_slice(br#"<requestedExecutionLevel level="requireAdministrator" />"#);
 
-    File::create(&target_path).unwrap().write_all(&priv_pe).unwrap();
+    File::create(&target_path)
+        .unwrap()
+        .write_all(&priv_pe)
+        .unwrap();
 
     let hardlink_path = dir.path().join("hardlink_worker.bin");
     std::fs::hard_link(&target_path, &hardlink_path).expect("create hardlink");
@@ -822,29 +965,54 @@ fn test_challenge_hardlinks_on_disk() {
 #[test]
 fn test_challenge_parent_child_token_delta_extreme_values() {
     // 1. Extreme EUID delta: u32::MAX -> 0
-    let p1 = ProcessSecurityContext { euid: u32::MAX, ..Default::default() };
-    let c1 = ProcessSecurityContext { euid: 0, ..Default::default() };
+    let p1 = ProcessSecurityContext {
+        euid: u32::MAX,
+        ..Default::default()
+    };
+    let c1 = ProcessSecurityContext {
+        euid: 0,
+        ..Default::default()
+    };
     let deltas1 = evaluate_security_context_delta(&p1, &c1);
     assert_eq!(
         deltas1,
-        vec![SecurityContextDelta::LinuxEuidEscalation { parent_euid: u32::MAX, child_euid: 0 }]
+        vec![SecurityContextDelta::LinuxEuidEscalation {
+            parent_euid: u32::MAX,
+            child_euid: 0
+        }]
     );
 
     // 2. Maximum capability bitmask expansion: 0 -> u64::MAX
-    let p2 = ProcessSecurityContext { capabilities: 0, ..Default::default() };
-    let c2 = ProcessSecurityContext { capabilities: u64::MAX, ..Default::default() };
+    let p2 = ProcessSecurityContext {
+        capabilities: 0,
+        ..Default::default()
+    };
+    let c2 = ProcessSecurityContext {
+        capabilities: u64::MAX,
+        ..Default::default()
+    };
     let deltas2 = evaluate_security_context_delta(&p2, &c2);
     assert_eq!(
         deltas2,
-        vec![SecurityContextDelta::LinuxCapabilityExpansion { added_capabilities: u64::MAX }]
+        vec![SecurityContextDelta::LinuxCapabilityExpansion {
+            added_capabilities: u64::MAX
+        }]
     );
 
     // 3. Extreme session transition: u32::MAX -> 0
-    let p3 = ProcessSecurityContext { session_id: u32::MAX, ..Default::default() };
-    let c3 = ProcessSecurityContext { session_id: 0, ..Default::default() };
+    let p3 = ProcessSecurityContext {
+        session_id: u32::MAX,
+        ..Default::default()
+    };
+    let c3 = ProcessSecurityContext {
+        session_id: 0,
+        ..Default::default()
+    };
     let deltas3 = evaluate_security_context_delta(&p3, &c3);
     assert_eq!(
         deltas3,
-        vec![SecurityContextDelta::WindowsSession0Transition { parent_session: u32::MAX }]
+        vec![SecurityContextDelta::WindowsSession0Transition {
+            parent_session: u32::MAX
+        }]
     );
 }

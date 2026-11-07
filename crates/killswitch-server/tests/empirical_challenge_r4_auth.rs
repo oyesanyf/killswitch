@@ -3,18 +3,17 @@
 //!
 //! Author: challenger_sec4_1 (teamwork_challenger)
 
-use std::net::SocketAddr;
-use std::sync::Arc;
 use axum::body::Body;
 use axum::extract::ConnectInfo;
 use axum::http::{Request, StatusCode};
+use std::net::SocketAddr;
+use std::sync::Arc;
 use subtle::ConstantTimeEq;
 use tower::ServiceExt;
 
 use killswitch_core::killchain::HostContainmentManager;
 use killswitch_server::auth::{
-    constant_time_token_match, extract_token_from_headers,
-    verify_control_plane_request_with_token,
+    constant_time_token_match, extract_token_from_headers, verify_control_plane_request_with_token,
     AuthVerdict, DEFAULT_CONTROL_PLANE_HEADER,
 };
 use killswitch_server::routes::build_router;
@@ -46,8 +45,14 @@ fn test_timing_resistance_subtle_ct_eq() {
     assert!(constant_time_token_match(expected, expected));
 
     // Whitespace trimming behavior
-    assert!(constant_time_token_match(&format!("  {}  ", expected), expected));
-    assert!(constant_time_token_match(expected, &format!("  {}  \n", expected)));
+    assert!(constant_time_token_match(
+        &format!("  {}  ", expected),
+        expected
+    ));
+    assert!(constant_time_token_match(
+        expected,
+        &format!("  {}  \n", expected)
+    ));
 
     // Differing lengths must reject
     assert!(!constant_time_token_match("short", expected));
@@ -84,12 +89,18 @@ fn test_header_extraction_sanitization() {
     // 1. Bearer standard
     let mut headers = HeaderMap::new();
     headers.insert("authorization", "Bearer my_secret_token".parse().unwrap());
-    assert_eq!(extract_token_from_headers(&headers), Some("my_secret_token".to_string()));
+    assert_eq!(
+        extract_token_from_headers(&headers),
+        Some("my_secret_token".to_string())
+    );
 
     // 2. Lowercase bearer
     let mut headers = HeaderMap::new();
     headers.insert("authorization", "bearer my_secret_token".parse().unwrap());
-    assert_eq!(extract_token_from_headers(&headers), Some("my_secret_token".to_string()));
+    assert_eq!(
+        extract_token_from_headers(&headers),
+        Some("my_secret_token".to_string())
+    );
 
     // 3. Malformed "Bearer " (empty)
     let mut headers = HeaderMap::new();
@@ -103,8 +114,14 @@ fn test_header_extraction_sanitization() {
 
     // 5. X-KillSwitch-Token standard
     let mut headers = HeaderMap::new();
-    headers.insert(DEFAULT_CONTROL_PLANE_HEADER, "custom_x_token".parse().unwrap());
-    assert_eq!(extract_token_from_headers(&headers), Some("custom_x_token".to_string()));
+    headers.insert(
+        DEFAULT_CONTROL_PLANE_HEADER,
+        "custom_x_token".parse().unwrap(),
+    );
+    assert_eq!(
+        extract_token_from_headers(&headers),
+        Some("custom_x_token".to_string())
+    );
 
     // 6. X-KillSwitch-Token empty
     let mut headers = HeaderMap::new();
@@ -133,41 +150,90 @@ fn test_verification_oracle_unauthenticated_and_malformed_tokens() {
 
     // Empty tokens
     assert_eq!(
-        verify_control_plane_request_with_token(Some(""), None, Some(100), 100, &frozen_pids, expected),
+        verify_control_plane_request_with_token(
+            Some(""),
+            None,
+            Some(100),
+            100,
+            &frozen_pids,
+            expected
+        ),
         AuthVerdict::Unauthorized401
     );
     assert_eq!(
-        verify_control_plane_request_with_token(None, Some("   "), Some(100), 100, &frozen_pids, expected),
+        verify_control_plane_request_with_token(
+            None,
+            Some("   "),
+            Some(100),
+            100,
+            &frozen_pids,
+            expected
+        ),
         AuthVerdict::Unauthorized401
     );
 
     // Random fake token
     assert_eq!(
-        verify_control_plane_request_with_token(Some("bad_token_123"), None, Some(100), 100, &frozen_pids, expected),
+        verify_control_plane_request_with_token(
+            Some("bad_token_123"),
+            None,
+            Some(100),
+            100,
+            &frozen_pids,
+            expected
+        ),
         AuthVerdict::Unauthorized401
     );
 
     // Confirmation phrase "CONFIRM ISOLATE" against expected master token must FAIL in standalone oracle
     assert_eq!(
-        verify_control_plane_request_with_token(Some(KILLCHAIN_ISOLATE_CONFIRMATION_PHRASE), None, Some(100), 100, &frozen_pids, expected),
+        verify_control_plane_request_with_token(
+            Some(KILLCHAIN_ISOLATE_CONFIRMATION_PHRASE),
+            None,
+            Some(100),
+            100,
+            &frozen_pids,
+            expected
+        ),
         AuthVerdict::Unauthorized401
     );
 
     // Valid master token -> Authorized
     assert_eq!(
-        verify_control_plane_request_with_token(Some(expected), None, Some(100), 100, &frozen_pids, expected),
+        verify_control_plane_request_with_token(
+            Some(expected),
+            None,
+            Some(100),
+            100,
+            &frozen_pids,
+            expected
+        ),
         AuthVerdict::Authorized
     );
 
     // Caller PID spoofing: claimed 100 != actual 200
     assert_eq!(
-        verify_control_plane_request_with_token(Some(expected), None, Some(100), 200, &frozen_pids, expected),
+        verify_control_plane_request_with_token(
+            Some(expected),
+            None,
+            Some(100),
+            200,
+            &frozen_pids,
+            expected
+        ),
         AuthVerdict::Forbidden403PidSpoofing
     );
 
     // Quarantined caller: actual 400 is in frozen_pids
     assert_eq!(
-        verify_control_plane_request_with_token(Some(expected), None, Some(400), 400, &frozen_pids, expected),
+        verify_control_plane_request_with_token(
+            Some(expected),
+            None,
+            Some(400),
+            400,
+            &frozen_pids,
+            expected
+        ),
         AuthVerdict::Forbidden403CallerQuarantined
     );
 }
@@ -193,7 +259,11 @@ async fn test_http_engage_auth_boundaries() {
         .body(Body::from(serde_json::to_vec(&body).unwrap()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "Unauthenticated /engage must return 401");
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "Unauthenticated /engage must return 401"
+    );
 
     // Case 2: Empty token in body ("") -> 401
     let body = serde_json::json!({
@@ -208,7 +278,11 @@ async fn test_http_engage_auth_boundaries() {
         .body(Body::from(serde_json::to_vec(&body).unwrap()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "Empty token /engage must return 401");
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "Empty token /engage must return 401"
+    );
 
     // Case 3: Malformed Bearer header ("Bearer ") -> 401
     let body = serde_json::json!({
@@ -223,7 +297,11 @@ async fn test_http_engage_auth_boundaries() {
         .body(Body::from(serde_json::to_vec(&body).unwrap()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "Malformed Bearer header /engage must return 401");
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "Malformed Bearer header /engage must return 401"
+    );
 
     // Case 4: Random fake token ("bad_token_123") -> 401
     let body = serde_json::json!({
@@ -238,7 +316,11 @@ async fn test_http_engage_auth_boundaries() {
         .body(Body::from(serde_json::to_vec(&body).unwrap()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "Fake token /engage must return 401");
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "Fake token /engage must return 401"
+    );
 
     // Case 5: Confirmation phrase "CONFIRM ISOLATE" in body -> 200 OK
     let body = serde_json::json!({
@@ -253,7 +335,11 @@ async fn test_http_engage_auth_boundaries() {
         .body(Body::from(serde_json::to_vec(&body).unwrap()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK, "'CONFIRM ISOLATE' on /engage must succeed with 200");
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "'CONFIRM ISOLATE' on /engage must succeed with 200"
+    );
 
     // Case 6: Valid cryptographic control token in Authorization header -> 200 OK
     let body = serde_json::json!({
@@ -264,11 +350,18 @@ async fn test_http_engage_auth_boundaries() {
         .uri("/engage")
         .method("POST")
         .header("Content-Type", "application/json")
-        .header("Authorization", format!("Bearer {}", CHALLENGE_MASTER_TOKEN))
+        .header(
+            "Authorization",
+            format!("Bearer {}", CHALLENGE_MASTER_TOKEN),
+        )
         .body(Body::from(serde_json::to_vec(&body).unwrap()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK, "Valid cryptographic token on /engage must succeed with 200");
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "Valid cryptographic token on /engage must succeed with 200"
+    );
 }
 
 // ============================================================================
@@ -294,7 +387,11 @@ async fn test_http_mode_auth_boundaries() {
         .unwrap();
     req.extensions_mut().insert(ConnectInfo(loopback_addr));
     let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "Unauthenticated loopback /mode must return 401");
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "Unauthenticated loopback /mode must return 401"
+    );
 
     // Case 2: Confirmation phrase "CONFIRM ISOLATE" must FAIL with 401 on /mode
     let body = serde_json::json!({
@@ -310,7 +407,11 @@ async fn test_http_mode_auth_boundaries() {
         .unwrap();
     req.extensions_mut().insert(ConnectInfo(loopback_addr));
     let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "'CONFIRM ISOLATE' must FAIL on /mode with 401");
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "'CONFIRM ISOLATE' must FAIL on /mode with 401"
+    );
 
     // Case 3: Empty token ("") -> 401
     let body = serde_json::json!({
@@ -326,7 +427,11 @@ async fn test_http_mode_auth_boundaries() {
         .unwrap();
     req.extensions_mut().insert(ConnectInfo(loopback_addr));
     let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "Empty token on /mode must return 401");
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "Empty token on /mode must return 401"
+    );
 
     // Case 4: Malformed Bearer header ("Bearer ") -> 401
     let body = serde_json::json!({
@@ -342,7 +447,11 @@ async fn test_http_mode_auth_boundaries() {
         .unwrap();
     req.extensions_mut().insert(ConnectInfo(loopback_addr));
     let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "Malformed Bearer on /mode must return 401");
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "Malformed Bearer on /mode must return 401"
+    );
 
     // Case 5: Fake token ("bad_token_123") -> 401
     let body = serde_json::json!({
@@ -358,7 +467,11 @@ async fn test_http_mode_auth_boundaries() {
         .unwrap();
     req.extensions_mut().insert(ConnectInfo(loopback_addr));
     let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "Fake token on /mode must return 401");
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "Fake token on /mode must return 401"
+    );
 
     // Case 6: Valid cryptographic control token -> 200 OK
     let body = serde_json::json!({
@@ -369,12 +482,19 @@ async fn test_http_mode_auth_boundaries() {
         .uri("/mode")
         .method("POST")
         .header("Content-Type", "application/json")
-        .header("Authorization", format!("Bearer {}", CHALLENGE_MASTER_TOKEN))
+        .header(
+            "Authorization",
+            format!("Bearer {}", CHALLENGE_MASTER_TOKEN),
+        )
         .body(Body::from(serde_json::to_vec(&body).unwrap()))
         .unwrap();
     req.extensions_mut().insert(ConnectInfo(loopback_addr));
     let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK, "Valid cryptographic token on /mode must succeed with 200");
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "Valid cryptographic token on /mode must succeed with 200"
+    );
 }
 
 // ============================================================================
@@ -402,7 +522,11 @@ async fn test_http_rl_learn_auth_boundaries() {
         .body(Body::from(serde_json::to_vec(&base_rl_body).unwrap()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "Unauthenticated /rl/learn must return 401");
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "Unauthenticated /rl/learn must return 401"
+    );
 
     // Case 2: Confirmation phrase "CONFIRM ISOLATE" must FAIL with 401
     let mut body_confirm = base_rl_body.clone();
@@ -414,7 +538,11 @@ async fn test_http_rl_learn_auth_boundaries() {
         .body(Body::from(serde_json::to_vec(&body_confirm).unwrap()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "'CONFIRM ISOLATE' on /rl/learn must return 401");
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "'CONFIRM ISOLATE' on /rl/learn must return 401"
+    );
 
     // Case 3: Empty token ("") -> 401
     let mut body_empty = base_rl_body.clone();
@@ -426,7 +554,11 @@ async fn test_http_rl_learn_auth_boundaries() {
         .body(Body::from(serde_json::to_vec(&body_empty).unwrap()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "Empty token on /rl/learn must return 401");
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "Empty token on /rl/learn must return 401"
+    );
 
     // Case 4: Malformed Bearer ("Bearer ") -> 401
     let req = Request::builder()
@@ -437,7 +569,11 @@ async fn test_http_rl_learn_auth_boundaries() {
         .body(Body::from(serde_json::to_vec(&base_rl_body).unwrap()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "Malformed Bearer on /rl/learn must return 401");
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "Malformed Bearer on /rl/learn must return 401"
+    );
 
     // Case 5: Fake token ("bad_token_123") -> 401
     let mut body_fake = base_rl_body.clone();
@@ -449,7 +585,11 @@ async fn test_http_rl_learn_auth_boundaries() {
         .body(Body::from(serde_json::to_vec(&body_fake).unwrap()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "Fake token on /rl/learn must return 401");
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "Fake token on /rl/learn must return 401"
+    );
 
     // Case 6: Valid cryptographic control token -> 200 OK
     let req = Request::builder()
@@ -460,7 +600,11 @@ async fn test_http_rl_learn_auth_boundaries() {
         .body(Body::from(serde_json::to_vec(&base_rl_body).unwrap()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK, "Valid cryptographic token on /rl/learn must succeed with 200");
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "Valid cryptographic token on /rl/learn must succeed with 200"
+    );
 }
 
 // ============================================================================
@@ -487,7 +631,11 @@ async fn test_http_rate_limit_allowlist_auth_boundaries() {
         .body(Body::from(serde_json::to_vec(&base_body).unwrap()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "Unauthenticated /rate-limit/allowlist must return 401");
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "Unauthenticated /rate-limit/allowlist must return 401"
+    );
 
     // Case 2: Confirmation phrase "CONFIRM ISOLATE" must FAIL with 401
     let mut body_confirm = base_body.clone();
@@ -499,7 +647,11 @@ async fn test_http_rate_limit_allowlist_auth_boundaries() {
         .body(Body::from(serde_json::to_vec(&body_confirm).unwrap()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "'CONFIRM ISOLATE' on /rate-limit/allowlist must return 401");
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "'CONFIRM ISOLATE' on /rate-limit/allowlist must return 401"
+    );
 
     // Case 3: Empty token ("") -> 401
     let mut body_empty = base_body.clone();
@@ -511,7 +663,11 @@ async fn test_http_rate_limit_allowlist_auth_boundaries() {
         .body(Body::from(serde_json::to_vec(&body_empty).unwrap()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "Empty token on /rate-limit/allowlist must return 401");
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "Empty token on /rate-limit/allowlist must return 401"
+    );
 
     // Case 4: Malformed Bearer ("Bearer ") -> 401
     let req = Request::builder()
@@ -522,7 +678,11 @@ async fn test_http_rate_limit_allowlist_auth_boundaries() {
         .body(Body::from(serde_json::to_vec(&base_body).unwrap()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "Malformed Bearer on /rate-limit/allowlist must return 401");
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "Malformed Bearer on /rate-limit/allowlist must return 401"
+    );
 
     // Case 5: Fake token ("bad_token_123") -> 401
     let mut body_fake = base_body.clone();
@@ -534,18 +694,29 @@ async fn test_http_rate_limit_allowlist_auth_boundaries() {
         .body(Body::from(serde_json::to_vec(&body_fake).unwrap()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "Fake token on /rate-limit/allowlist must return 401");
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "Fake token on /rate-limit/allowlist must return 401"
+    );
 
     // Case 6: Valid cryptographic control token -> 200 OK
     let req = Request::builder()
         .uri("/rate-limit/allowlist")
         .method("POST")
         .header("Content-Type", "application/json")
-        .header("Authorization", format!("Bearer {}", CHALLENGE_MASTER_TOKEN))
+        .header(
+            "Authorization",
+            format!("Bearer {}", CHALLENGE_MASTER_TOKEN),
+        )
         .body(Body::from(serde_json::to_vec(&base_body).unwrap()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK, "Valid cryptographic token on /rate-limit/allowlist must succeed with 200");
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "Valid cryptographic token on /rate-limit/allowlist must succeed with 200"
+    );
 }
 
 // ============================================================================
@@ -582,7 +753,11 @@ fn setup_challenge_state_with_frozen_pid(frozen_pid: u32) -> Arc<ServerState> {
 #[tokio::test]
 async fn test_http_quarantined_caller_pid_rejection() {
     let state = setup_challenge_state_with_frozen_pid(7777);
-    assert!(state.containment_manager.get_status().frozen_pids.contains(&7777));
+    assert!(state
+        .containment_manager
+        .get_status()
+        .frozen_pids
+        .contains(&7777));
 
     let app = build_router(state);
 
@@ -697,11 +872,17 @@ async fn test_live_tcp_loopback_caller_pid_spoofing_detection() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let local_addr = listener.local_addr().unwrap();
     let port = local_addr.port();
-    state.active_bound_port.store(port, std::sync::atomic::Ordering::SeqCst);
+    state
+        .active_bound_port
+        .store(port, std::sync::atomic::Ordering::SeqCst);
 
     let app = build_router(state);
     let server_handle = tokio::spawn(async move {
-        let _ = axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await;
+        let _ = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await;
     });
 
     // Give server a moment to spin up
@@ -719,11 +900,7 @@ async fn test_live_tcp_loopback_caller_pid_spoofing_detection() {
         "caller_pid": my_pid + 99999
     });
 
-    let resp = client.post(&url)
-        .json(&spoof_body)
-        .send()
-        .await
-        .unwrap();
+    let resp = client.post(&url).json(&spoof_body).send().await.unwrap();
 
     assert_eq!(
         resp.status(),
@@ -733,8 +910,7 @@ async fn test_live_tcp_loopback_caller_pid_spoofing_detection() {
 
     let err_json: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(
-        err_json["error"]["code"],
-        "CALLER_PID_SPOOFED",
+        err_json["error"]["code"], "CALLER_PID_SPOOFED",
         "Error code must be CALLER_PID_SPOOFED"
     );
 
@@ -746,11 +922,7 @@ async fn test_live_tcp_loopback_caller_pid_spoofing_detection() {
         "caller_pid": my_pid
     });
 
-    let resp_legit = client.post(&url)
-        .json(&legit_body)
-        .send()
-        .await
-        .unwrap();
+    let resp_legit = client.post(&url).json(&legit_body).send().await.unwrap();
 
     assert_eq!(
         resp_legit.status(),
@@ -760,4 +932,3 @@ async fn test_live_tcp_loopback_caller_pid_spoofing_detection() {
 
     server_handle.abort();
 }
-

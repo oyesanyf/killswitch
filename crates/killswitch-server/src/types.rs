@@ -404,8 +404,6 @@ pub struct TpmStatusResponse {
     pub status_detail: String,
 }
 
-
-
 // =============================================================================
 // NASA JPL F' (F Prime) Flight-Software Command & Telemetry DTOs
 // =============================================================================
@@ -506,7 +504,6 @@ pub struct ResearchIngestResponse {
     #[serde(default)]
     pub calibrated_sources_total: usize,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LangGraphSwarmRequest {
@@ -755,7 +752,6 @@ pub struct ResearchClearResponse {
     pub timestamp: String,
 }
 
-
 // =============================================================================
 // Continuous EDR Behavioral Anomaly, Process Lineage Tree & Baseline DTOs
 // =============================================================================
@@ -776,7 +772,6 @@ pub struct EdrBehavioralIngestResponse {
     pub status: killswitch_telemetry::EdrBehavioralStatusReport,
     pub timestamp: String,
 }
-
 
 // =============================================================================
 // 16. OshoosiClaw Migrated Modules: Oso/AWS R1-R5, APC, Tamper Guard & HITL
@@ -870,12 +865,12 @@ impl CageVerifyTracePayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JwkKeyDto {
-    pub kty: String,       // "OKP"
-    pub crv: String,       // "Ed25519"
-    pub kid: String,       // 64-hex SHA-256 of public key
-    pub x: String,         // base64url-encoded public key (32 bytes, unpadded)
-    pub r#use: String,     // "sig"
-    pub alg: String,       // "EdDSA"
+    pub kty: String,   // "OKP"
+    pub crv: String,   // "Ed25519"
+    pub kid: String,   // 64-hex SHA-256 of public key
+    pub x: String,     // base64url-encoded public key (32 bytes, unpadded)
+    pub r#use: String, // "sig"
+    pub alg: String,   // "EdDSA"
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -916,13 +911,13 @@ pub struct CageQuarantineReceiptResponse {
     pub quarantined: bool,         // true
     pub enforcement_plane: String, // "HOST_OS_KERNEL"
     pub rule_id: String,
-    pub quarantined_at: String,    // ISO 8601 / RFC 3339
+    pub quarantined_at: String, // ISO 8601 / RFC 3339
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_pid: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub envelope_digest: Option<String>,
-    pub kid: String,               // KillSwitch Ed25519 public key ID
-    pub signature: String,         // base64url Ed25519 signature over CAGE_QUARANTINE_RECEIPT_V1:<JCS>
+    pub kid: String,       // KillSwitch Ed25519 public key ID
+    pub signature: String, // base64url Ed25519 signature over CAGE_QUARANTINE_RECEIPT_V1:<JCS>
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -946,23 +941,23 @@ pub struct CageQuarantineReleaseReceiptResponse {
     pub enforcement_plane: String, // "HOST_OS_KERNEL"
     pub epoch_before: u64,
     pub epoch_after: u64,
-    pub outcome: String,           // "RELEASED"
+    pub outcome: String, // "RELEASED"
     pub released_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub envelope_digest: Option<String>,
     pub kid: String,
-    pub signature: String,         // base64url Ed25519 signature over CAGE_QUARANTINE_RELEASE_RECEIPT_V1:<JCS>
+    pub signature: String, // base64url Ed25519 signature over CAGE_QUARANTINE_RELEASE_RECEIPT_V1:<JCS>
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CageAttestationResponse {
-    pub attestation_type: String,  // "HOST_TPM_PCR"
-    pub ring0_posture: String,     // "ACTIVE_WFP_FILTERED" | "ACTIVE_RING0_ENFORCED"
-    pub tpm_pcr_quote: String,     // 64-hex SHA-256 quote of PCRs 0..7
+    pub attestation_type: String, // "HOST_TPM_PCR"
+    pub ring0_posture: String,    // "ACTIVE_WFP_FILTERED" | "ACTIVE_RING0_ENFORCED"
+    pub tpm_pcr_quote: String,    // 64-hex SHA-256 quote of PCRs 0..7
     pub pcr_values: std::collections::BTreeMap<String, String>,
-    pub timestamp_utc: String,     // ISO 8601 / RFC 3339
-    pub kid: String,               // KillSwitch Ed25519 public key ID
-    pub signature: String,         // base64url Ed25519 signature over CAGE_ATTESTATION_RECEIPT_V1:<JCS>
+    pub timestamp_utc: String, // ISO 8601 / RFC 3339
+    pub kid: String,           // KillSwitch Ed25519 public key ID
+    pub signature: String,     // base64url Ed25519 signature over CAGE_ATTESTATION_RECEIPT_V1:<JCS>
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1025,4 +1020,3 @@ pub struct RateLimitAllowlistRequest {
     #[serde(default)]
     pub token: Option<String>,
 }
-
