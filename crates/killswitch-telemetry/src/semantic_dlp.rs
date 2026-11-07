@@ -236,7 +236,7 @@ impl RedactXStructuredValidator {
     /// Scans text for Payment Card Numbers (PAN) passing the Luhn algorithm.
     pub fn pan_scan(text: &str) -> Vec<String> {
         let mut found = Vec::new();
-        for token in text.split(|c: char| c.is_whitespace() || matches!(c, ',' | ';' | ':' | '(' | ')' | '[' | ']')) {
+        for token in tokenize_dlp_payload(text) {
             let digits: String = token.chars().filter(|c| c.is_ascii_digit()).collect();
             if (digits.len() >= 13 && digits.len() <= 19) && luhn_check(&digits) {
                 found.push(digits);
@@ -254,7 +254,7 @@ impl RedactXStructuredValidator {
             || lower.contains("chart number");
         let mut found = Vec::new();
         if has_context {
-            for word in text.split_whitespace() {
+            for word in tokenize_dlp_payload(text) {
                 let clean = word.trim_matches(|c: char| !c.is_ascii_alphanumeric());
                 if clean.len() >= 6 && clean.len() <= 12 && Self::mod11_valid(clean) {
                     found.push(clean.to_string());
@@ -390,7 +390,7 @@ impl GlinerSpanNerEngine {
     /// Extracts candidate entity spans (<= 12 words) from text.
     pub fn extract_spans(&self, text: &str) -> Vec<GlinerSpanMatch> {
         let mut matches = Vec::new();
-        let words: Vec<&str> = text.split_whitespace().collect();
+        let words: Vec<&str> = tokenize_dlp_payload(text).collect();
 
         // Check 1-word and 2-word spans
         for (i, &word) in words.iter().enumerate() {
@@ -473,8 +473,8 @@ impl PresidioGlinerPiiZeroGuard {
         let mut count = 0;
 
         // Redact SSNs
-        for word in text.split_whitespace() {
-            let clean = word.trim_matches([',', ';', '.', ':', '(', ')', '[', ']']);
+        for word in tokenize_dlp_payload(text) {
+            let clean = word.trim_matches([',', ';', '.', ':', '(', ')', '[', ']', '{', '}', '"', '\'']);
             let parts: Vec<&str> = clean.split('-').collect();
             if parts.len() == 3 && RedactXStructuredValidator::ssn_valid(parts[0], parts[1], parts[2]) {
                 let digest = blake3::hash(clean.as_bytes()).to_hex().to_string();
@@ -502,6 +502,71 @@ impl PresidioGlinerPiiZeroGuard {
 
         (scrubbed, proof)
     }
+}
+
+// =============================================================================
+// Structural Delimiter Tokenization for Compact JSON, Query Strings & Payloads
+// =============================================================================
+
+/// Returns true if character `c` is a structural syntax delimiter in JSON, query strings,
+/// CLI flags, headers, or code syntax that should segment tokens during DLP scanning.
+/// Note: Hyphens `-` (used in SSNs `123-45-6789`) and underscores `_` (used in `ghp_...`)
+/// are preserved inside tokens.
+#[inline]
+pub fn is_dlp_structural_delimiter(c: char) -> bool {
+    c.is_whitespace()
+        || c.is_control()
+        || matches!(
+            c,
+            '{' | '}'
+                | '[' | ']'
+                | '(' | ')'
+                | '<' | '>'
+                | ':' | ';' | ','
+                | '"' | '\'' | '`'
+                | '=' | '&' | '?'
+                | '\\' | '/' | '|'
+        )
+}
+
+/// Tokenizes an input payload into candidate subslice tokens by splitting on
+/// whitespace, control characters, and structural delimiters (`{}[]():;,"'=\&/?|`).
+/// Boundary punctuation is trimmed, and empty tokens are filtered out.
+pub fn tokenize_dlp_payload(payload: &str) -> impl Iterator<Item = &str> {
+    payload
+        .split(is_dlp_structural_delimiter)
+        .map(|tok| tok.trim_matches(['.', '!', '?', '`', '(', ')', '"', '\'']))
+        .filter(|tok| !tok.is_empty())
+}
+
+/// Returns true if character `c` is a structural delimiter for deal value parsing.
+/// Unlike `is_dlp_structural_delimiter`, this preserves internal commas in monetary numbers
+/// (such as `$1,000,000` or `USD 4,200,000`), while splitting on whitespace, curlies, brackets,
+/// colons, semicolons, quotes, equals, and ampersands.
+#[inline]
+pub fn is_dlp_deal_delimiter(c: char) -> bool {
+    c.is_whitespace()
+        || c.is_control()
+        || matches!(
+            c,
+            '{' | '}'
+                | '[' | ']'
+                | '(' | ')'
+                | '<' | '>'
+                | ':' | ';'
+                | '"' | '\'' | '`'
+                | '=' | '&' | '?'
+                | '\\' | '/' | '|'
+        )
+}
+
+/// Tokenizes an input payload for deal value parsing, preserving internal commas in numbers
+/// while trimming trailing/leading commas, colons, or punctuation from token boundaries.
+pub fn tokenize_dlp_deal_payload(payload: &str) -> impl Iterator<Item = &str> {
+    payload
+        .split(is_dlp_deal_delimiter)
+        .map(|tok| tok.trim_matches([',', ';', '.', '!', '?', '`', '(', ')', '"', '\'']))
+        .filter(|tok| !tok.is_empty())
 }
 
 // =============================================================================
@@ -665,13 +730,13 @@ impl SemanticDlpEngine {
         const ISO_CURRENCIES: &[&str] = &["USD", "EUR", "GBP", "CAD", "AUD", "CHF", "JPY"];
         const CURRENCY_SYMBOLS: &[char] = &['$', '€', '£', '¥'];
 
-        let tokens: Vec<&str> = payload.split_whitespace().collect();
+        let tokens: Vec<&str> = tokenize_dlp_deal_payload(payload).collect();
         let mut i = 0;
         let mut scan_cursor = 0;
 
         while i < tokens.len() {
             let token = tokens[i];
-            let trimmed = token.trim_matches([',', ';', ':', '(', ')', '[', ']', '"', '\'']);
+            let trimmed = token.trim_matches([',', ';', ':', '(', ')', '[', ']', '{', '}', '"', '\'', '\\', '=', '&']);
 
             // 1. Identify currency prefix and extract numeric candidate string
             enum CurrencyMatch<'a> {
@@ -709,7 +774,7 @@ impl SemanticDlpEngine {
             let (num_candidate, mut tokens_consumed, lookahead_idx) = match currency_match {
                 Some(CurrencyMatch::Attached(num_str)) => (num_str, 1, i + 1),
                 Some(CurrencyMatch::Separated) if i + 1 < tokens.len() => {
-                    let next_trimmed = tokens[i + 1].trim_matches([',', ';', ':', '(', ')', '[', ']', '"', '\'']);
+                    let next_trimmed = tokens[i + 1].trim_matches([',', ';', ':', '(', ')', '[', ']', '{', '}', '"', '\'', '\\', '=', '&']);
                     let num_clean = next_trimmed.trim_start_matches(['$', '€', '£', '¥']);
                     if num_clean.chars().next().map_or(false, |c| c.is_ascii_digit()) {
                         (num_clean, 2, i + 2)
@@ -819,8 +884,8 @@ impl SemanticDlpEngine {
             || lower.contains("patient id")
             || lower.contains("chart number");
 
-        for word in payload.split_whitespace() {
-            let trimmed = word.trim_matches([',', ';', '.', ':', '(', ')', '[', ']', '"', '\'']);
+        for word in tokenize_dlp_payload(payload) {
+            let trimmed = word.trim_matches([',', ';', '.', ':', '(', ')', '[', ']', '{', '}', '"', '\'', '\\', '=', '&']);
 
             // 1. SSN Check: \d{3}-\d{2}-\d{4}
             let parts: Vec<&str> = trimmed.split('-').collect();
@@ -830,7 +895,7 @@ impl SemanticDlpEngine {
                 && parts[2].len() == 4 && parts[2].chars().all(|c| c.is_ascii_digit())
             {
                 if RedactXStructuredValidator::ssn_valid(parts[0], parts[1], parts[2]) {
-                    let start = payload.find(trimmed).unwrap_or(0);
+                    let start = (trimmed.as_ptr() as usize).saturating_sub(payload.as_ptr() as usize);
                     let end = start + trimmed.len();
                     if !matches.iter().any(|m| m.span == (start, end)) {
                         matches.push(SemanticDlpEntity {
@@ -857,7 +922,7 @@ impl SemanticDlpEngine {
                     && candidate_npi.chars().all(|c| c.is_ascii_digit())
                     && RedactXStructuredValidator::npi_valid(candidate_npi)
                 {
-                    let start = payload.find(candidate_npi).unwrap_or(0);
+                    let start = (candidate_npi.as_ptr() as usize).saturating_sub(payload.as_ptr() as usize);
                     let end = start + candidate_npi.len();
                     if !matches.iter().any(|m| m.span == (start, end)) {
                         matches.push(SemanticDlpEntity {
@@ -879,7 +944,7 @@ impl SemanticDlpEngine {
                         && candidate_mrn.len() <= 12
                         && RedactXStructuredValidator::mod11_valid(candidate_mrn)
                     {
-                        let start = payload.find(candidate_mrn).unwrap_or(0);
+                        let start = (candidate_mrn.as_ptr() as usize).saturating_sub(payload.as_ptr() as usize);
                         let end = start + candidate_mrn.len();
                         if !matches.iter().any(|m| m.span == (start, end)) {
                             matches.push(SemanticDlpEntity {
@@ -961,15 +1026,16 @@ impl SemanticDlpEngine {
     }
 
     fn detect_financial_and_cards(&self, payload: &str, matches: &mut Vec<SemanticDlpEntity>) {
-        for word in payload.split_whitespace() {
+        for word in tokenize_dlp_payload(payload) {
             let clean: String = word.chars().filter(|c| c.is_ascii_digit()).collect();
             if (clean.len() >= 13 && clean.len() <= 19) && luhn_check(&clean) {
-                let start = payload.find(word).unwrap_or(0);
+                let start = (word.as_ptr() as usize).saturating_sub(payload.as_ptr() as usize);
+                let end = start + word.len();
                 matches.push(SemanticDlpEntity {
                     kind: SemanticEntityKind::PaymentCard,
                     raw: word.to_string(),
                     text: format!("****-****-****-{}", &clean[clean.len().saturating_sub(4)..]),
-                    span: (start, start + word.len()),
+                    span: (start, end),
                     confidence: 0.99,
                     classification: DlpClassification::CrownJewel,
                     policy: DlpPolicy::Quarantine,
@@ -979,26 +1045,28 @@ impl SemanticDlpEngine {
     }
 
     fn detect_secret_keys(&self, payload: &str, matches: &mut Vec<SemanticDlpEntity>) {
-        for word in payload.split_whitespace() {
-            let trimmed = word.trim_matches(['"', '\'', ';', ',']);
+        for word in tokenize_dlp_payload(payload) {
+            let trimmed = word.trim_matches(['"', '\'', ';', ',', '.', '{', '}', '[', ']', ':', '\\', '=', '&']);
             if (trimmed.starts_with("ghp_") || trimmed.starts_with("gho_")) && trimmed.len() >= 36 {
-                let start = payload.find(trimmed).unwrap_or(0);
+                let start = (trimmed.as_ptr() as usize).saturating_sub(payload.as_ptr() as usize);
+                let end = start + trimmed.len();
                 matches.push(SemanticDlpEntity {
                     kind: SemanticEntityKind::SecretKey,
                     raw: trimmed.to_string(),
                     text: "GitHub Personal Access Token".to_string(),
-                    span: (start, start + trimmed.len()),
+                    span: (start, end),
                     confidence: 0.99,
                     classification: DlpClassification::CrownJewel,
                     policy: DlpPolicy::Quarantine,
                 });
             } else if trimmed.starts_with("AKIA") && trimmed.len() == 20 && trimmed.chars().all(|c| c.is_ascii_alphanumeric()) {
-                let start = payload.find(trimmed).unwrap_or(0);
+                let start = (trimmed.as_ptr() as usize).saturating_sub(payload.as_ptr() as usize);
+                let end = start + trimmed.len();
                 matches.push(SemanticDlpEntity {
                     kind: SemanticEntityKind::SecretKey,
                     raw: trimmed.to_string(),
                     text: "AWS Access Key ID".to_string(),
-                    span: (start, start + trimmed.len()),
+                    span: (start, end),
                     confidence: 0.99,
                     classification: DlpClassification::CrownJewel,
                     policy: DlpPolicy::Quarantine,

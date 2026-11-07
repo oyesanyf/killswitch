@@ -89,6 +89,7 @@ fn test_siquery_telemetry_virtual_tables() {
         stderr: None,
         cwd: None,
         session_id: Some("test-session-sql".to_string()),
+        rpc_id: None,
     };
     let _dec = evaluate_hook_synchronously(&req);
 
