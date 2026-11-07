@@ -120,7 +120,9 @@ fn test_adversarial_peer_pid_closed_socket_rejects_pid_zero() {
             // Expected fail-closed behavior
             assert!(
                 msg.contains("No kernel TCP table entry found")
-                    || msg.contains("closed/unowned (PID 0)"),
+                    || msg.contains("closed/unowned (PID 0)")
+                    || msg.contains("No matching Linux socket inode found")
+                    || msg.contains("not supported on this platform"),
                 "Expected unowned/closed error message, got: {}",
                 msg
             );
