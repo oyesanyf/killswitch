@@ -70,6 +70,10 @@ fn test_adversarial_peer_pid_ipv4_mapped_ipv6_loopback() {
     let mapped_addr = SocketAddr::V6(SocketAddrV6::new(mapped_ip, client_v4.port(), 0, 0));
 
     let res = resolve_loopback_peer_pid(mapped_addr, server_port);
+    if cfg!(not(any(windows, target_os = "linux"))) {
+        assert!(matches!(res, Err(KillSwitchError::NativeOsError(_))));
+        return;
+    }
     assert!(
         res.is_ok(),
         "IPv4-mapped IPv6 loopback must successfully resolve caller PID from AF_INET table: {:?}",

@@ -65,6 +65,10 @@ fn test_stress_peer_pid_mismatched_caller_pid() {
 
     let my_pid = std::process::id();
     let resolved = resolve_loopback_peer_pid(client_addr, server_port);
+    if cfg!(not(any(windows, target_os = "linux"))) {
+        assert!(matches!(resolved, Err(KillSwitchError::NativeOsError(_))));
+        return;
+    }
     assert!(resolved.is_ok(), "Expected Ok PID, got {:?}", resolved);
     let actual_pid = resolved.unwrap();
     assert_eq!(
@@ -181,6 +185,10 @@ fn test_stress_peer_pid_ipv4_mapped_ipv6_loopback() {
         "🔬 [EMPIRICAL] IPv4-mapped IPv6 resolution result: {:?}",
         res
     );
+    if cfg!(not(any(windows, target_os = "linux"))) {
+        assert!(matches!(res, Err(KillSwitchError::NativeOsError(_))));
+        return;
+    }
     assert!(
         res.is_ok(),
         "IPv4-mapped IPv6 loopback must successfully resolve caller PID from AF_INET table: {:?}",
@@ -310,6 +318,10 @@ fn test_stress_peer_pid_concurrent_connections() {
         errors,
         num_threads * 5
     );
+    if cfg!(not(any(windows, target_os = "linux"))) {
+        assert_eq!(successes, 0);
+        return;
+    }
     assert!(
         successes > 0,
         "Expected at least some successful resolutions under high concurrency"
