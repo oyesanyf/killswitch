@@ -165,13 +165,15 @@ async fn test_server_orchestrator_step_and_state() {
     // 3. POST /mode
     let mode_body = serde_json::json!({
         "mode": "manual",
-        "operator": "test_lead"
+        "operator": "test_lead",
+        "token": TEST_MASTER_TOKEN
     });
 
     let req = Request::builder()
         .uri("/mode")
         .method("POST")
         .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {}", TEST_MASTER_TOKEN))
         .body(Body::from(serde_json::to_vec(&mode_body).unwrap()))
         .unwrap();
 

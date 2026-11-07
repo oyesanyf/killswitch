@@ -152,15 +152,10 @@ pub fn verify_control_plane_auth(
     let token_to_verify = match presented_token {
         Some(t) => t,
         None => {
-            // Over loopback socket (connect_info is Some) or endpoints other than /mode, require token
-            if connect_info.is_some() || endpoint_name != "/mode" {
-                return Err(ServerError::AuthenticationFailed(format!(
-                    "Missing required authentication token for control plane endpoint '{}'",
-                    endpoint_name
-                )));
-            }
-            // In-memory test harness on /mode without socket connection defaults to state control token
-            state.control_token.as_str()
+            return Err(ServerError::AuthenticationFailed(format!(
+                "Missing required authentication token for control plane endpoint '{}'",
+                endpoint_name
+            )));
         }
     };
 
