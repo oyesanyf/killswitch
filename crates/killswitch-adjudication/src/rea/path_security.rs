@@ -286,12 +286,21 @@ pub fn detect_binary_masquerade_spoof(
 
         let p = Path::new(raw);
         if p.is_file() {
-            let trust_verdict = crate::win_trust::verify_binary_cryptographic_trust(p);
-            if !trust_verdict.is_trusted() {
-                return Some(format!(
-                    "REA_MASQUERADE_SPOOF_DETECTED: Protected binary '{}' at '{}' lacks valid cryptographic signature or hash inventory verification",
-                    base_lower, raw
-                ));
+            let unix_norm = raw.replace('\\', "/").to_ascii_lowercase();
+            let is_system_os_dir = unix_norm.starts_with("/usr/bin/")
+                || unix_norm.starts_with("/bin/")
+                || unix_norm.starts_with("/usr/sbin/")
+                || unix_norm.starts_with("/sbin/")
+                || unix_norm.starts_with("/system/");
+
+            if !is_system_os_dir {
+                let trust_verdict = crate::win_trust::verify_binary_cryptographic_trust(p);
+                if !trust_verdict.is_trusted() {
+                    return Some(format!(
+                        "REA_MASQUERADE_SPOOF_DETECTED: Protected binary '{}' at '{}' lacks valid cryptographic signature or hash inventory verification",
+                        base_lower, raw
+                    ));
+                }
             }
         }
     }
