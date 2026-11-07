@@ -312,6 +312,36 @@ fn test_empirical_multibyte_utf8_deal_context_crash_freedom() {
             "Cyrillic аб prefix followed by USD amount in compact JSON deal value",
         ),
         (
+            r#"{"оценка_сделки": "💰 $25,000,000", "статус": "одобрено"}"#,
+            true,
+            "Compact JSON Cyrillic оценка_сделки key with emoji 💰 and USD amount",
+        ),
+        (
+            r#"{"стоимость_приобретения": "🚀 €50,000,000", "цель": "ООО Альфа"}"#,
+            true,
+            "Compact JSON Cyrillic стоимость_приобретения key with emoji 🚀 and Euro amount",
+        ),
+        (
+            r#"{"оценка": "💰 €12,500,000", "валюта": "EUR"}"#,
+            true,
+            "Compact JSON Cyrillic оценка key with emoji 💰 and Euro amount",
+        ),
+        (
+            r#"{"стоимость": "🚀 $100M USD", "инвестор": "Фонд"}"#,
+            true,
+            "Compact JSON Cyrillic стоимость key with emoji 🚀 and USD multiplier",
+        ),
+        (
+            "Оценка сделки составляет 💰 $42,000,000 в рамках слияния",
+            true,
+            "Cyrillic deal context text with emoji 💰 and USD amount",
+        ),
+        (
+            "Стоимость приобретения активов оценивается в 🚀 €75M",
+            true,
+            "Cyrillic acquisition context text with emoji 🚀 and Euro amount",
+        ),
+        (
             "Acquisition deal value: аб $15M USD for target portfolio",
             true,
             "Cyrillic prefix with $15M USD in acquisition deal value context",
