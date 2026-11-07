@@ -217,6 +217,8 @@ pub async fn get_history(
 /// POST /engage
 pub async fn post_engage(
     State(state): State<Arc<ServerState>>,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<EngageRequest>,
 ) -> Result<Json<EngageResponse>, ServerError> {
     info!(
@@ -224,8 +226,19 @@ pub async fn post_engage(
         req.operator
     );
 
+    let auth = crate::auth::verify_control_plane_auth(
+        &state,
+        &headers,
+        req.token.as_deref(),
+        req.caller_pid,
+        connect_info.as_ref(),
+        "/engage",
+    )?;
+
+    let effective_pid = auth.actual_peer_pid.or(req.caller_pid);
+
     // Validate caller PID if present
-    if let Some(pid) = req.caller_pid {
+    if let Some(pid) = effective_pid {
         let current_status = state.containment_manager.get_status();
         if current_status.frozen_pids.contains(&pid) {
             return Err(ServerError::CallerQuarantined(pid));
@@ -278,7 +291,7 @@ pub async fn post_engage(
 
     let mut new_status = state
         .containment_manager
-        .engage_isolation(&req.operator, &req.reason, level, req.caller_pid)
+        .engage_isolation(&req.operator, &req.reason, level, effective_pid)
         .await?;
 
     let bound_port = state
@@ -632,8 +645,19 @@ pub async fn get_graph_state(
 /// POST /mode
 pub async fn post_mode(
     State(state): State<Arc<ServerState>>,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<ModeRequest>,
 ) -> Result<Json<ModeResponse>, ServerError> {
+    let _auth = crate::auth::verify_control_plane_auth(
+        &state,
+        &headers,
+        req.token.as_deref(),
+        None,
+        connect_info.as_ref(),
+        "/mode",
+    )?;
+
     let prev_mode_val = *state.active_mode.read().await;
     let prev_mode = format!("{:?}", prev_mode_val).to_lowercase();
 
@@ -1363,15 +1387,6 @@ pub async fn post_fprime_dispatch(
 // =============================================================================
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct RlLearnRequest {
-    pub destination_url: String,
-    pub process_name: Option<String>,
-    pub payload_taint_level: Option<f64>,
-    pub ai_breakout_signal: Option<f64>,
-    pub is_legitimate_transaction: bool,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct OctopusBreakoutRequest {
     pub action: String,
     pub resource: String,
@@ -1404,8 +1419,19 @@ pub async fn get_rl_status(
 /// POST /rl/learn
 pub async fn post_rl_learn(
     State(state): State<Arc<ServerState>>,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<RlLearnRequest>,
 ) -> Result<Json<killswitch_telemetry::RlTrafficDecision>, ServerError> {
+    let _auth = crate::auth::verify_control_plane_auth(
+        &state,
+        &headers,
+        req.token.as_deref(),
+        req.caller_pid,
+        connect_info.as_ref(),
+        "/rl/learn",
+    )?;
+
     let decision = state.lineage_engine.rl_traffic.record_feedback_and_learn(
         &req.destination_url,
         req.process_name.as_deref(),
@@ -1542,16 +1568,6 @@ pub struct RateLimitEvaluateRequest {
     pub tool_name: Option<String>,
     pub items_requested: Option<u64>,
     pub tokens_used: Option<u32>,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct RateLimitAllowlistRequest {
-    pub destination_host: String,
-    pub protocol: Option<String>,
-    pub pid: Option<u32>,
-    pub operator: Option<String>,
-    pub reason: Option<String>,
-    pub clear: Option<bool>,
 }
 
 /// GET /rate-limit/status (and /api/rate-limit/status)
@@ -1715,8 +1731,20 @@ pub async fn post_rate_limit_evaluate(
 
 /// POST /rate-limit/allowlist (and /api/rate-limit/allowlist)
 pub async fn post_rate_limit_allowlist(
+    State(state): State<Arc<ServerState>>,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<RateLimitAllowlistRequest>,
 ) -> Result<Json<serde_json::Value>, ServerError> {
+    let _auth = crate::auth::verify_control_plane_auth(
+        &state,
+        &headers,
+        req.token.as_deref(),
+        req.caller_pid.or(req.pid),
+        connect_info.as_ref(),
+        "/rate-limit/allowlist",
+    )?;
+
     if req.clear.unwrap_or(false) {
         killswitch_telemetry::RateLimitAllowlist::clear();
         return Ok(Json(serde_json::json!({

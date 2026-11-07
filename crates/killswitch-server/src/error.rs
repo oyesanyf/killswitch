@@ -18,6 +18,9 @@ pub enum ServerError {
     #[error("Caller PID {0} is quarantined/frozen and forbidden from invoking containment controls")]
     CallerQuarantined(u32),
 
+    #[error("Caller PID spoofing detected: claimed PID {claimed} does not match authenticated peer PID {actual}")]
+    CallerPidSpoofing { claimed: u32, actual: u32 },
+
     #[error("Validation error: {0}")]
     Validation(String),
 
@@ -58,6 +61,7 @@ impl IntoResponse for ServerError {
             Self::AuthenticationFailed(_) => (StatusCode::UNAUTHORIZED, "AUTHENTICATION_FAILED"),
             Self::LockoutActive(_) => (StatusCode::TOO_MANY_REQUESTS, "LOCKOUT_ACTIVE"),
             Self::CallerQuarantined(_) => (StatusCode::FORBIDDEN, "CALLER_QUARANTINED"),
+            Self::CallerPidSpoofing { .. } => (StatusCode::FORBIDDEN, "CALLER_PID_SPOOFED"),
             Self::Validation(_) => (StatusCode::BAD_REQUEST, "VALIDATION_ERROR"),
             Self::NotFound(_) => (StatusCode::NOT_FOUND, "NOT_FOUND"),
             Self::PayloadTooLarge(_) => (StatusCode::PAYLOAD_TOO_LARGE, "PAYLOAD_TOO_LARGE"),

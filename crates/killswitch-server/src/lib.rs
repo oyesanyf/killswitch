@@ -8,6 +8,7 @@
 //! - Anti-lockout rate-limiting and caller PID validation
 //! - Zero external OS command subprocess spawning
 
+pub mod auth;
 pub mod cage_substrate;
 pub mod error;
 pub mod handlers;
@@ -20,6 +21,7 @@ pub mod types;
 pub mod webui;
 
 // Re-exports
+pub use auth::*;
 pub use error::ServerError;
 pub use orchestrator_bridge::{InMemoryOrchestratorBridge, OrchestratorBridge};
 pub use routes::build_router;

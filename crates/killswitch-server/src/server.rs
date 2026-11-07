@@ -122,6 +122,12 @@ impl CageKeyManifestResolver {
     }
 }
 
+impl Default for CageKeyManifestResolver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Configuration for local Axum HTTP control server.
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
@@ -168,6 +174,7 @@ pub struct ServerState {
     pub cage_key_manifest: Arc<CageKeyManifestResolver>,
     pub replay_cache: Arc<NonceReplayCache>,
     pub journal: Arc<QuarantineJournal>,
+    pub control_token: Arc<String>,
 }
 
 pub type AppState = ServerState;
@@ -235,6 +242,18 @@ impl ServerState {
             ed25519_kid.clone(),
         ));
 
+        // 8. Control Plane Token (R4)
+        let control_token = if let Ok(tok) = std::env::var("KILLSWITCH_CONTROL_TOKEN") {
+            Arc::new(tok.trim().to_string())
+        } else if let Ok(tok) = std::env::var("KILLSWITCH_MASTER_TOKEN") {
+            Arc::new(tok.trim().to_string())
+        } else {
+            let mut bytes = [0u8; 32];
+            use rand::RngCore;
+            rand::rngs::OsRng.fill_bytes(&mut bytes);
+            Arc::new(hex::encode(bytes))
+        };
+
         Self {
             containment_manager,
             adjudicator,
@@ -258,6 +277,7 @@ impl ServerState {
             cage_key_manifest,
             replay_cache,
             journal,
+            control_token,
         }
     }
 
@@ -273,6 +293,40 @@ impl ServerState {
             orchestrator_bridge,
             service_manager,
         )
+    }
+
+    pub fn is_valid_control_token(&self, candidate: &str) -> bool {
+        let trimmed = candidate.trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+
+        if crate::auth::constant_time_token_match(trimmed, &self.control_token) {
+            return true;
+        }
+
+        if let Ok(env_tok) = std::env::var("KILLSWITCH_CONTROL_TOKEN") {
+            if crate::auth::constant_time_token_match(trimmed, env_tok.trim()) {
+                return true;
+            }
+        }
+        if let Ok(env_tok) = std::env::var("KILLSWITCH_MASTER_TOKEN") {
+            if crate::auth::constant_time_token_match(trimmed, env_tok.trim()) {
+                return true;
+            }
+        }
+
+        let creds = killswitch_types::status::OperatorCredentials {
+            operator_id: "control_plane".to_string(),
+            auth_token: Some(trimmed.to_string()),
+            password: Some(trimmed.to_string()),
+            caller_pid: None,
+            confirmation_phrase: Some(trimmed.to_string()),
+        };
+        self.containment_manager
+            .authenticator()
+            .authenticate(&creds)
+            .is_success()
     }
 }
 

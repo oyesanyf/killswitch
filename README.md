@@ -7,7 +7,7 @@ It runs without requiring external OS CLI wrapper tools (`netsh`, `iptables`, `n
 > [!IMPORTANT]
 > **Architectural Positioning & Scope (`Agentic EDR & Runtime Governance Kill-Switch`)**:
 > - **Do call it an Agentic EDR & Runtime Governance Kill-Switch (or User-Space Behavioral EDR + CAGE/APC Control Plane)**: it governs AI agents *before* tool actuation (via Google CAGE 8-tier deterministic policy enforcement, Bounded Agents APC principal chains `arXiv:2608.15888`, and Oso/AWS R1–R5 intersection containment) and monitors/contains the host process lineage and network sockets *during* execution (via `edr_behavioral.rs`, `otel_lineage.rs`, `rl_traffic.rs`, and kernel firewall quarantine across **Windows WFP** `FwpmFilterAdd0`, **macOS `/dev/pf`**, and **Linux Netlink/Landlock**).
-> - **Do NOT call it a replacement for a Ring-0 kernel EDR driver (like CrowdStrike or Microsoft Defender) on general corporate laptops**—unless you pair its user-space engine with a real **Windows ETW kernel provider subscription / Sysmon feed**, a **Linux eBPF ring-buffer loader** (`drivers/linux/killswitch_ring0.bpf.c` pinned in `/sys/fs/bpf/killswitch/*`), or the included **EV/WHQL-signed Windows Ring-0 Minifilter/ELAM driver** (`drivers/windows/killswitch_minifilter.c` + `.inf` for `PsSetCreateProcessNotifyRoutineEx` and `ObRegisterCallbacks`).
+> - **Do NOT call it a replacement for a Ring-0 kernel EDR driver (like CrowdStrike or Microsoft Defender) on general corporate laptops**—KillSwitch operates as a 100% native user-mode engine leveraging direct OS-provided kernel containment interfaces (user-mode Windows Filtering Platform dynamic sessions, Linux Landlock LSM/Netlink, and macOS `/dev/pf` ioctl). Reference C and eBPF source templates (`drivers/windows/killswitch_minifilter.c` and `drivers/linux/killswitch_ring0.bpf.c`) are provided for organizations wishing to compile and sign out-of-tree kernel extensions with their own enterprise EV/WHQL certificates.
 > - **Ideal Use Case**: If you are running autonomous AI coding agents, computer-use agents, MCP tool servers, or local LLM workflows on a workstation or server and want a deterministic runtime governor + hardware-anchored emergency circuit breaker that can stop data exfiltration or rogue agent actions in milliseconds, it is a very good, uniquely capable tool.
 
 ---
@@ -232,11 +232,11 @@ To prevent an attacker or rootkit with local administrator access from tampering
 ---
 
 
-## 🛡️ Signed Kernel-Mode Driver Deployment (`ELAM / Minifilter / eBPF Ring-0 Loading`)
+## 🛡️ Native User-Mode Architecture & Optional Out-of-Tree Driver Templates
 
-As an **Agentic EDR & Runtime Governance Kill-Switch (User-Space Behavioral EDR + CAGE/APC Control Plane)**, KillSwitch governs AI agents before tool actuation and monitors/contains the host process lineage and network sockets during execution. **Do not call it a replacement for a Ring-0 kernel EDR driver (like CrowdStrike or Microsoft Defender) on general corporate laptops—unless you pair its user-space engine with a real Windows ETW kernel provider subscription / Sysmon feed, a Linux eBPF ring-buffer loader, or the included EV/WHQL-signed Ring-0 minifilter driver** via `killswitch-telemetry::ring0_driver_loader`:
+KillSwitch operates primarily as a **100% Native Driverless User-Mode Security Agent**: it governs AI agents before tool actuation and isolates network traffic and processes via direct OS-provided user-mode APIs (`fwpuclnt.dll` WFP dynamic sessions on Windows, Netlink/Landlock on Linux, and `/dev/pf` ioctl on macOS). It does not ship pre-compiled kernel binaries in Git. For environments requiring out-of-tree kernel-level interception, reference source templates are provided in `drivers/`:
 
-1. **Windows Kernel Minifilter, ELAM & `ObRegisterCallbacks` (`drivers/windows/killswitch_minifilter.c` & `.inf`)**:
+1. **Windows Kernel Minifilter & ELAM Reference Source (`drivers/windows/killswitch_minifilter.c` & `.inf`)**:
    - Registers `FltRegisterFilter` at Altitude `385200` (`FSFilter Anti-Virus`), `PsSetCreateProcessNotifyRoutineEx` for Ring-0 process creation lineage, and `ObRegisterCallbacks` to strip `PROCESS_TERMINATE (0x0001)` and `PROCESS_VM_WRITE (0x0020)` handles targeting `killswitch.exe` and `lsass.exe`.
    - `verify_windows_pe_sys_binary` enforces a **Fail-Closed Binary Gate** before staging: verifies PE32+ headers (`MZ`, `PE\0\0`, `IMAGE_SUBSYSTEM_NATIVE`), verifies `IMAGE_DLLCHARACTERISTICS_FORCE_INTEGRITY (0x0080 /INTEGRITYCHECK)` (required by the Windows kernel for `ObRegisterCallbacks`), validates the embedded PKCS#7 Authenticode `WIN_CERTIFICATE` table, and checks SHA-256 + BLAKE3 digests.
 2. **Linux Ring-0 eBPF Tracepoints & LSM Tamper Guard (`drivers/linux/killswitch_ring0.bpf.c`)**:

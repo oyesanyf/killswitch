@@ -28,10 +28,19 @@ pub mod rate_limit_backoff;
 pub mod ring0_driver_loader;
 pub mod rl_traffic;
 pub mod semantic_command;
+pub mod semantic_dlp;
 pub mod tamper_and_process_killswitch;
 pub mod watchdog;
 
 // Re-exports for clean ergonomics
+pub use semantic_dlp::{
+    luhn_check, query_recent_semantic_events, record_semantic_event,
+    scan_payload_for_semantic_entities, volatile_scrub_bytes, GlinerSpanMatch,
+    GlinerSpanNerEngine, PresidioGlinerPiiZeroGuard, RedactXStructuredValidator,
+    SemanticDlpClassification, SemanticDlpEngine, SemanticDlpEntity, SemanticDlpRecord,
+    SemanticDlpVerdict, SemanticEntityKind, SemanticEntityMatch, SemanticSensitivityLevel,
+    ZkBftQuarantineProof, LIVE_SEMANTIC_DLP_EVENTS, MAX_LIVE_SEMANTIC_EVENTS,
+};
 pub use circumvention::{
     classify_denial_pattern, evaluate_denial_outcome, is_cross_boundary_invocation,
     observe_denial, CircumventionAlert, DenialPatternKind, DynamicDenialSignal,
@@ -118,12 +127,12 @@ pub use phaselock::{
     PhaseLockManager, PhaseSpaceConfig, PhaseSpaceVerdict,
 };
 pub use ring0_driver_loader::{
-    build_canonical_ebpf_elf_object, build_canonical_signed_pe_sys_image, global_ring0_manager,
-    query_live_host_ring0_inventory, verify_linux_ebpf_elf_binary, verify_windows_pe_sys_binary,
-    EbpfElfVerificationReport, EdrArchitectureClassification, HostKernelDriverInventory,
-    PeSysVerificationReport, Ring0DeploymentManager, Ring0DriverStatusReport,
-    Ring0KernelEventFrame, Ring0Posture, KILLSWITCH_BPFFS_PIN_ROOT, KILLSWITCH_MINIFILTER_ALTITUDE,
-    KILLSWITCH_MINIFILTER_PORT,
+    build_canonical_ebpf_elf_object, build_canonical_signed_pe_sys_image, compute_sha256_hex,
+    global_ring0_manager, query_live_host_ring0_inventory, verify_linux_ebpf_elf_binary,
+    verify_windows_pe_sys_binary, EbpfElfVerificationReport, EdrArchitectureClassification,
+    HostKernelDriverInventory, PeSysVerificationReport, Ring0DeploymentManager,
+    Ring0DriverStatusReport, Ring0KernelEventFrame, Ring0Posture, KILLSWITCH_BPFFS_PIN_ROOT,
+    KILLSWITCH_MINIFILTER_ALTITUDE, KILLSWITCH_MINIFILTER_PORT,
 };
 pub use rl_traffic::{
     query_live_os_process_sockets, run_empirical_rl_benchmark, ConfidenceInterval95,
