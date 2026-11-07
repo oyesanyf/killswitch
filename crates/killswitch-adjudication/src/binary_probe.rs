@@ -165,20 +165,18 @@ pub fn inspect_binary_metadata_from_bytes(bytes: &[u8]) -> DynamicBinaryMetadata
     // -------------------------------------------------------------------------
     // 3. Subsystem invocation traits scanning (WSL & Hyper-V)
     // -------------------------------------------------------------------------
-    if !meta.invokes_wsl_subsystem {
-        if find_subsequence_case_insensitive(bytes, b"wslapi.dll")
+    if !meta.invokes_wsl_subsystem
+        && (find_subsequence_case_insensitive(bytes, b"wslapi.dll")
             || find_subsequence_case_insensitive(bytes, b"wsl.exe")
-            || find_subsequence_case_insensitive(bytes, b"lxss")
-        {
-            meta.invokes_wsl_subsystem = true;
-        }
+            || find_subsequence_case_insensitive(bytes, b"lxss"))
+    {
+        meta.invokes_wsl_subsystem = true;
     }
-    if !meta.invokes_hyperv_compute {
-        if find_subsequence_case_insensitive(bytes, b"vmcompute.dll")
-            || find_subsequence_case_insensitive(bytes, b"compute-system")
-        {
-            meta.invokes_hyperv_compute = true;
-        }
+    if !meta.invokes_hyperv_compute
+        && (find_subsequence_case_insensitive(bytes, b"vmcompute.dll")
+            || find_subsequence_case_insensitive(bytes, b"compute-system"))
+    {
+        meta.invokes_hyperv_compute = true;
     }
 
     meta
@@ -285,7 +283,7 @@ fn find_subsequence_case_insensitive(haystack: &[u8], needle: &[u8]) -> bool {
         window
             .iter()
             .zip(needle.iter())
-            .all(|(&h, &n)| h.to_ascii_lowercase() == n.to_ascii_lowercase())
+            .all(|(&h, &n)| h.eq_ignore_ascii_case(&n))
     })
 }
 
@@ -373,9 +371,11 @@ mod tests {
 
     #[test]
     fn test_suid_privileged_evaluation() {
-        let mut meta = DynamicBinaryMetadata::default();
-        meta.is_suid = true;
-        meta.file_uid = 0;
+        let mut meta = DynamicBinaryMetadata {
+            is_suid: true,
+            file_uid: 0,
+            ..Default::default()
+        };
         assert!(meta.is_privileged_target());
 
         // Non-root SUID is not flagged as root target

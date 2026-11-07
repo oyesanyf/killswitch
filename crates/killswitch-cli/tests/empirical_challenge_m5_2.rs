@@ -43,12 +43,29 @@ fn test_subsystem_diagnostics_live_binary_verify_and_check() {
         .unwrap()
         .to_path_buf();
 
-    let killswitch_exe = workspace_root.join("killswitch.exe");
-    let start_exe = workspace_root.join("start.exe");
+    let candidates_killswitch = [
+        workspace_root.join("killswitch.exe"),
+        workspace_root.join("target").join("debug").join("killswitch.exe"),
+        workspace_root.join("target").join("release").join("killswitch.exe"),
+    ];
+    let killswitch_exe = candidates_killswitch
+        .into_iter()
+        .find(|p| p.exists())
+        .unwrap_or_else(|| workspace_root.join("killswitch.exe"));
+
+    let candidates_start = [
+        workspace_root.join("start.exe"),
+        workspace_root.join("target").join("debug").join("start.exe"),
+        workspace_root.join("target").join("release").join("start.exe"),
+    ];
+    let start_exe = candidates_start
+        .into_iter()
+        .find(|p| p.exists())
+        .unwrap_or_else(|| workspace_root.join("start.exe"));
 
     assert!(
         killswitch_exe.exists() || start_exe.exists(),
-        "killswitch.exe or start.exe must exist at root workspace: {:?}",
+        "killswitch.exe or start.exe must exist at root workspace or target/debug: {:?}",
         workspace_root
     );
 

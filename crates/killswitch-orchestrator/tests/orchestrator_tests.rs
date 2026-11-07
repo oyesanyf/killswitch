@@ -1,5 +1,7 @@
 //! Integration and invariant tests for `killswitch-orchestrator`.
 
+#![allow(clippy::await_holding_lock)]
+
 use std::sync::Arc;
 use killswitch_adjudication::ZeroFalsePositiveAdjudicator;
 use killswitch_core::killchain::HostContainmentManager;

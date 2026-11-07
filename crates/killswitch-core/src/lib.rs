@@ -4,6 +4,7 @@
 //! 4-tier hybrid operator authentication, TPM 2.0 hardware sealing, and BLAKE3-chained state ledger.
 
 pub mod auth;
+pub mod exec_sensor;
 pub mod fprime;
 pub mod freeze;
 pub mod killchain;
@@ -15,6 +16,19 @@ pub mod state_ledger;
 pub mod tarpit;
 pub mod tpm;
 pub mod wfp;
+
+pub use exec_sensor::{
+    clear_exec_events, default_process_sensor, get_recent_exec_events, record_exec_event,
+    register_exec_event_subscriber, simulate_exec_event, ExecEvent, ExecEventSubscriber,
+    ExecSensorBuffer, NativeProcessSensor, SimulatedProcessSensor, EXEC_SENSOR_BUFFER,
+    EXEC_SENSOR_DEFAULT_CAPACITY,
+};
+#[cfg(target_os = "windows")]
+pub use exec_sensor::WindowsProcessSensor;
+#[cfg(target_os = "linux")]
+pub use exec_sensor::LinuxProcessSensor;
+#[cfg(target_os = "macos")]
+pub use exec_sensor::MacOsProcessSensor;
 
 pub use peer_pid::resolve_loopback_peer_pid;
 

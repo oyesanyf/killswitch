@@ -56,6 +56,7 @@ sysinfo = "0.30"
 dashmap = "6.1"
 parking_lot = "0.12"
 chrono = { version = "0.4", features = ["serde"] }
+rusqlite = { version = "0.31", features = ["bundled", "serde_json", "hooks"] }
 
 # Error handling & logging
 thiserror = "2.0"

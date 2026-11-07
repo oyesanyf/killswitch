@@ -8,6 +8,7 @@
 //! Multi-Node Raft/Valkey Consensus Storage, and 100% OpenTelemetry & OpenLineage
 //! DLP Data Lineage Engine.
 
+pub mod agent_hooks;
 pub mod attack;
 pub mod bounded_agents_apc;
 pub mod cage_governance;
@@ -29,10 +30,26 @@ pub mod ring0_driver_loader;
 pub mod rl_traffic;
 pub mod semantic_command;
 pub mod semantic_dlp;
+pub mod siquery;
 pub mod tamper_and_process_killswitch;
 pub mod watchdog;
 
 // Re-exports for clean ergonomics
+pub use agent_hooks::{
+    clear_interceptions, evaluate_hook_synchronously, format_claude_response,
+    format_copilot_response, format_cursor_response, format_mcp_error_response,
+    format_opencode_response, get_recent_interceptions, install_agent_hooks,
+    parse_claude_request, parse_copilot_request, parse_cursor_request,
+    parse_mcp_call_request, parse_opencode_request, record_interception_event,
+    snapshot_interceptions, AgentInterceptionRecord, HookEvaluationDecision,
+    HookEventType, NormalizedHookRequest, SupportedAgentKind,
+    AGENT_INTERCEPTION_CAPACITY, AGENT_INTERCEPTION_EVENTS, GLOBAL_CORRELATOR,
+};
+pub use siquery::{
+    record_live_file_event, register_lineage_file_events_hook, register_lineage_open_files_hook,
+    FileEventRecord, LineageFileEventsHook, LineageOpenFilesHook, SiqueryEngine, SiqueryRow,
+    LIVE_FILE_EVENTS, SIQUERY_LAST_TELEMETRY,
+};
 pub use semantic_dlp::{
     luhn_check, query_recent_semantic_events, record_semantic_event,
     scan_payload_for_semantic_entities, volatile_scrub_bytes, GlinerSpanMatch,

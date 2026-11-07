@@ -4220,3 +4220,137 @@ pub async fn get_protocol_catalog_domain(
         "protocols": protocols,
     })))
 }
+
+// ============================================================================
+// 20. Siquery Relational SQL Discovery & Active EDR Audit Engine (R8 / SEC-5)
+// ============================================================================
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct SiqueryQueryRequest {
+    pub query: String,
+    pub format: Option<String>,
+}
+
+/// Executes an arbitrary read-only SQL query with quadruple read-only guard and 15s timeout.
+pub async fn post_siquery_query(
+    State(state): State<Arc<ServerState>>,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+    headers: axum::http::HeaderMap,
+    Json(payload): Json<SiqueryQueryRequest>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let _auth = crate::auth::verify_control_plane_auth(
+        &state,
+        &headers,
+        None,
+        None,
+        connect_info.as_ref(),
+        "/api/siquery/query",
+    )?;
+
+    let sql = payload.query.clone();
+    let format = payload.format.clone().unwrap_or_else(|| "json".to_string());
+    let start = std::time::Instant::now();
+
+    let res = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        tokio::task::spawn_blocking(move || {
+            let engine = killswitch_telemetry::siquery::SiqueryEngine::new();
+            match format.to_ascii_lowercase().as_str() {
+                "csv" => engine
+                    .execute_csv(&sql)
+                    .map(|csv| ("csv", serde_json::Value::String(csv))),
+                "pretty" => engine
+                    .execute_pretty(&sql)
+                    .map(|p| ("pretty", serde_json::Value::String(p))),
+                _ => engine
+                    .execute_query(&sql)
+                    .map(|rows| ("rows", serde_json::Value::Array(rows))),
+            }
+        }),
+    )
+    .await
+    .map_err(|_| {
+        ServerError::Internal("Siquery query execution timed out after 15 seconds".to_string())
+    })?
+    .map_err(|e| ServerError::Internal(format!("Siquery task join error: {}", e)))?
+    .map_err(ServerError::Validation)?;
+
+    let elapsed = start.elapsed().as_millis() as u64;
+
+    let mut resp = serde_json::json!({
+        "status": "ok",
+        "query": payload.query,
+        "execution_duration_ms": elapsed,
+    });
+
+    match res.0 {
+        "csv" => {
+            resp["csv"] = res.1;
+        }
+        "pretty" => {
+            resp["pretty"] = res.1;
+        }
+        _ => {
+            if let serde_json::Value::Array(ref arr) = res.1 {
+                resp["count"] = serde_json::json!(arr.len());
+            }
+            resp["rows"] = res.1;
+        }
+    }
+
+    Ok(Json(resp))
+}
+
+/// Returns the complete list of 41 supported relational tables.
+pub async fn get_siquery_tables() -> Result<Json<serde_json::Value>, ServerError> {
+    let tables = killswitch_telemetry::siquery::SiqueryEngine::list_tables();
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "tables": tables,
+        "total": tables.len(),
+    })))
+}
+
+/// Returns the latest active 12-sweep EDR audit snapshot.
+pub async fn get_siquery_edr_status() -> Result<Json<serde_json::Value>, ServerError> {
+    let cached = killswitch_telemetry::siquery::SIQUERY_LAST_TELEMETRY
+        .read()
+        .clone();
+    let telemetry = match cached {
+        Some(t) => t,
+        None => {
+            tokio::task::spawn_blocking(|| {
+                let engine = killswitch_telemetry::siquery::SiqueryEngine::new();
+                engine.run_siquery_edr_audit_sweep()
+            })
+            .await
+            .map_err(|e| ServerError::Internal(format!("Sweep join error: {}", e)))?
+        }
+    };
+    Ok(Json(telemetry))
+}
+
+/// Triggers an active 12-sweep EDR security and host audit sweep.
+pub async fn post_siquery_protect_sweep(
+    State(state): State<Arc<ServerState>>,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let _auth = crate::auth::verify_control_plane_auth(
+        &state,
+        &headers,
+        None,
+        None,
+        connect_info.as_ref(),
+        "/api/siquery/protect-sweep",
+    )?;
+
+    let telemetry = tokio::task::spawn_blocking(|| {
+        let engine = killswitch_telemetry::siquery::SiqueryEngine::new();
+        engine.run_siquery_edr_audit_sweep()
+    })
+    .await
+    .map_err(|e| ServerError::Internal(format!("Sweep join error: {}", e)))?;
+
+    Ok(Json(telemetry))
+}

@@ -330,6 +330,17 @@ pub fn build_router(state: Arc<ServerState>) -> Router {
             "/api/protocol-catalog/domain",
             get(handlers::get_protocol_catalog_domain),
         )
+        // 20. Siquery Relational SQL Discovery & Active EDR Audit Engine (R8 / SEC-5)
+        .route("/siquery/query", post(handlers::post_siquery_query))
+        .route("/api/siquery/query", post(handlers::post_siquery_query))
+        .route("/siquery/tables", get(handlers::get_siquery_tables))
+        .route("/api/siquery/tables", get(handlers::get_siquery_tables))
+        .route("/siquery/edr-status", get(handlers::get_siquery_edr_status))
+        .route("/api/siquery/edr-status", get(handlers::get_siquery_edr_status))
+        .route("/siquery/protect-sweep", post(handlers::post_siquery_protect_sweep))
+        .route("/api/siquery/protect-sweep", post(handlers::post_siquery_protect_sweep))
+        .route("/siquery/protection-sweep", post(handlers::post_siquery_protect_sweep))
+        .route("/api/siquery/protection-sweep", post(handlers::post_siquery_protect_sweep))
         // Middleware Layers (applied bottom-up)
         .layer(axum::middleware::from_fn(middleware::rate_limit_middleware))
         .layer(middleware::cors_layer())

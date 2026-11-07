@@ -13,6 +13,8 @@
 //! 3. StateLedger Cryptographic Durability & Hash Chaining:
 //!    - Rapid concurrent commits across multiple threads
 //!    - Forward snapshot hash chaining and reverse audit history event chaining
+
+#![allow(deprecated)]
 //!    - Bit-flip corruption detection across hashes, sequence numbers, and state payloads
 //! 4. Cross-Platform Native Service Manager & Unconditional Shutdown Disarm:
 //!    - Service stop/shutdown executes `execute_host_disarm_unauthenticated()`
@@ -213,14 +215,19 @@ async fn test_stress_multithreaded_process_freeze_and_resume_cycle() {
             resume_res
         );
 
-        // Sleep while resumed and assert counter advances cleanly
-        tokio::time::sleep(Duration::from_millis(150)).await;
-
-        let resumed_val = fs::read_to_string(&counter_file)
-            .unwrap_or_default()
-            .trim()
-            .parse::<u64>()
-            .unwrap_or(0);
+        // Wait while resumed and assert counter advances cleanly
+        let mut resumed_val = 0;
+        for _ in 0..10 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            resumed_val = fs::read_to_string(&counter_file)
+                .unwrap_or_default()
+                .trim()
+                .parse::<u64>()
+                .unwrap_or(0);
+            if resumed_val > frozen_val {
+                break;
+            }
+        }
 
         assert!(
             resumed_val > frozen_val,
