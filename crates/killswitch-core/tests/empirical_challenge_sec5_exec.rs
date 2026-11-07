@@ -2,7 +2,7 @@
 //! Zero-Polling Kernel Exec Sensor Flood, 32-Thread Concurrency, Lock-Drop Subscriber & FIFO Eviction.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -11,8 +11,14 @@ use killswitch_core::exec_sensor::{
     ExecSensorBuffer, EXEC_SENSOR_DEFAULT_CAPACITY,
 };
 
+/// Global test synchronization lock to serialize access to the global singleton
+/// `EXEC_SENSOR_BUFFER` across concurrent test runner threads in this integration test binary.
+static EXEC_SENSOR_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+
 #[test]
 fn test_exec_sensor_32_thread_concurrent_flood() {
+    let _guard = EXEC_SENSOR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     clear_exec_events();
     let thread_count = 32;
     let events_per_thread = 100; // Total 3,200 events, exceeding default 2048 capacity
@@ -72,6 +78,8 @@ fn test_exec_sensor_32_thread_concurrent_flood() {
         assert!(!ev.image_path.is_empty());
         assert!(ev.timestamp_ns > 0);
     }
+
+    clear_exec_events();
 }
 
 #[test]
@@ -188,6 +196,7 @@ fn test_exec_sensor_panicking_subscriber_isolation() {
 
 #[test]
 fn test_micro_process_lifecycle_start_and_exit_correlation() {
+    let _guard = EXEC_SENSOR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     clear_exec_events();
 
     // Simulate 50 ephemeral micro-processes that spawn and terminate in <5ms
@@ -230,4 +239,6 @@ fn test_micro_process_lifecycle_start_and_exit_correlation() {
     let second_newest = &events[1];
     assert!(second_newest.is_start());
     assert_eq!(second_newest.pid, 10050);
+
+    clear_exec_events();
 }

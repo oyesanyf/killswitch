@@ -19,6 +19,8 @@ pub enum SensitiveCredentialStoreKind {
     WindowsSystemHive,
     WindowsSecurityHive,
     WindowsNtdsDit,
+    RootSshKey,
+    DockerSocket,
 }
 
 impl SensitiveCredentialStoreKind {
@@ -33,6 +35,8 @@ impl SensitiveCredentialStoreKind {
             Self::WindowsSystemHive => "Windows SYSTEM registry hive (System32\\config\\SYSTEM)",
             Self::WindowsSecurityHive => "Windows SECURITY registry hive (System32\\config\\SECURITY)",
             Self::WindowsNtdsDit => "Windows Active Directory database (NTDS\\ntds.dit)",
+            Self::RootSshKey => "Root/User SSH credential store (/root/.ssh, ~/.ssh, /etc/ssh)",
+            Self::DockerSocket => "Docker container management control socket (/var/run/docker.sock, /run/docker.sock, \\\\.\\pipe\\docker_engine)",
         }
     }
 }
@@ -83,12 +87,26 @@ pub fn normalize_path_for_inspection(raw: &str) -> String {
     // 2. Normalize separators to '/' and convert to lowercase
     let mut lower = decoded.replace('\\', "/").to_ascii_lowercase();
 
-    // 3. Strip Windows device / namespace prefixes
-    for prefix in &["//?/", "//./", "/??/", "/device/"] {
+    // 3. Strip Windows device / namespace prefixes and identify genuine UNC paths
+    let mut is_unc = false;
+    for prefix in &["//?/unc/", "//./unc/", "/??/unc/"] {
         if lower.starts_with(prefix) {
             lower = lower[prefix.len()..].to_string();
+            is_unc = true;
             break;
         }
+    }
+    if !is_unc {
+        for prefix in &["//?/", "//./", "/??/", "/device/"] {
+            if lower.starts_with(prefix) {
+                lower = lower[prefix.len()..].to_string();
+                break;
+            }
+        }
+    }
+    if !is_unc && lower.starts_with("//") {
+        lower = lower[2..].to_string();
+        is_unc = true;
     }
 
     // 4. Strip Windows drive letters (e.g. C:, D:)
@@ -113,7 +131,7 @@ pub fn normalize_path_for_inspection(raw: &str) -> String {
     // 7. Resolve '.' and '..' segments
     let segments: Vec<&str> = lower.split('/').collect();
     let mut resolved: Vec<&str> = Vec::new();
-    let is_absolute = lower.starts_with('/');
+    let is_absolute = lower.starts_with('/') || is_unc;
 
     for seg in segments {
         let seg_clean = seg.trim();
@@ -124,6 +142,27 @@ pub fn normalize_path_for_inspection(raw: &str) -> String {
             resolved.pop();
         } else {
             resolved.push(seg_clean);
+        }
+    }
+
+    // 8. Handle UNC share prefixes: \\wsl$\<distro>\..., \\wsl.localhost\<distro>\..., \\<host>\<drive>$\...
+    if resolved.len() >= 3 {
+        if resolved[0] == "wsl$" || resolved[0] == "wsl.localhost" {
+            // Strip wsl$ and distribution name
+            resolved.drain(0..2);
+        } else if resolved[1].len() == 2
+            && resolved[1].as_bytes()[0].is_ascii_alphabetic()
+            && resolved[1].as_bytes()[1] == b'$'
+        {
+            // Strip host and administrative drive share (e.g. c$)
+            resolved.drain(0..2);
+        } else if resolved[1] == "admin$" {
+            // Admin$ share maps to Windows directory
+            resolved.drain(0..2);
+            resolved.insert(0, "windows");
+        } else if is_unc && resolved[0] != "pipe" && resolved[1] != "pipe" {
+            // Generic UNC path \\server\share\...
+            resolved.drain(0..2);
         }
     }
 
@@ -204,7 +243,60 @@ pub fn classify_sensitive_system_path(raw_path: &str) -> Option<SensitiveCredent
         return Some(SensitiveCredentialStoreKind::WindowsNtdsDit);
     }
 
+    // 10. Root and user SSH credential stores (/root/.ssh/*, ~/.ssh/*, /etc/ssh/ssh_host_*_key)
+    if is_ssh_credential_path(stripped) {
+        return Some(SensitiveCredentialStoreKind::RootSshKey);
+    }
+
+    // 11. Docker control socket (/var/run/docker.sock, /run/docker.sock, \\.\pipe\docker_engine)
+    if is_docker_socket_path(stripped, raw_path) {
+        return Some(SensitiveCredentialStoreKind::DockerSocket);
+    }
+
     None
+}
+
+fn is_ssh_credential_path(stripped: &str) -> bool {
+    // Root or user .ssh directory and files
+    if stripped == "root/.ssh"
+        || stripped.starts_with("root/.ssh/")
+        || stripped == "~/.ssh"
+        || stripped.starts_with("~/.ssh/")
+        || stripped == ".ssh"
+        || stripped.starts_with(".ssh/")
+        || stripped.contains("/.ssh/")
+        || stripped.ends_with("/.ssh")
+    {
+        return true;
+    }
+
+    // /etc/ssh host keys
+    if stripped.starts_with("etc/ssh/ssh_host_") {
+        return true;
+    }
+
+    false
+}
+
+fn is_docker_socket_path(stripped: &str, raw: &str) -> bool {
+    if stripped == "var/run/docker.sock"
+        || stripped.starts_with("var/run/docker.sock")
+        || stripped == "run/docker.sock"
+        || stripped.starts_with("run/docker.sock")
+        || stripped.ends_with("/docker.sock")
+        || stripped == "docker.sock"
+        || stripped == "pipe/docker_engine"
+        || stripped.ends_with("/pipe/docker_engine")
+    {
+        return true;
+    }
+
+    let lower_raw = raw.to_ascii_lowercase().replace('/', "\\");
+    if lower_raw.contains("pipe\\docker_engine") || lower_raw.contains("docker.sock") {
+        return true;
+    }
+
+    false
 }
 
 fn is_windows_hive_match(stripped: &str, hive_name: &str) -> bool {
@@ -273,6 +365,16 @@ pub fn scan_for_sensitive_system_path(text: &str) -> Option<(SensitiveCredential
         ("hklm\\sam", SensitiveCredentialStoreKind::WindowsSamHive),
         ("hklm\\system", SensitiveCredentialStoreKind::WindowsSystemHive),
         ("hklm\\security", SensitiveCredentialStoreKind::WindowsSecurityHive),
+        ("root/.ssh", SensitiveCredentialStoreKind::RootSshKey),
+        ("~/.ssh", SensitiveCredentialStoreKind::RootSshKey),
+        (".ssh/id_rsa", SensitiveCredentialStoreKind::RootSshKey),
+        (".ssh/id_ed25519", SensitiveCredentialStoreKind::RootSshKey),
+        (".ssh/id_ecdsa", SensitiveCredentialStoreKind::RootSshKey),
+        (".ssh/id_dsa", SensitiveCredentialStoreKind::RootSshKey),
+        (".ssh/authorized_keys", SensitiveCredentialStoreKind::RootSshKey),
+        ("etc/ssh/ssh_host_", SensitiveCredentialStoreKind::RootSshKey),
+        ("docker.sock", SensitiveCredentialStoreKind::DockerSocket),
+        ("pipe/docker_engine", SensitiveCredentialStoreKind::DockerSocket),
     ];
 
     for (needle, kind) in targets {
@@ -382,6 +484,50 @@ mod tests {
             classify_sensitive_system_path("/var/log/normal.txt"),
             None
         );
+        assert_eq!(
+            classify_sensitive_system_path("/root/.ssh/id_rsa"),
+            Some(SensitiveCredentialStoreKind::RootSshKey)
+        );
+        assert_eq!(
+            classify_sensitive_system_path("/root/.ssh/id_ed25519"),
+            Some(SensitiveCredentialStoreKind::RootSshKey)
+        );
+        assert_eq!(
+            classify_sensitive_system_path("~/.ssh/id_rsa"),
+            Some(SensitiveCredentialStoreKind::RootSshKey)
+        );
+        assert_eq!(
+            classify_sensitive_system_path("/etc/ssh/ssh_host_rsa_key"),
+            Some(SensitiveCredentialStoreKind::RootSshKey)
+        );
+        assert_eq!(
+            classify_sensitive_system_path("/etc/ssh/ssh_host_ed25519_key"),
+            Some(SensitiveCredentialStoreKind::RootSshKey)
+        );
+        assert_eq!(
+            classify_sensitive_system_path("/var/run/docker.sock"),
+            Some(SensitiveCredentialStoreKind::DockerSocket)
+        );
+        assert_eq!(
+            classify_sensitive_system_path("/run/docker.sock"),
+            Some(SensitiveCredentialStoreKind::DockerSocket)
+        );
+        assert_eq!(
+            classify_sensitive_system_path("\\\\.\\pipe\\docker_engine"),
+            Some(SensitiveCredentialStoreKind::DockerSocket)
+        );
+        assert_eq!(
+            classify_sensitive_system_path("\\\\wsl$\\Ubuntu\\etc\\shadow"),
+            Some(SensitiveCredentialStoreKind::UnixShadow)
+        );
+        assert_eq!(
+            classify_sensitive_system_path("\\\\wsl$\\Ubuntu\\root\\.ssh\\id_rsa"),
+            Some(SensitiveCredentialStoreKind::RootSshKey)
+        );
+        assert_eq!(
+            classify_sensitive_system_path("\\\\wsl$\\Ubuntu\\var\\run\\docker.sock"),
+            Some(SensitiveCredentialStoreKind::DockerSocket)
+        );
     }
 
     #[test]
@@ -390,6 +536,8 @@ mod tests {
         assert!(scan_for_sensitive_system_path("type C:\\Windows\\System32\\config\\SAM").is_some());
         assert!(scan_for_sensitive_system_path("python -c \"open('/etc/sudoers')\"").is_some());
         assert!(scan_for_sensitive_system_path("git status").is_none());
+        assert!(scan_for_sensitive_system_path("cat /root/.ssh/id_rsa").is_some());
+        assert!(scan_for_sensitive_system_path("nc -U /var/run/docker.sock").is_some());
     }
 
     #[test]

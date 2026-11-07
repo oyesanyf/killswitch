@@ -758,15 +758,16 @@ impl SemanticDlpEngine {
             }
 
             // Check standard ISO 4217 currency codes (USD, EUR, GBP, CAD, AUD, CHF, JPY)
-            if currency_match.is_none() && trimmed.len() >= 3 {
-                let prefix = &trimmed[..3];
-                if ISO_CURRENCIES.iter().any(|&c| prefix.eq_ignore_ascii_case(c)) {
-                    let rest = &trimmed[3..];
-                    let num_part = rest.trim_start_matches([':', '=', '-', ' ']);
-                    if num_part.is_empty() {
-                        currency_match = Some(CurrencyMatch::Separated);
-                    } else if num_part.chars().next().map_or(false, |c| c.is_ascii_digit()) {
-                        currency_match = Some(CurrencyMatch::Attached(num_part));
+            if currency_match.is_none() {
+                if let Some(prefix) = trimmed.get(..3) {
+                    if ISO_CURRENCIES.iter().any(|&c| prefix.eq_ignore_ascii_case(c)) {
+                        let rest = &trimmed[3..];
+                        let num_part = rest.trim_start_matches([':', '=', '-', ' ']);
+                        if num_part.is_empty() {
+                            currency_match = Some(CurrencyMatch::Separated);
+                        } else if num_part.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+                            currency_match = Some(CurrencyMatch::Attached(num_part));
+                        }
                     }
                 }
             }
@@ -1228,5 +1229,37 @@ mod tests {
         let events = query_recent_semantic_events(10);
         assert!(!events.is_empty());
         assert_eq!(events[0].kind, SemanticEntityKind::SecretKey);
+    }
+
+    #[test]
+    fn test_deal_values_multibyte_utf8_boundary_safety() {
+        let engine = SemanticDlpEngine::new();
+        // Payloads with emojis / non-ASCII characters inside deal context must never panic
+        let payloads = [
+            "deal value: 💰10,000,000",
+            "deal value: 💰 USD 15,000,000",
+            "acquisition target price: 🚀$15,000,000",
+            "valuation: 🏢 USD 25,000,000",
+            "valuation: аб USD 12,000,000",
+            "merger price: 💳 EUR 50,000,000",
+            "deal value: 💰",
+            "deal value: 💰💰💰",
+            "deal value: 💰1M",
+        ];
+
+        for payload in payloads {
+            let _entities = engine.scan_payload(payload);
+            let _verdict = engine.evaluate_verdict(payload);
+        }
+
+        // Verify that USD and EUR accompanied by multibyte emojis/Cyrillic in deal contexts are detected
+        let usd_deal = engine.scan_payload("deal value: 💰 USD 15,000,000");
+        assert!(usd_deal.iter().any(|e| e.kind == SemanticEntityKind::DealValue));
+
+        let cyrillic_deal = engine.scan_payload("valuation: аб USD 12,000,000");
+        assert!(cyrillic_deal.iter().any(|e| e.kind == SemanticEntityKind::DealValue));
+
+        let eur_deal = engine.scan_payload("merger price: 💳 EUR 50,000,000");
+        assert!(eur_deal.iter().any(|e| e.kind == SemanticEntityKind::DealValue));
     }
 }

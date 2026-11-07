@@ -257,39 +257,126 @@ pub fn clear_interceptions() {
 // Wire Format Parsers
 // ============================================================================
 
+/// Extracts tool name matching canonical synonyms: `tool_name`, `name`, `tool`.
+pub fn extract_wire_tool_name(val: &serde_json::Value) -> Option<String> {
+    val.get("tool_name")
+        .or_else(|| val.get("name"))
+        .or_else(|| val.get("tool"))
+        .and_then(|v| v.as_str())
+        .map(String::from)
+}
+
+/// Extracts tool arguments / parameter object matching canonical synonyms:
+/// `arguments`, `tool_input`, `args`, `parameters`, `input`.
+pub fn extract_wire_arguments(val: &serde_json::Value) -> Option<serde_json::Value> {
+    val.get("arguments")
+        .or_else(|| val.get("tool_input"))
+        .or_else(|| val.get("args"))
+        .or_else(|| val.get("parameters"))
+        .or_else(|| val.get("input"))
+        .cloned()
+}
+
+/// Extracts tool response object matching canonical synonyms:
+/// `tool_response`, `result`, `output`, `content`.
+pub fn extract_wire_tool_response(val: &serde_json::Value) -> Option<&serde_json::Value> {
+    val.get("tool_response")
+        .or_else(|| val.get("result"))
+        .or_else(|| val.get("output"))
+        .or_else(|| val.get("content"))
+}
+
+/// Extracts command string matching canonical synonyms: `command`, `cmd`.
+/// Supports both string literals and token arrays (`["bash", "-c", ...]`).
+pub fn extract_wire_command(val: &serde_json::Value) -> Option<String> {
+    let field = val.get("command").or_else(|| val.get("cmd"));
+    if let Some(f) = field {
+        if let Some(s) = f.as_str() {
+            return Some(s.to_string());
+        }
+        if let Some(arr) = f.as_array() {
+            let parts: Vec<&str> = arr.iter().filter_map(|v| v.as_str()).collect();
+            if !parts.is_empty() {
+                return Some(parts.join(" "));
+            }
+        }
+    }
+    None
+}
+
+/// Extracts file path matching canonical synonyms: `file_path`, `path`, `filePath`, `uri`.
+pub fn extract_wire_file_path(val: &serde_json::Value) -> Option<String> {
+    val.get("file_path")
+        .or_else(|| val.get("path"))
+        .or_else(|| val.get("filePath"))
+        .or_else(|| val.get("uri"))
+        .and_then(|v| v.as_str())
+        .map(String::from)
+}
+
+/// Extracts session ID matching canonical synonyms:
+/// `session_id`, `sessionId`, `conversation_id`, `cursor_trace_id`.
+pub fn extract_wire_session_id(val: &serde_json::Value) -> Option<String> {
+    val.get("session_id")
+        .or_else(|| val.get("sessionId"))
+        .or_else(|| val.get("conversation_id"))
+        .or_else(|| val.get("cursor_trace_id"))
+        .and_then(|v| v.as_str())
+        .map(String::from)
+}
+
+/// Extracts exit code matching canonical synonyms: `exit_code`, `exitCode`.
+pub fn extract_wire_exit_code(val: &serde_json::Value) -> Option<i32> {
+    val.get("exit_code")
+        .or_else(|| val.get("exitCode"))
+        .and_then(|v| v.as_i64())
+        .map(|i| i as i32)
+}
+
+/// Extracts stderr or error message string matching: `stderr`, `error`.
+pub fn extract_wire_stderr(val: &serde_json::Value) -> Option<String> {
+    val.get("stderr")
+        .or_else(|| val.get("error"))
+        .and_then(|v| v.as_str())
+        .map(String::from)
+}
+
+/// Extracts working directory matching canonical synonyms: `cwd`, `working_dir`, `workingDirectory`.
+pub fn extract_wire_cwd(val: &serde_json::Value) -> Option<String> {
+    val.get("cwd")
+        .or_else(|| val.get("working_dir"))
+        .or_else(|| val.get("workingDirectory"))
+        .and_then(|v| v.as_str())
+        .map(String::from)
+}
+
 /// Parses Claude Code `.claude/settings.json` hook payload from JSON on stdin.
 pub fn parse_claude_request(raw_json: &str, is_post: bool) -> Result<NormalizedHookRequest, String> {
     let val: serde_json::Value = serde_json::from_str(raw_json)
         .map_err(|e| format!("Invalid Claude Code hook JSON: {e}"))?;
 
-    let tool_name = val.get("tool_name").and_then(|v| v.as_str()).map(String::from);
-    let mut command = None;
-    let mut file_path = None;
+    let tool_name = extract_wire_tool_name(&val);
+    let arguments = extract_wire_arguments(&val);
+    let command = arguments
+        .as_ref()
+        .and_then(extract_wire_command)
+        .or_else(|| extract_wire_command(&val));
+    let file_path = arguments
+        .as_ref()
+        .and_then(extract_wire_file_path)
+        .or_else(|| extract_wire_file_path(&val));
 
-    if let Some(tool_input) = val.get("tool_input") {
-        if let Some(cmd) = tool_input
-            .get("command")
-            .or_else(|| tool_input.get("cmd"))
-            .and_then(|v| v.as_str())
-        {
-            command = Some(cmd.to_string());
-        }
-        if let Some(path) = tool_input
-            .get("file_path")
-            .or_else(|| tool_input.get("path"))
-            .and_then(|v| v.as_str())
-        {
-            file_path = Some(path.to_string());
-        }
-    }
+    let tool_resp = extract_wire_tool_response(&val);
+    let exit_code = tool_resp
+        .and_then(extract_wire_exit_code)
+        .or_else(|| extract_wire_exit_code(&val));
+    let stderr = tool_resp
+        .and_then(extract_wire_stderr)
+        .or_else(|| extract_wire_stderr(&val));
 
-    let mut exit_code = None;
-    let mut stderr = None;
-
-    if let Some(tool_response) = val.get("tool_response") {
-        exit_code = tool_response.get("exit_code").and_then(|v| v.as_i64()).map(|i| i as i32);
-        stderr = tool_response.get("stderr").and_then(|v| v.as_str()).map(String::from);
-    }
+    let cwd = extract_wire_cwd(&val)
+        .or_else(|| arguments.as_ref().and_then(extract_wire_cwd));
+    let session_id = extract_wire_session_id(&val);
 
     Ok(NormalizedHookRequest {
         agent: SupportedAgentKind::Claude,
@@ -301,16 +388,11 @@ pub fn parse_claude_request(raw_json: &str, is_post: bool) -> Result<NormalizedH
         tool_name,
         command,
         file_path,
-        arguments: val.get("tool_input").cloned(),
+        arguments,
         exit_code,
         stderr,
-        cwd: val.get("cwd").and_then(|v| v.as_str()).map(String::from),
-        session_id: val
-            .get("session_id")
-            .or_else(|| val.get("sessionId"))
-            .or_else(|| val.get("conversation_id"))
-            .and_then(|v| v.as_str())
-            .map(String::from),
+        cwd,
+        session_id,
         rpc_id: None,
     })
 }
@@ -321,31 +403,24 @@ pub fn parse_cursor_request(raw_json: &str, event_name: &str) -> Result<Normaliz
         .map_err(|e| format!("Invalid Cursor hook JSON: {e}"))?;
 
     let event_type = HookEventType::from_name(event_name);
-    let command = val
-        .get("command")
-        .or_else(|| val.get("cmd"))
-        .and_then(|v| v.as_str())
-        .map(String::from);
-    let file_path = val
-        .get("file_path")
-        .or_else(|| val.get("path"))
-        .or_else(|| val.get("filePath"))
-        .and_then(|v| v.as_str())
-        .map(String::from);
-    let tool_name = val.get("tool_name").and_then(|v| v.as_str()).map(String::from);
-    let exit_code = val
-        .get("exit_code")
-        .or_else(|| val.get("exitCode"))
-        .and_then(|v| v.as_i64())
-        .map(|i| i as i32);
-    let stderr = val.get("stderr").and_then(|v| v.as_str()).map(String::from);
-    let cwd = val.get("cwd").and_then(|v| v.as_str()).map(String::from);
-    let session_id = val
-        .get("session_id")
-        .or_else(|| val.get("sessionId"))
-        .or_else(|| val.get("cursor_trace_id"))
-        .and_then(|v| v.as_str())
-        .map(String::from);
+    let tool_name = extract_wire_tool_name(&val);
+    let arguments = extract_wire_arguments(&val);
+    let command = extract_wire_command(&val)
+        .or_else(|| arguments.as_ref().and_then(extract_wire_command));
+    let file_path = extract_wire_file_path(&val)
+        .or_else(|| arguments.as_ref().and_then(extract_wire_file_path));
+
+    let tool_resp = extract_wire_tool_response(&val);
+    let exit_code = tool_resp
+        .and_then(extract_wire_exit_code)
+        .or_else(|| extract_wire_exit_code(&val));
+    let stderr = tool_resp
+        .and_then(extract_wire_stderr)
+        .or_else(|| extract_wire_stderr(&val));
+
+    let cwd = extract_wire_cwd(&val)
+        .or_else(|| arguments.as_ref().and_then(extract_wire_cwd));
+    let session_id = extract_wire_session_id(&val);
 
     Ok(NormalizedHookRequest {
         agent: SupportedAgentKind::Cursor,
@@ -353,7 +428,7 @@ pub fn parse_cursor_request(raw_json: &str, event_name: &str) -> Result<Normaliz
         tool_name,
         command,
         file_path,
-        arguments: val.get("arguments").cloned(),
+        arguments,
         exit_code,
         stderr,
         cwd,
@@ -368,42 +443,28 @@ pub fn parse_copilot_request(raw_json: &str, event_name: &str) -> Result<Normali
         .map_err(|e| format!("Invalid GitHub Copilot hook JSON: {e}"))?;
 
     let event_type = HookEventType::from_name(event_name);
-    let tool_name = val
-        .get("tool")
-        .or_else(|| val.get("tool_name"))
-        .and_then(|v| v.as_str())
-        .map(String::from);
+    let tool_name = extract_wire_tool_name(&val);
+    let arguments = extract_wire_arguments(&val);
+    let command = arguments
+        .as_ref()
+        .and_then(extract_wire_command)
+        .or_else(|| extract_wire_command(&val));
+    let file_path = arguments
+        .as_ref()
+        .and_then(extract_wire_file_path)
+        .or_else(|| extract_wire_file_path(&val));
 
-    let mut command = None;
-    let mut file_path = None;
-    if let Some(params) = val.get("parameters") {
-        if let Some(cmd) = params
-            .get("command")
-            .or_else(|| params.get("cmd"))
-            .and_then(|v| v.as_str())
-        {
-            command = Some(cmd.to_string());
-        }
-        if let Some(path) = params
-            .get("file_path")
-            .or_else(|| params.get("path"))
-            .or_else(|| params.get("filePath"))
-            .and_then(|v| v.as_str())
-        {
-            file_path = Some(path.to_string());
-        }
-    }
+    let tool_resp = extract_wire_tool_response(&val);
+    let exit_code = tool_resp
+        .and_then(extract_wire_exit_code)
+        .or_else(|| extract_wire_exit_code(&val));
+    let stderr = tool_resp
+        .and_then(extract_wire_stderr)
+        .or_else(|| extract_wire_stderr(&val));
 
-    let mut exit_code = None;
-    let mut stderr = None;
-    if let Some(res) = val.get("result") {
-        exit_code = res
-            .get("exitCode")
-            .or_else(|| res.get("exit_code"))
-            .and_then(|v| v.as_i64())
-            .map(|i| i as i32);
-        stderr = res.get("stderr").and_then(|v| v.as_str()).map(String::from);
-    }
+    let cwd = extract_wire_cwd(&val)
+        .or_else(|| arguments.as_ref().and_then(extract_wire_cwd));
+    let session_id = extract_wire_session_id(&val);
 
     Ok(NormalizedHookRequest {
         agent: SupportedAgentKind::Copilot,
@@ -411,15 +472,11 @@ pub fn parse_copilot_request(raw_json: &str, event_name: &str) -> Result<Normali
         tool_name,
         command,
         file_path,
-        arguments: val.get("parameters").cloned(),
+        arguments,
         exit_code,
         stderr,
-        cwd: None,
-        session_id: val
-            .get("session_id")
-            .or_else(|| val.get("sessionId"))
-            .and_then(|v| v.as_str())
-            .map(String::from),
+        cwd,
+        session_id,
         rpc_id: None,
     })
 }
@@ -436,26 +493,28 @@ pub fn parse_opencode_request(raw_json: &str) -> Result<NormalizedHookRequest, S
         HookEventType::PreToolUse
     };
 
-    let tool_name = val
-        .get("tool")
-        .or_else(|| val.get("tool_name"))
-        .and_then(|v| v.as_str())
-        .map(String::from);
-    let command = val
-        .get("args")
-        .and_then(|a| a.get("command").or_else(|| a.get("cmd")))
-        .and_then(|v| v.as_str())
-        .map(String::from);
-    let file_path = val
-        .get("args")
-        .and_then(|a| a.get("file_path").or_else(|| a.get("path")).or_else(|| a.get("filePath")))
-        .and_then(|v| v.as_str())
-        .map(String::from);
-    let exit_code = val
-        .get("exit_code")
-        .or_else(|| val.get("exitCode"))
-        .and_then(|v| v.as_i64())
-        .map(|i| i as i32);
+    let tool_name = extract_wire_tool_name(&val);
+    let arguments = extract_wire_arguments(&val);
+    let command = arguments
+        .as_ref()
+        .and_then(extract_wire_command)
+        .or_else(|| extract_wire_command(&val));
+    let file_path = arguments
+        .as_ref()
+        .and_then(extract_wire_file_path)
+        .or_else(|| extract_wire_file_path(&val));
+
+    let tool_resp = extract_wire_tool_response(&val);
+    let exit_code = tool_resp
+        .and_then(extract_wire_exit_code)
+        .or_else(|| extract_wire_exit_code(&val));
+    let stderr = tool_resp
+        .and_then(extract_wire_stderr)
+        .or_else(|| extract_wire_stderr(&val));
+
+    let cwd = extract_wire_cwd(&val)
+        .or_else(|| arguments.as_ref().and_then(extract_wire_cwd));
+    let session_id = extract_wire_session_id(&val);
 
     Ok(NormalizedHookRequest {
         agent: SupportedAgentKind::OpenCode,
@@ -463,15 +522,11 @@ pub fn parse_opencode_request(raw_json: &str) -> Result<NormalizedHookRequest, S
         tool_name,
         command,
         file_path,
-        arguments: val.get("args").cloned(),
+        arguments,
         exit_code,
-        stderr: val.get("stderr").and_then(|v| v.as_str()).map(String::from),
-        cwd: None,
-        session_id: val
-            .get("session_id")
-            .or_else(|| val.get("sessionId"))
-            .and_then(|v| v.as_str())
-            .map(String::from),
+        stderr,
+        cwd,
+        session_id,
         rpc_id: None,
     })
 }
@@ -488,18 +543,28 @@ pub fn parse_mcp_call_request(raw_json: &str) -> Result<NormalizedHookRequest, S
 
     let rpc_id = val.get("id").cloned();
     let params = val.get("params").cloned().unwrap_or(serde_json::Value::Null);
-    let tool_name = params.get("name").and_then(|v| v.as_str()).map(String::from);
-    let args = params.get("arguments").cloned();
-    let command = args
+
+    let tool_name = extract_wire_tool_name(&params)
+        .or_else(|| extract_wire_tool_name(&val));
+    let arguments = extract_wire_arguments(&params)
+        .or_else(|| extract_wire_arguments(&val));
+
+    let command = arguments
         .as_ref()
-        .and_then(|a| a.get("command").or_else(|| a.get("cmd")))
-        .and_then(|v| v.as_str())
-        .map(String::from);
-    let file_path = args
+        .and_then(extract_wire_command)
+        .or_else(|| extract_wire_command(&params))
+        .or_else(|| extract_wire_command(&val));
+    let file_path = arguments
         .as_ref()
-        .and_then(|a| a.get("path").or_else(|| a.get("file_path")).or_else(|| a.get("filePath")).or_else(|| a.get("uri")))
-        .and_then(|v| v.as_str())
-        .map(String::from);
+        .and_then(extract_wire_file_path)
+        .or_else(|| extract_wire_file_path(&params))
+        .or_else(|| extract_wire_file_path(&val));
+
+    let cwd = extract_wire_cwd(&params)
+        .or_else(|| extract_wire_cwd(&val))
+        .or_else(|| arguments.as_ref().and_then(extract_wire_cwd));
+    let session_id = extract_wire_session_id(&params)
+        .or_else(|| extract_wire_session_id(&val));
 
     Ok(NormalizedHookRequest {
         agent: SupportedAgentKind::Mcp,
@@ -507,11 +572,11 @@ pub fn parse_mcp_call_request(raw_json: &str) -> Result<NormalizedHookRequest, S
         tool_name,
         command,
         file_path,
-        arguments: args,
+        arguments,
         exit_code: None,
         stderr: None,
-        cwd: None,
-        session_id: None,
+        cwd,
+        session_id,
         rpc_id,
     })
 }
@@ -579,11 +644,24 @@ pub fn format_opencode_response(decision: &HookEvaluationDecision) -> (i32, Stri
     (0, obj.to_string())
 }
 
-/// Formats MCP JSON-RPC response for `tools/call`.
+/// Formats MCP JSON-RPC response for `tools/call` compliant with JSON-RPC 2.0 §5.1 and MCP CallToolResult.
 pub fn format_mcp_error_response(id: &serde_json::Value, decision: &HookEvaluationDecision) -> String {
+    let mut error_obj = serde_json::json!({
+        "code": -32000,
+        "message": format!("KillSwitch Policy Violation: {}", decision.rationale)
+    });
+
+    if decision.denied_by_layer.is_some() || decision.remediation.is_some() {
+        error_obj["data"] = serde_json::json!({
+            "denied_by_layer": decision.denied_by_layer.as_deref().unwrap_or("Unknown"),
+            "suggested_remediation": decision.remediation.as_deref().unwrap_or("None"),
+        });
+    }
+
     let resp = serde_json::json!({
         "jsonrpc": "2.0",
         "id": id,
+        "error": error_obj,
         "result": {
             "content": [
                 {
@@ -657,6 +735,8 @@ pub fn evaluate_hook_synchronously(req: &NormalizedHookRequest) -> HookEvaluatio
     if let Some(path) = &req.file_path {
         if let Some(kind) = crate::sensitive_paths::classify_sensitive_system_path(path) {
             detected_sensitive_store = Some((kind, path.clone()));
+        } else if let Some(found) = crate::sensitive_paths::scan_for_sensitive_system_path(path) {
+            detected_sensitive_store = Some(found);
         }
     }
 
