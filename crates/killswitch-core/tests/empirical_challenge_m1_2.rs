@@ -208,8 +208,8 @@ fn test_challenge_task2_only_local_loopback_preserved_on_control_port() {
     let elevated = is_current_process_elevated();
     let rules = apply_bfe_registry_quarantine_rules();
 
-    if elevated {
-        // When elevated, verify registry rules applied
+    if elevated && cfg!(windows) {
+        // When elevated on Windows, verify registry rules applied
         let allow_rules: Vec<_> = rules
             .iter()
             .filter(|r| r.starts_with("KillSwitch-Allow-"))
@@ -258,13 +258,21 @@ fn test_challenge_task2_only_local_loopback_preserved_on_control_port() {
             block_rules.iter().any(|r| r.contains("Outbound-v6")),
             "Missing Outbound-v6 block rule"
         );
-    } else {
-        // When un-elevated, verify that apply_bfe_registry_quarantine_rules() returns empty
+    } else if cfg!(windows) {
+        // When un-elevated on Windows, verify that apply_bfe_registry_quarantine_rules() returns empty
         // because writing to HKLM requires Administrator privileges (fail-safe protection)
         assert!(
             rules.is_empty(),
             "Un-elevated caller must not be able to modify HKLM registry rules; expected empty, got {:?}",
             rules
+        );
+    } else {
+        // On non-Windows platforms without HKLM, verify loopback restriction
+        assert!(
+            rules
+                .iter()
+                .all(|r| r.contains("Loopback") || r.contains("WebUI")),
+            "Non-Windows quarantine rules must be loopback-restricted"
         );
     }
 
