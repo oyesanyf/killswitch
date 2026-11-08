@@ -108,6 +108,13 @@ pub trait NativeServiceManager: Send + Sync {
     /// Queries the operational status of the service.
     fn service_status(&self, service_name: &str) -> Result<ServiceStatus, ServiceError>;
 
+    /// Restarts the service by stopping it and then starting it.
+    fn restart_service(&self, service_name: &str) -> Result<(), ServiceError> {
+        let _ = self.stop_service(service_name);
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        self.start_service(service_name)
+    }
+
     /// Runs the daemon execution loop. Blocks until shutdown signal is received.
     /// Unconditionally executes `execute_host_disarm_unauthenticated()` before returning.
     fn run_service_daemon(&self) -> Result<(), ServiceError>;
@@ -254,18 +261,54 @@ impl NativeServiceManager for LinuxServiceManager {
         if !path.exists() {
             return Err(ServiceError::NotFound(service_name.to_string()));
         }
+        let status = self.service_status(service_name)?;
+        if status.state == ServiceState::Running {
+            info!(
+                "🟢 [LINUX-SERVICE] Service '{}' is already running",
+                service_name
+            );
+            return Ok(());
+        }
+        let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("/usr/bin/killswitch"));
+        std::process::Command::new(exe)
+            .args(["--service", "run"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(ServiceError::Io)?;
         info!(
-            "🟢 [LINUX-SERVICE] Signaled systemd service start for '{}'",
+            "🟢 [LINUX-SERVICE] Started systemd service daemon for '{}'",
             service_name
         );
         Ok(())
     }
 
     fn stop_service(&self, service_name: &str) -> Result<(), ServiceError> {
-        info!(
-            "🟢 [LINUX-SERVICE] Signaled systemd service stop for '{}'",
-            service_name
-        );
+        let status = self.service_status(service_name)?;
+        if let Some(pid) = status.pid {
+            #[cfg(unix)]
+            unsafe {
+                if libc::kill(pid as libc::pid_t, libc::SIGTERM) != 0 {
+                    let err = std::io::Error::last_os_error();
+                    return Err(ServiceError::Io(err));
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = pid;
+            }
+            info!(
+                "🟢 [LINUX-SERVICE] Sent SIGTERM to systemd service '{}' (PID {})",
+                service_name, pid
+            );
+        } else {
+            info!(
+                "🟢 [LINUX-SERVICE] Service '{}' is not running",
+                service_name
+            );
+        }
+        self.stop_flag.store(true, Ordering::SeqCst);
         Ok(())
     }
 
@@ -559,18 +602,54 @@ impl NativeServiceManager for MacOsServiceManager {
         if !path.exists() {
             return Err(ServiceError::NotFound(service_name.to_string()));
         }
+        let status = self.service_status(service_name)?;
+        if status.state == ServiceState::Running {
+            info!(
+                "🟢 [MACOS-SERVICE] Service '{}' is already running",
+                service_name
+            );
+            return Ok(());
+        }
+        let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("/usr/local/bin/killswitch"));
+        std::process::Command::new(exe)
+            .args(["--service", "run"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(ServiceError::Io)?;
         info!(
-            "🟢 [MACOS-SERVICE] Registered launchd service start for '{}'",
+            "🟢 [MACOS-SERVICE] Started launchd service daemon for '{}'",
             service_name
         );
         Ok(())
     }
 
     fn stop_service(&self, service_name: &str) -> Result<(), ServiceError> {
-        info!(
-            "🟢 [MACOS-SERVICE] Registered launchd service stop for '{}'",
-            service_name
-        );
+        let status = self.service_status(service_name)?;
+        if let Some(pid) = status.pid {
+            #[cfg(unix)]
+            unsafe {
+                if libc::kill(pid as libc::pid_t, libc::SIGTERM) != 0 {
+                    let err = std::io::Error::last_os_error();
+                    return Err(ServiceError::Io(err));
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = pid;
+            }
+            info!(
+                "🟢 [MACOS-SERVICE] Sent SIGTERM to launchd service '{}' (PID {})",
+                service_name, pid
+            );
+        } else {
+            info!(
+                "🟢 [MACOS-SERVICE] Service '{}' is not running",
+                service_name
+            );
+        }
+        self.stop_flag.store(true, Ordering::SeqCst);
         Ok(())
     }
 

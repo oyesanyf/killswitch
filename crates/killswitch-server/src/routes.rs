@@ -31,7 +31,9 @@ pub fn build_router(state: Arc<ServerState>) -> Router {
         .route("/edr/ingest", post(handlers::post_edr_ingest))
         // 4. Native OS Service Lifecycle
         .route("/service/status", get(handlers::get_service_status))
+        .route("/api/service/status", get(handlers::get_service_status))
         .route("/service/control", post(handlers::post_service_control))
+        .route("/api/service/control", post(handlers::post_service_control))
         // 5. DLP Data Lineage Engine
         .route("/lineage/status", get(handlers::get_lineage_status))
         .route("/lineage/seed", post(handlers::post_lineage_seed))
@@ -53,6 +55,14 @@ pub fn build_router(state: Arc<ServerState>) -> Router {
         )
         .route(
             "/api/killswitch-bench/evaluate",
+            post(handlers::post_edr_bench_evaluate),
+        )
+        .route(
+            "/api/edr-bench/ingest",
+            post(handlers::post_edr_bench_evaluate),
+        )
+        .route(
+            "/edr-bench/ingest",
             post(handlers::post_edr_bench_evaluate),
         )
         // 7. Connected Peers Inspection & 1-Click Disable/Enable Control

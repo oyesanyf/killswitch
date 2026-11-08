@@ -50,10 +50,28 @@ jobs:
         run: cargo build --release --workspace
       - name: Package Linux Tarball & Deb
         run: |
-          mkdir -p release-out stage-deb/usr/bin stage-deb/DEBIAN
+          mkdir -p release-out stage-deb/usr/bin stage-deb/etc/systemd/system stage-deb/DEBIAN
           cp target/release/killswitch stage-deb/usr/bin/killswitch
           cp target/release/start stage-deb/usr/bin/killswitch-start
           chmod 0755 stage-deb/usr/bin/*
+          cat > stage-deb/etc/systemd/system/killswitch.service << 'EOF'
+          [Unit]
+          Description=KillSwitch Security Agent
+          After=network.target
+          Documentation=https://github.com/killswitch/killswitch
+
+          [Service]
+          Type=notify
+          ExecStart=/usr/bin/killswitch --service run
+          Restart=on-failure
+          RestartSec=5s
+          KillMode=process
+          TimeoutStopSec=15
+          SendSIGKILL=yes
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
           cat > stage-deb/DEBIAN/control << 'EOF'
           Package: killswitch
           Version: 0.1.0
@@ -63,6 +81,53 @@ jobs:
           Maintainer: KillSwitch Security <security@killswitch.local>
           Description: KillSwitch Autonomous EDR, Stateful Lineage & Multi-Source Conformal Guard
           EOF
+          cat > stage-deb/DEBIAN/postinst << 'EOF'
+          #!/bin/sh
+          set -e
+          if [ "$1" = "configure" ]; then
+              if command -v systemctl >/dev/null 2>&1; then
+                  systemctl daemon-reload || true
+                  systemctl enable killswitch.service || true
+                  systemctl restart killswitch.service || true
+              elif [ -x /usr/bin/killswitch ]; then
+                  /usr/bin/killswitch --service install || true
+                  /usr/bin/killswitch --service start || true
+              fi
+              if [ -n "$DISPLAY" ] || [ -n "$WAYLAND_DISPLAY" ]; then
+                  if command -v xdg-open >/dev/null 2>&1; then
+                      xdg-open "http://127.0.0.1:3030" >/dev/null 2>&1 &
+                  elif command -v gio >/dev/null 2>&1; then
+                      gio open "http://127.0.0.1:3030" >/dev/null 2>&1 &
+                  fi
+              fi
+          fi
+          exit 0
+          EOF
+          cat > stage-deb/DEBIAN/prerm << 'EOF'
+          #!/bin/sh
+          set -e
+          if [ "$1" = "remove" ] || [ "$1" = "deconfigure" ]; then
+              if command -v systemctl >/dev/null 2>&1; then
+                  systemctl stop killswitch.service || true
+                  systemctl disable killswitch.service || true
+              elif [ -x /usr/bin/killswitch ]; then
+                  /usr/bin/killswitch --service stop || true
+                  /usr/bin/killswitch --service uninstall || true
+              fi
+          fi
+          exit 0
+          EOF
+          cat > stage-deb/DEBIAN/postrm << 'EOF'
+          #!/bin/sh
+          set -e
+          if [ "$1" = "purge" ] || [ "$1" = "remove" ]; then
+              if command -v systemctl >/dev/null 2>&1; then
+                  systemctl daemon-reload || true
+              fi
+          fi
+          exit 0
+          EOF
+          chmod 0755 stage-deb/DEBIAN/postinst stage-deb/DEBIAN/prerm stage-deb/DEBIAN/postrm
           dpkg-deb --build stage-deb release-out/killswitch_0.1.0_amd64.deb
           tar -czf release-out/killswitch-0.1.0-linux-x86_64.tar.gz -C target/release killswitch start
       - uses: actions/upload-artifact@v7
@@ -81,11 +146,63 @@ jobs:
         run: cargo build --release --workspace
       - name: Package macOS Tarball & Pkg
         run: |
-          mkdir -p release-out pkgroot/usr/local/bin
+          mkdir -p release-out pkgroot/usr/local/bin pkgroot/Library/LaunchDaemons pkgscripts
           cp target/release/killswitch pkgroot/usr/local/bin/killswitch
           cp target/release/start pkgroot/usr/local/bin/killswitch-start
+          cat > pkgroot/Library/LaunchDaemons/com.oshoosi.killswitch.plist << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>Label</key>
+              <string>com.oshoosi.killswitch</string>
+              <key>ProgramArguments</key>
+              <array>
+                  <string>/usr/local/bin/killswitch</string>
+                  <string>--service</string>
+                  <string>run</string>
+              </array>
+              <key>RunAtLoad</key>
+              <true/>
+              <key>KeepAlive</key>
+              <true/>
+              <key>StandardOutPath</key>
+              <string>/var/log/killswitch.log</string>
+              <key>StandardErrorPath</key>
+              <string>/var/log/killswitch.err</string>
+          </dict>
+          </plist>
+          EOF
+          cat > pkgscripts/postinstall << 'EOF'
+          #!/bin/bash
+          set -e
+          PLIST_PATH="/Library/LaunchDaemons/com.oshoosi.killswitch.plist"
+          if [ -f "$PLIST_PATH" ]; then
+              chown root:wheel "$PLIST_PATH"
+              chmod 644 "$PLIST_PATH"
+              launchctl unload "$PLIST_PATH" 2>/dev/null || true
+              launchctl load -w "$PLIST_PATH" || true
+          fi
+          LOGGED_IN_USER=$(scutil <<< "show State:/Users/ConsoleUser" | awk '/Name :/ && !/loginwindow/ { print $3 }')
+          if [ -n "$LOGGED_IN_USER" ] && [ "$LOGGED_IN_USER" != "root" ]; then
+              USER_ID=$(id -u "$LOGGED_IN_USER")
+              launchctl asuser "$USER_ID" sudo -u "$LOGGED_IN_USER" open "http://127.0.0.1:3030" 2>/dev/null || true
+          else
+              open "http://127.0.0.1:3030" 2>/dev/null || true
+          fi
+          exit 0
+          EOF
+          cat > pkgscripts/preinstall << 'EOF'
+          #!/bin/bash
+          PLIST_PATH="/Library/LaunchDaemons/com.oshoosi.killswitch.plist"
+          if [ -f "$PLIST_PATH" ]; then
+              launchctl unload "$PLIST_PATH" 2>/dev/null || true
+          fi
+          exit 0
+          EOF
+          chmod 0755 pkgscripts/*
           tar -czf release-out/killswitch-0.1.0-macos-universal.tar.gz -C target/release killswitch start
-          pkgbuild --root pkgroot --identifier io.killswitch.agent --version 0.1.0 release-out/KillSwitch-0.1.0-macos-universal.pkg
+          pkgbuild --root pkgroot --scripts pkgscripts --identifier io.killswitch.agent --version 0.1.0 release-out/KillSwitch-0.1.0-macos-universal.pkg
       - uses: actions/upload-artifact@v7
         with:
           name: macos-artifacts

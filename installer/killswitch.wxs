@@ -13,6 +13,22 @@
             <Directory Id="INSTALLFOLDER" Name="KillSwitch">
                 <Component Id="KillSwitchMainExe" Guid="4b1e9705-6fa9-4812-a2eb-6958fb3d14df" Bitness="always64">
                     <File Id="KillSwitchExe" Source="target\release\killswitch.exe" KeyPath="yes" />
+                    <ServiceInstall Id="KillSwitchServiceInstall"
+                                    Name="killswitch"
+                                    DisplayName="KillSwitch Security Agent"
+                                    Description="Native zero-OS-tool host containment and security daemon"
+                                    Type="ownProcess"
+                                    Start="auto"
+                                    ErrorControl="normal"
+                                    Account="LocalSystem"
+                                    Arguments="--service run"
+                                    Vital="yes" />
+                    <ServiceControl Id="KillSwitchServiceControl"
+                                    Name="killswitch"
+                                    Start="install"
+                                    Stop="both"
+                                    Remove="uninstall"
+                                    Wait="yes" />
                 </Component>
                 <Component Id="KillSwitchStartExe" Guid="5c2fa816-7eb0-4923-b3fc-7069ac4e25ef" Bitness="always64">
                     <File Id="StartExe" Source="target\release\start.exe" KeyPath="yes" />
@@ -24,5 +40,17 @@
             <ComponentRef Id="KillSwitchMainExe" />
             <ComponentRef Id="KillSwitchStartExe" />
         </Feature>
+
+        <!-- Launch WebUI Dashboard in default browser upon successful installation -->
+        <CustomAction Id="LaunchBrowserUI"
+                      Directory="INSTALLFOLDER"
+                      Execute="immediate"
+                      Impersonate="yes"
+                      Return="asyncNoWait"
+                      ExeCommand="&quot;[System64Folder]cmd.exe&quot; /c start http://127.0.0.1:3030" />
+
+        <InstallExecuteSequence>
+            <Custom Action="LaunchBrowserUI" After="InstallFinalize" Condition="NOT REMOVE~=&quot;ALL&quot; AND NOT Installed" />
+        </InstallExecuteSequence>
     </Package>
 </Wix>

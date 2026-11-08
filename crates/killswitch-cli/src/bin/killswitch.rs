@@ -43,6 +43,14 @@ struct Cli {
     #[arg(long)]
     daemon: bool,
 
+    /// Automatically open default browser to WebUI Dashboard (http://127.0.0.1:3030)
+    #[arg(long = "open-browser", alias = "browser")]
+    open_browser: bool,
+
+    /// Manage native OS background service (install, delete, uninstall, start, stop, restart, status, run)
+    #[arg(long, value_name = "ACTION")]
+    service: Option<String>,
+
     /// Path to durable state ledger and database directory
     #[arg(long)]
     db_dir: Option<PathBuf>,
@@ -316,6 +324,7 @@ async fn boot_unified_webui_runtime(
     port: u16,
     mode_str: String,
     db_dir: Option<PathBuf>,
+    open_browser: bool,
 ) -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -354,6 +363,7 @@ async fn boot_unified_webui_runtime(
         port,
         mode,
         db_dir,
+        open_browser,
     };
 
     info!(
@@ -435,6 +445,10 @@ async fn main() -> Result<()> {
         }
     }
 
+    if let Some(ref action) = cli.service {
+        return killswitch_cli::commands::handle_native_service_cli(action).await;
+    }
+
     let client = KillSwitchClient::new(&cli.host, cli.port);
 
     if let Some(ref approve_id) = cli.research_approve {
@@ -493,7 +507,7 @@ async fn main() -> Result<()> {
                     std::process::exit(0);
                 }
             }
-            boot_unified_webui_runtime(cli.host, cli.port, cli.mode, cli.db_dir).await?;
+            boot_unified_webui_runtime(cli.host, cli.port, cli.mode, cli.db_dir, cli.open_browser).await?;
         }
         Some(Commands::Status) => handle_status(&client).await?,
         Some(Commands::Isolate {
@@ -523,7 +537,9 @@ async fn main() -> Result<()> {
                 std::process::exit(1);
             }
         },
-        Some(Commands::Service { action }) => handle_service(&client, Some(&action)).await?,
+        Some(Commands::Service { action }) => {
+            killswitch_cli::commands::handle_native_service_cli(&action).await?
+        }
         Some(Commands::Lineage {
             action,
             path,

@@ -39,6 +39,7 @@ pub struct UnifiedConfig {
     pub port: u16,
     pub mode: OrchestratorMode,
     pub db_dir: Option<PathBuf>,
+    pub open_browser: bool,
 }
 
 impl Default for UnifiedConfig {
@@ -48,6 +49,7 @@ impl Default for UnifiedConfig {
             port: 3030,
             mode: OrchestratorMode::Autonomous,
             db_dir: None,
+            open_browser: false,
         }
     }
 }
@@ -77,11 +79,11 @@ impl OrchestratorBridge for LiveOrchestratorAdapter {
     async fn step(
         &self,
         _input: Option<serde_json::Value>,
-        _force_node: Option<GraphNodeId>,
+        force_node: Option<GraphNodeId>,
     ) -> Result<GraphNodeOutput, ServerError> {
         let transition = self
             .orchestrator
-            .step()
+            .step_with_force(force_node)
             .await
             .map_err(|e| ServerError::Internal(format!("Orchestrator step failed: {}", e)))?;
 
@@ -227,6 +229,7 @@ impl UnifiedRuntime {
         server_state_raw.config = ServerConfig {
             host: config.host.clone(),
             port: config.port,
+            open_browser: config.open_browser,
             ..Default::default()
         };
 

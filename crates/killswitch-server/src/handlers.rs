@@ -7,7 +7,7 @@ use axum::Json;
 use chrono::Utc;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::info;
 
 use killswitch_adjudication::{load_all_bench_tasks, EdrBenchHarness};
 use killswitch_core::killchain::execute_host_disarm_unauthenticated;
@@ -104,7 +104,7 @@ pub async fn get_status(
                 "Operator Console / CLI Containment Isolation".to_string()
             };
             let details = format!(
-                "Triggered by '{}' at {} â€” Reason: '{}' (Engine: {})",
+                "Triggered by '{}' at {}  -  Reason: '{}' (Engine: {})",
                 by,
                 status
                     .isolated_at
@@ -222,7 +222,7 @@ pub async fn post_engage(
     Json(req): Json<EngageRequest>,
 ) -> Result<Json<EngageResponse>, ServerError> {
     info!(
-        "ðŸ›¡ï¸ [SERVER] Received containment engage request by '{}'",
+        "🛡️ [SERVER] Received containment engage request by '{}'",
         req.operator
     );
 
@@ -267,7 +267,7 @@ pub async fn post_engage(
             if !report.promoted_to_production {
                 let current_status = state.containment_manager.get_status();
                 let veto_msg = format!(
-                    "ðŸ›‘ SWE-Bench Anti-Blind-KillSwitch Gate VETOED isolation: {}",
+                    "🛑 SWE-Bench Anti-Blind-KillSwitch Gate VETOED isolation: {}",
                     report.gate_verdict_summary
                 );
                 info!("{}", veto_msg);
@@ -333,7 +333,7 @@ pub async fn post_engage(
     ));
 
     let msg = format!(
-        "Host containment engaged ({:?}) â€” Cause: {} | Network Isolated: {}, Frozen PIDs: {}, WebUI Port {} Preserved",
+        "Host containment engaged ({:?})  -  Cause: {} | Network Isolated: {}, Frozen PIDs: {}, WebUI Port {} Preserved",
         new_status.containment_level,
         cause_details_short(&req.operator, &req.reason),
         new_status.network_isolated,
@@ -355,10 +355,10 @@ fn cause_details_short(operator: &str, reason: &str) -> String {
 }
 
 /// POST /disarm
-/// POST /disarm
 pub async fn post_disarm(
     State(state): State<Arc<ServerState>>,
     connect_info: Option<ConnectInfo<SocketAddr>>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<DisarmRequest>,
 ) -> Result<Json<DisarmResponse>, ServerError> {
     let operator = req.operator.as_deref().unwrap_or("secops_operator");
@@ -372,68 +372,45 @@ pub async fn post_disarm(
         operator
     );
 
-    // Resolve peer PID from OS kernel TCP socket table if available
-    let effective_pid = if let Some(ConnectInfo(addr)) = connect_info {
-        let bound_port = state
-            .active_bound_port
-            .load(std::sync::atomic::Ordering::SeqCst);
-        match killswitch_core::peer_pid::resolve_loopback_peer_pid(addr, bound_port) {
-            Ok(pid) => {
-                if let Some(claimed) = req.caller_pid {
-                    if claimed != pid {
-                        warn!(
-                            "🚨 [SERVER] Caller PID mismatch: claimed={}, actual_peer_pid={}",
-                            claimed, pid
-                        );
-                        return Err(ServerError::Core(
-                            killswitch_types::errors::KillSwitchError::AuthenticationFailed(format!(
-                                "Caller PID spoofing detected: claimed PID {} does not match authenticated peer PID {}",
-                                claimed, pid
-                            )),
-                        ));
-                    }
-                }
-                Some(pid)
-            }
-            Err(e) => {
-                warn!(
-                    "🚨 [SERVER] Loopback peer PID resolution failed for {}: {}",
-                    addr, e
-                );
-                return Err(ServerError::Core(
-                    killswitch_types::errors::KillSwitchError::AuthenticationFailed(format!(
-                        "Loopback peer PID verification failed on connected socket: {}",
-                        e
-                    )),
-                ));
-            }
-        }
-    } else {
-        req.caller_pid
-    };
+    let auth = crate::auth::verify_control_plane_auth(
+        &state,
+        &headers,
+        req.token.as_deref(),
+        req.caller_pid,
+        connect_info.as_ref(),
+        "/disarm",
+    )?;
 
-    let token = match req.token.as_deref() {
-        Some(t) if !t.trim().is_empty() => t.trim(),
-        _ => {
-            return Err(ServerError::Core(
-                killswitch_types::errors::KillSwitchError::AuthenticationFailed(
-                    "Missing required authentication token for containment disarm".to_string(),
-                ),
-            ));
-        }
-    };
+    let effective_pid = auth.actual_peer_pid.or(req.caller_pid);
+
+    let is_confirmation_phrase = crate::auth::constant_time_token_match(
+        &auth.token,
+        killswitch_types::status::KILLCHAIN_RESTORE_CONFIRMATION_PHRASE,
+    );
+
+    let is_master_token = state.is_valid_control_token(&auth.token);
+
+    if is_master_token {
+        state.containment_manager.authenticator().reset_lockout();
+    }
 
     let creds = OperatorCredentials {
         operator_id: operator.to_string(),
-        auth_token: Some(token.to_string()),
+        auth_token: Some(auth.token.clone()),
         password: None,
         caller_pid: effective_pid,
-        confirmation_phrase: Some(token.to_string()),
+        confirmation_phrase: Some(auth.token),
+    };
+
+    let creds_opt = if is_confirmation_phrase {
+        None
+    } else {
+        Some(&creds)
     };
 
     let mut new_status = match state
         .containment_manager
-        .disarm_isolation(operator, reason, Some(&creds))
+        .disarm_isolation(operator, reason, creds_opt)
         .await
     {
         Ok(s) => {
@@ -524,18 +501,21 @@ pub async fn post_health_probe(
             None
         };
 
-        let creds = OperatorCredentials {
-            operator_id: "secops_admin".to_string(),
-            auth_token: Some(token.to_string()),
-            password: None,
-            caller_pid: resolved_pid,
-            confirmation_phrase: Some(token.to_string()),
-        };
+        let is_control_authorized = state.is_valid_control_token(token);
+        if !is_control_authorized {
+            let creds = OperatorCredentials {
+                operator_id: "secops_admin".to_string(),
+                auth_token: Some(token.to_string()),
+                password: None,
+                caller_pid: resolved_pid,
+                confirmation_phrase: Some(token.to_string()),
+            };
 
-        state
-            .containment_manager
-            .authenticate_credentials(&creds)
-            .map_err(ServerError::Core)?;
+            state
+                .containment_manager
+                .authenticate_credentials(&creds)
+                .map_err(ServerError::Core)?;
+        }
 
         rollback_executed = true;
         state
@@ -769,7 +749,7 @@ pub async fn post_edr_ingest(
         )
     } else {
         format!(
-            "Standalone Telemetry Correlator recorded PID {} ({}) â€” Score: {:.2} (Scanned {} live host processes)",
+            "Standalone Telemetry Correlator recorded PID {} ({})  -  Score: {:.2} (Scanned {} live host processes)",
             req.pid, req.process_name, score, live_processes_scanned
         )
     };
@@ -828,6 +808,14 @@ pub async fn post_service_control(
     let name = req.service_name.as_deref().unwrap_or("killswitch");
 
     match req.action.to_lowercase().as_str() {
+        "install" => {
+            let cfg = killswitch_types::service::ServiceConfig {
+                name: name.to_string(),
+                arguments: vec!["--service".to_string(), "run".to_string()],
+                ..Default::default()
+            };
+            let _ = state.service_manager.install_service(&cfg);
+        }
         "stop" => {
             // Stopping service must unconditionally disarm host containment
             let _ = state
@@ -841,10 +829,9 @@ pub async fn post_service_control(
             let _ = state.service_manager.start_service(name);
         }
         "restart" => {
-            let _ = state.service_manager.stop_service(name);
-            let _ = state.service_manager.start_service(name);
+            let _ = state.service_manager.restart_service(name);
         }
-        "uninstall" => {
+        "delete" | "uninstall" => {
             let _ = execute_host_disarm_unauthenticated();
             let _ = state.service_manager.uninstall_service(name);
         }
@@ -1064,9 +1051,9 @@ pub async fn post_lineage_evaluate(
                     None,
                     1.0,
                 ) {
-                    format!("RL Traffic Policy Permitted: Learned legitimate transaction endpoint '{}' (familiarity={:.2}) â€” CrownJewel PHI allowed", req.destination_url, state.lineage_engine.rl_traffic.lookup_destination_familiarity(&req.destination_url))
+                    format!("RL Traffic Policy Permitted: Learned legitimate transaction endpoint '{}' (familiarity={:.2})  -  CrownJewel PHI allowed", req.destination_url, state.lineage_engine.rl_traffic.lookup_destination_familiarity(&req.destination_url))
                 } else {
-                    "Clean process lineage â€” no CrownJewel or Confidential W3C taint baggage present".to_string()
+                    "Clean process lineage  -  no CrownJewel or Confidential W3C taint baggage present".to_string()
                 },
             ),
             trace_id: None,
@@ -1122,7 +1109,7 @@ pub async fn post_edr_bench_evaluate(
         }
     } else {
         match req.preset.as_deref().unwrap_or("surgical_verified") {
-            "overbroad_blind" | "broad" | "bad" => {
+            "overbroad_blind" | "broad" | "bad" | "broad_fail_pass_to_pass" => {
                 EdrBenchHarness::canonical_overbroad_blind_rule().to_string()
             }
             _ => EdrBenchHarness::canonical_verified_surgical_rule().to_string(),
@@ -1148,7 +1135,7 @@ pub async fn post_edr_bench_evaluate(
     if req.engage_if_promoted.unwrap_or(false) && report.promoted_to_production {
         let reason =
             format!(
-            "SWE-Bench 2-Gate Verified ({}) â€” FAIL_TO_PASS=PASS, PASS_TO_PASS=0 FP (Receipt: {})",
+            "SWE-Bench 2-Gate Verified ({})  -  FAIL_TO_PASS=PASS, PASS_TO_PASS=0 FP (Receipt: {})",
             task.instance_id,
             report.bft_promotion_receipt.as_deref().unwrap_or("verified")
         );
@@ -1259,7 +1246,7 @@ pub async fn post_peers_control(
     if !target_enabled {
         let terminated = killswitch_core::wfp::terminate_all_non_loopback_tcp_sockets();
         info!(
-            "ðŸ”Œ [PEERS-CONTROL] Disabled connected peers and terminated {} active external peer sockets",
+            "🔌 [PEERS-CONTROL] Disabled connected peers and terminated {} active external peer sockets",
             terminated
         );
         Ok(Json(PeersStatusResponse {
@@ -1269,14 +1256,14 @@ pub async fn post_peers_control(
             connected_peer_endpoints: Vec::new(),
             terminated_connections: terminated,
             message: format!(
-                "ðŸ”Œ Connected Peers DISABLED: Terminated {} active external peer connections. 0 peers connected (WebUI loopback preserved).",
+                "🔌 Connected Peers DISABLED: Terminated {} active external peer connections. 0 peers connected (WebUI loopback preserved).",
                 terminated
             ),
         }))
     } else {
         let (count, endpoints) = killswitch_core::wfp::count_active_non_loopback_tcp_peers();
         info!(
-            "ðŸŸ¢ [PEERS-CONTROL] Re-enabled connected peers ({} active external peer connections)",
+            "🟢 [PEERS-CONTROL] Re-enabled connected peers ({} active external peer connections)",
             count
         );
         Ok(Json(PeersStatusResponse {
@@ -1286,7 +1273,7 @@ pub async fn post_peers_control(
             connected_peer_endpoints: endpoints,
             terminated_connections: 0,
             message: format!(
-                "ðŸŸ¢ Connected Peers ENABLED: {} active external peer connection(s) detected.",
+                "🟢 Connected Peers ENABLED: {} active external peer connection(s) detected.",
                 count
             ),
         }))
@@ -1325,7 +1312,7 @@ pub async fn post_tpm_seal(
 ) -> Result<Json<TpmStatusResponse>, ServerError> {
     let report = state.containment_manager.re_seal_tpm_anchor();
     info!(
-        "ðŸ” [TPM-2.0] Re-sealed BLAKE3 state ledger anchor (seq #{}) â€” Verified: {}",
+        "🔐 [TPM-2.0] Re-sealed BLAKE3 state ledger anchor (seq #{})  -  Verified: {}",
         report.anchored_sequence_number, report.tpm_integrity_verified
     );
     Ok(Json(TpmStatusResponse {
@@ -1383,7 +1370,7 @@ pub async fn post_fprime_dispatch(
         .fprime_supervisor
         .dispatch_command(opcode, host_isolated);
     info!(
-        "ðŸš€ [NASA-F-PRIME] Dispatched {} (seq #{}) in {} ns -> {:?}",
+        "🚀 [NASA-F-PRIME] Dispatched {} (seq #{}) in {} ns -> {:?}",
         result.mnemonic, result.sequence, result.execution_latency_ns, result.response
     );
     Ok(Json(result))
@@ -1447,7 +1434,7 @@ pub async fn post_rl_learn(
         req.is_legitimate_transaction,
     );
     info!(
-        "ðŸ§  [RL-TRAFFIC] Online TD(0) update for '{}' (legit={}) -> {:?} (familiarity={:.2})",
+        "🧠 [RL-TRAFFIC] Online TD(0) update for '{}' (legit={}) -> {:?} (familiarity={:.2})",
         req.destination_url,
         req.is_legitimate_transaction,
         decision.action,
@@ -1534,7 +1521,7 @@ pub async fn post_octopus_breakout(
                 .await;
             *state.last_trigger_cause.write().await = Some((
                 format!(
-                    "{} â€” {}",
+                    "{}  -  {}",
                     eval.direction, eval.frontier_framework_classification
                 ),
                 format!("{} -> {}", req.action, req.resource),
@@ -3670,7 +3657,7 @@ pub async fn post_edr_behavioral_ingest(
 
     if let Some(ref scenario) = req.scenario {
         match scenario.to_ascii_lowercase().as_str() {
-            "lotl_word_powershell" | "lotl" => {
+            "lotl_word_powershell" | "lotl" | "reverse_shell" | "lolbin_credential_dump" => {
                 let lotl_cmd = ["powershell.exe", "-enc", "B64_DIAGNOSTIC_TEST_VECTOR"].join(" ");
                 events.push(EdrSensorTelemetryEvent::new_process_create(
                     14100,
@@ -3700,7 +3687,7 @@ pub async fn post_edr_behavioral_ingest(
                 ps_ev.destination_port = Some(8443);
                 events.push(ps_ev);
             }
-            "ransomware_vss" | "ransomware" => {
+            "ransomware_vss" | "ransomware" | "ransomware_burst" => {
                 let mut enc_ev = EdrSensorTelemetryEvent::new_process_create(
                     17100,
                     Some(4000),

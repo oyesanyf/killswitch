@@ -454,16 +454,26 @@ impl KillSwitchClient {
         let svc = default_service_manager();
         let name = "killswitch";
         match action.to_lowercase().as_str() {
+            "install" => {
+                let cfg = killswitch_types::service::ServiceConfig {
+                    name: name.to_string(),
+                    arguments: vec!["--service".to_string(), "run".to_string()],
+                    ..Default::default()
+                };
+                svc.install_service(&cfg)?;
+            }
             "stop" => {
                 let _ = execute_host_disarm_unauthenticated();
                 svc.stop_service(name)?;
             }
             "start" => svc.start_service(name)?,
             "restart" => {
-                let _ = svc.stop_service(name);
-                svc.start_service(name)?;
+                let _ = svc.restart_service(name);
             }
-            "uninstall" => svc.uninstall_service(name)?,
+            "delete" | "uninstall" => {
+                let _ = execute_host_disarm_unauthenticated();
+                svc.uninstall_service(name)?;
+            }
             _ => anyhow::bail!("Unsupported service action: {}", action),
         }
         let status = svc.service_status(name)?;

@@ -941,6 +941,7 @@ async fn test_client_server_disarm_integration_and_offline_fallback() {
         port: 0,
         mode: OrchestratorMode::Autonomous,
         db_dir: Some(temp_dir.path().to_path_buf()),
+        open_browser: false,
     };
 
     // 1. Boot live UnifiedRuntime

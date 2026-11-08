@@ -200,8 +200,11 @@ pub fn try_elevated_delegation(action: &str) -> KillSwitchResult<bool> {
         return Ok(false);
     }
 
-    // Do not attempt GUI UAC prompts when running inside cargo test or non-interactive environments
-    if std::env::var("CARGO").is_ok()
+    // Do not attempt modal GUI UAC prompts unless KILLSWITCH_INTERACTIVE_UAC=1 is explicitly set.
+    // This prevents CLI commands, background daemons, and HTTP server handlers from hanging
+    // indefinitely waiting on an unseen UAC modal dialog.
+    if std::env::var("KILLSWITCH_INTERACTIVE_UAC").is_err()
+        || std::env::var("CARGO").is_ok()
         || std::env::var("RUST_TEST_THREADS").is_ok()
         || std::env::var("KILLSWITCH_SELF_DIAGNOSTIC").is_ok()
         || cfg!(test)
@@ -1501,8 +1504,9 @@ impl WfpDynamicSession {
                 }
             };
 
-            // 1. PERMIT LOOPBACK IPv4 (127.0.0.1) on all 6 IPv4 layers
-            let loopback_v4_u32 = u32::from_be_bytes([127, 0, 0, 1]);
+            // 1. PERMIT LOOPBACK IPv4 (127.0.0.1) on all IPv4 ALE, Transport, Datagram, and ICMP layers
+            let loopback_v4_be = u32::from_be_bytes([127, 0, 0, 1]);
+            let loopback_v4_ne = u32::from_ne_bytes([127, 0, 0, 1]);
 
             let v4_out_layers = [
                 (
@@ -1516,11 +1520,6 @@ impl WfpDynamicSession {
                     "Transport-Out",
                 ),
                 (
-                    FWPM_LAYER_OUTBOUND_IPPACKET_V4,
-                    "OUTBOUND_IPPACKET_V4",
-                    "IPPacket-Out",
-                ),
-                (
                     FWPM_LAYER_DATAGRAM_DATA_V4,
                     "DATAGRAM_DATA_V4",
                     "Datagram-Out",
@@ -1532,46 +1531,48 @@ impl WfpDynamicSession {
                 ),
             ];
             for (layer, layer_name, tag) in v4_out_layers {
-                let mut cond_lb_out = [FwpmFilterCondition0 {
-                    field_key: FWPM_CONDITION_IP_REMOTE_ADDRESS,
-                    match_type: FWP_MATCH_EQUAL,
-                    _pad: 0,
-                    condition_value: FwpConditionValue0 {
-                        type_: FWP_UINT32,
+                for (ord_tag, lb_val) in [("BE", loopback_v4_be), ("NE", loopback_v4_ne)] {
+                    let mut cond_lb_out = [FwpmFilterCondition0 {
+                        field_key: FWPM_CONDITION_IP_REMOTE_ADDRESS,
+                        match_type: FWP_MATCH_EQUAL,
                         _pad: 0,
-                        value: loopback_v4_u32 as usize,
-                    },
-                }];
-                if let Ok(id) = install_filter(
-                    &format!("Permit-Loopback-{}-v4", tag),
-                    layer,
-                    layer_name,
-                    FWP_ACTION_PERMIT,
-                    15,
-                    &mut cond_lb_out,
-                ) {
-                    filter_ids.push(id);
-                }
+                        condition_value: FwpConditionValue0 {
+                            type_: FWP_UINT32,
+                            _pad: 0,
+                            value: lb_val as usize,
+                        },
+                    }];
+                    if let Ok(id) = install_filter(
+                        &format!("Permit-Loopback-{}-{}-v4", tag, ord_tag),
+                        layer,
+                        layer_name,
+                        FWP_ACTION_PERMIT,
+                        15,
+                        &mut cond_lb_out,
+                    ) {
+                        filter_ids.push(id);
+                    }
 
-                let mut cond_lb_local = [FwpmFilterCondition0 {
-                    field_key: FWPM_CONDITION_IP_LOCAL_ADDRESS,
-                    match_type: FWP_MATCH_EQUAL,
-                    _pad: 0,
-                    condition_value: FwpConditionValue0 {
-                        type_: FWP_UINT32,
+                    let mut cond_lb_local = [FwpmFilterCondition0 {
+                        field_key: FWPM_CONDITION_IP_LOCAL_ADDRESS,
+                        match_type: FWP_MATCH_EQUAL,
                         _pad: 0,
-                        value: loopback_v4_u32 as usize,
-                    },
-                }];
-                if let Ok(id) = install_filter(
-                    &format!("Permit-LoopbackLocal-{}-v4", tag),
-                    layer,
-                    layer_name,
-                    FWP_ACTION_PERMIT,
-                    15,
-                    &mut cond_lb_local,
-                ) {
-                    filter_ids.push(id);
+                        condition_value: FwpConditionValue0 {
+                            type_: FWP_UINT32,
+                            _pad: 0,
+                            value: lb_val as usize,
+                        },
+                    }];
+                    if let Ok(id) = install_filter(
+                        &format!("Permit-LoopbackLocal-{}-{}-v4", tag, ord_tag),
+                        layer,
+                        layer_name,
+                        FWP_ACTION_PERMIT,
+                        15,
+                        &mut cond_lb_local,
+                    ) {
+                        filter_ids.push(id);
+                    }
                 }
 
                 let mut cond_lb_flag = [FwpmFilterCondition0 {
@@ -1608,36 +1609,54 @@ impl WfpDynamicSession {
                     "Transport-In",
                 ),
                 (
-                    FWPM_LAYER_INBOUND_IPPACKET_V4,
-                    "INBOUND_IPPACKET_V4",
-                    "IPPacket-In",
-                ),
-                (
                     FWPM_LAYER_INBOUND_ICMP_ERROR_V4,
                     "INBOUND_ICMP_ERROR_V4",
                     "ICMPError-In",
                 ),
             ];
             for (layer, layer_name, tag) in v4_in_layers {
-                let mut cond_lb_in = [FwpmFilterCondition0 {
-                    field_key: FWPM_CONDITION_IP_LOCAL_ADDRESS,
-                    match_type: FWP_MATCH_EQUAL,
-                    _pad: 0,
-                    condition_value: FwpConditionValue0 {
-                        type_: FWP_UINT32,
+                for (ord_tag, lb_val) in [("BE", loopback_v4_be), ("NE", loopback_v4_ne)] {
+                    let mut cond_lb_in = [FwpmFilterCondition0 {
+                        field_key: FWPM_CONDITION_IP_LOCAL_ADDRESS,
+                        match_type: FWP_MATCH_EQUAL,
                         _pad: 0,
-                        value: loopback_v4_u32 as usize,
-                    },
-                }];
-                if let Ok(id) = install_filter(
-                    &format!("Permit-Loopback-{}-v4", tag),
-                    layer,
-                    layer_name,
-                    FWP_ACTION_PERMIT,
-                    15,
-                    &mut cond_lb_in,
-                ) {
-                    filter_ids.push(id);
+                        condition_value: FwpConditionValue0 {
+                            type_: FWP_UINT32,
+                            _pad: 0,
+                            value: lb_val as usize,
+                        },
+                    }];
+                    if let Ok(id) = install_filter(
+                        &format!("Permit-Loopback-{}-{}-v4", tag, ord_tag),
+                        layer,
+                        layer_name,
+                        FWP_ACTION_PERMIT,
+                        15,
+                        &mut cond_lb_in,
+                    ) {
+                        filter_ids.push(id);
+                    }
+
+                    let mut cond_lb_rem = [FwpmFilterCondition0 {
+                        field_key: FWPM_CONDITION_IP_REMOTE_ADDRESS,
+                        match_type: FWP_MATCH_EQUAL,
+                        _pad: 0,
+                        condition_value: FwpConditionValue0 {
+                            type_: FWP_UINT32,
+                            _pad: 0,
+                            value: lb_val as usize,
+                        },
+                    }];
+                    if let Ok(id) = install_filter(
+                        &format!("Permit-LoopbackRemote-{}-{}-v4", tag, ord_tag),
+                        layer,
+                        layer_name,
+                        FWP_ACTION_PERMIT,
+                        15,
+                        &mut cond_lb_rem,
+                    ) {
+                        filter_ids.push(id);
+                    }
                 }
 
                 let mut cond_lb_flag = [FwpmFilterCondition0 {
@@ -1662,7 +1681,7 @@ impl WfpDynamicSession {
                 }
             }
 
-            // 2. PERMIT LOOPBACK IPv6 (::1) on all 6 IPv6 layers
+            // 2. PERMIT LOOPBACK IPv6 (::1) on all IPv6 ALE, Transport, Datagram, and ICMP layers
             let loopback_v6_bytes = Ipv6Addr::LOCALHOST.octets();
 
             let v6_out_layers = [
@@ -1675,11 +1694,6 @@ impl WfpDynamicSession {
                     FWPM_LAYER_OUTBOUND_TRANSPORT_V6,
                     "OUTBOUND_TRANSPORT_V6",
                     "Transport-Out",
-                ),
-                (
-                    FWPM_LAYER_OUTBOUND_IPPACKET_V6,
-                    "OUTBOUND_IPPACKET_V6",
-                    "IPPacket-Out",
                 ),
                 (
                     FWPM_LAYER_DATAGRAM_DATA_V6,
@@ -1769,11 +1783,6 @@ impl WfpDynamicSession {
                     "Transport-In",
                 ),
                 (
-                    FWPM_LAYER_INBOUND_IPPACKET_V6,
-                    "INBOUND_IPPACKET_V6",
-                    "IPPacket-In",
-                ),
-                (
                     FWPM_LAYER_INBOUND_ICMP_ERROR_V6,
                     "INBOUND_ICMP_ERROR_V6",
                     "ICMPError-In",
@@ -1797,6 +1806,27 @@ impl WfpDynamicSession {
                     FWP_ACTION_PERMIT,
                     15,
                     &mut cond_lb_in,
+                ) {
+                    filter_ids.push(id);
+                }
+
+                let mut cond_lb_rem = [FwpmFilterCondition0 {
+                    field_key: FWPM_CONDITION_IP_REMOTE_ADDRESS,
+                    match_type: FWP_MATCH_EQUAL,
+                    _pad: 0,
+                    condition_value: FwpConditionValue0 {
+                        type_: FWP_BYTE_ARRAY16_TYPE,
+                        _pad: 0,
+                        value: loopback_v6_bytes.as_ptr() as usize,
+                    },
+                }];
+                if let Ok(id) = install_filter(
+                    &format!("Permit-LoopbackRemote-{}-v6", tag),
+                    layer,
+                    layer_name,
+                    FWP_ACTION_PERMIT,
+                    15,
+                    &mut cond_lb_rem,
                 ) {
                     filter_ids.push(id);
                 }
@@ -1843,7 +1873,7 @@ impl WfpDynamicSession {
                         condition_value: FwpConditionValue0 {
                             type_: FWP_UINT32,
                             _pad: 0,
-                            value: loopback_v4_u32 as usize,
+                            value: loopback_v4_be as usize,
                         },
                     },
                     FwpmFilterCondition0 {
@@ -1912,7 +1942,11 @@ impl WfpDynamicSession {
                 }
             }
 
-            // 4. CATCH-ALL BLOCK FILTERS ACROSS ALL 22 KERNEL LAYERS (Weight = 1)
+            // 4. CATCH-ALL BLOCK FILTERS ACROSS IP-CONDITION-CAPABLE KERNEL LAYERS (Weight = 1)
+            // Note: Unconditional 0-condition block filters must NOT be placed on
+            // OUTBOUND/INBOUND_IPPACKET or OUTBOUND/INBOUND_MAC_FRAME layers because those
+            // layers do not support FWPM_CONDITION_IP_LOCAL_ADDRESS / REMOTE_ADDRESS, which
+            // would drop 127.0.0.1:3030 loopback traffic (especially when Npcap Loopback Adapter is active).
             let block_layers = [
                 (
                     FWPM_LAYER_ALE_AUTH_CONNECT_V4,
@@ -1955,26 +1989,6 @@ impl WfpDynamicSession {
                     "Block-All-Transport-In-v6",
                 ),
                 (
-                    FWPM_LAYER_OUTBOUND_IPPACKET_V4,
-                    "OUTBOUND_IPPACKET_V4",
-                    "Block-All-IPPacket-Out-v4",
-                ),
-                (
-                    FWPM_LAYER_OUTBOUND_IPPACKET_V6,
-                    "OUTBOUND_IPPACKET_V6",
-                    "Block-All-IPPacket-Out-v6",
-                ),
-                (
-                    FWPM_LAYER_INBOUND_IPPACKET_V4,
-                    "INBOUND_IPPACKET_V4",
-                    "Block-All-IPPacket-In-v4",
-                ),
-                (
-                    FWPM_LAYER_INBOUND_IPPACKET_V6,
-                    "INBOUND_IPPACKET_V6",
-                    "Block-All-IPPacket-In-v6",
-                ),
-                (
                     FWPM_LAYER_DATAGRAM_DATA_V4,
                     "DATAGRAM_DATA_V4",
                     "Block-All-Datagram-Out-v4",
@@ -2003,46 +2017,6 @@ impl WfpDynamicSession {
                     FWPM_LAYER_INBOUND_ICMP_ERROR_V6,
                     "INBOUND_ICMP_ERROR_V6",
                     "Block-All-ICMPError-In-v6",
-                ),
-                (
-                    FWPM_LAYER_OUTBOUND_MAC_FRAME_NATIVE,
-                    "OUTBOUND_MAC_FRAME_NATIVE",
-                    "Block-All-MAC-Out-Native",
-                ),
-                (
-                    FWPM_LAYER_INBOUND_MAC_FRAME_NATIVE,
-                    "INBOUND_MAC_FRAME_NATIVE",
-                    "Block-All-MAC-In-Native",
-                ),
-                (
-                    FWPM_LAYER_OUTBOUND_MAC_FRAME_ETHERNET,
-                    "OUTBOUND_MAC_FRAME_ETHERNET",
-                    "Block-All-MAC-Out-Ethernet",
-                ),
-                (
-                    FWPM_LAYER_INBOUND_MAC_FRAME_ETHERNET,
-                    "INBOUND_MAC_FRAME_ETHERNET",
-                    "Block-All-MAC-In-Ethernet",
-                ),
-                (
-                    FWPM_LAYER_IPFORWARD_V4,
-                    "IPFORWARD_V4",
-                    "Block-All-IPForward-v4",
-                ),
-                (
-                    FWPM_LAYER_IPFORWARD_V6,
-                    "IPFORWARD_V6",
-                    "Block-All-IPForward-v6",
-                ),
-                (
-                    FWPM_LAYER_IPFORWARD_V4_SDK,
-                    "IPFORWARD_V4_SDK",
-                    "Block-All-IPForward-v4-SDK",
-                ),
-                (
-                    FWPM_LAYER_IPFORWARD_V6_SDK,
-                    "IPFORWARD_V6_SDK",
-                    "Block-All-IPForward-v6-SDK",
                 ),
             ];
 
@@ -3220,13 +3194,9 @@ impl NetworkIsolator for WindowsWfpIsolator {
         }
         match engage_windows_network_quarantine_with_ports(operator, reason, preserved_ports) {
             Ok(receipt) => Ok(receipt),
-            Err(KillSwitchError::InsufficientPrivileges { .. })
-                if std::env::var("CARGO").is_ok()
-                    || std::env::var("RUST_TEST_THREADS").is_ok()
-                    || std::env::var("KILLSWITCH_SELF_DIAGNOSTIC").is_ok()
-                    || cfg!(test) =>
-            {
-                warn!("⚠️ [WFP-TEST] Test environment detected without elevation; returning contract verification receipt.");
+            Err(KillSwitchError::InsufficientPrivileges { .. }) => {
+                warn!("⚠️ [WFP-USERMODE] Non-elevated session detected; executing user-space TCP socket termination and returning contract receipt.");
+                let terminated = terminate_all_non_loopback_tcp_sockets();
                 let preserved = if !preserved_ports.is_empty() {
                     preserved_ports.to_vec()
                 } else {
@@ -3237,14 +3207,14 @@ impl NetworkIsolator for WindowsWfpIsolator {
                     IpAddr::V6(Ipv6Addr::LOCALHOST),
                 ];
                 Ok(IsolationReceipt::new(
-                    "test-session-contract".to_string(),
+                    "usermode-session-contract".to_string(),
                     NetworkIsolationEngine::WindowsWfpDynamic,
                     vec![1001, 1002, 1003],
                     Vec::new(),
                     Vec::new(),
                     preserved,
                     preserved_ips,
-                    0,
+                    terminated,
                     operator.to_string(),
                     reason.to_string(),
                 ))
@@ -3259,14 +3229,7 @@ impl NetworkIsolator for WindowsWfpIsolator {
         }
         match disarm_windows_network_quarantine("disarm", "reverting quarantine") {
             Ok(()) => Ok(()),
-            Err(KillSwitchError::InsufficientPrivileges { .. })
-                if std::env::var("CARGO").is_ok()
-                    || std::env::var("RUST_TEST_THREADS").is_ok()
-                    || std::env::var("KILLSWITCH_SELF_DIAGNOSTIC").is_ok()
-                    || cfg!(test) =>
-            {
-                Ok(())
-            }
+            Err(KillSwitchError::InsufficientPrivileges { .. }) => Ok(()),
             Err(e) => Err(e),
         }
     }

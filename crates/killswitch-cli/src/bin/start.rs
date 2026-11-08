@@ -55,6 +55,14 @@ struct StartCli {
     #[arg(long = "cage-governance", alias = "cage")]
     cage_governance: bool,
 
+    /// Do not automatically launch the WebUI browser
+    #[arg(long = "no-browser")]
+    no_browser: bool,
+
+    /// Manage native OS background service (install, delete, uninstall, start, stop, restart, status, run)
+    #[arg(long, value_name = "ACTION")]
+    service: Option<String>,
+
     /// Internal elevated helper flag for Windows Filtering Platform (WFP) kernel delegation
     #[arg(long, hide = true)]
     wfp_kernel_apply: Option<String>,
@@ -62,11 +70,30 @@ struct StartCli {
     /// Internal marker set after startup UAC elevation relaunch
     #[arg(long, hide = true)]
     elevated_relaunch: bool,
+
+    #[command(subcommand)]
+    command: Option<StartSubcommands>,
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum StartSubcommands {
+    /// Manage native OS background service
+    Service {
+        #[arg(default_value = "status")]
+        action: String,
+    },
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = StartCli::parse();
+
+    if let Some(ref action) = cli.service {
+        return killswitch_cli::commands::handle_native_service_cli(action).await;
+    }
+    if let Some(StartSubcommands::Service { ref action }) = cli.command {
+        return killswitch_cli::commands::handle_native_service_cli(action).await;
+    }
 
     // Internal elevated helper invocation for Windows Filtering Platform (WFP) kernel delegation
     if let Some(ref action) = cli.wfp_kernel_apply {
@@ -179,6 +206,7 @@ async fn main() -> Result<()> {
         port: cli.port,
         mode,
         db_dir: cli.db_dir,
+        open_browser: !cli.no_browser && !cli.daemon,
     };
 
     info!(
