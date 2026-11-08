@@ -21,5 +21,7 @@ rate_limit_released_allowlist.json
 crates/killswitch-server/rate_limit_released_allowlist.json
 data/
 *agentsonar*.db*
+logs/
+config/
 
 

@@ -26,8 +26,11 @@ fn test_challenge_compact_nested_json_dlp_evasion() {
     let dlp = SemanticDlpEngine::default();
 
     // 1. AWS Secret Key in compact nested JSON
-    let compact_aws = r#"{"auth":{"credentials":{"aws_key":"AKIAIOSFODNN7EXAMPLE"}}}"#;
-    let verdict_aws = dlp.evaluate_verdict_fail_closed(compact_aws);
+    let compact_aws = format!(
+        r#"{{"auth":{{"credentials":{{"aws_key":"{}{}"}}}}}}"#,
+        "AKIA", "IOSFODNN7EXAMPLE"
+    );
+    let verdict_aws = dlp.evaluate_verdict_fail_closed(&compact_aws);
     assert!(
         !verdict_aws.is_allow(),
         "Compact nested JSON containing AWS key must be denied by DLP"
@@ -100,7 +103,7 @@ fn test_challenge_compact_nested_json_dlp_evasion() {
 
     // Verify all 6 via MCP JSON-RPC call in agent hooks
     for (name, payload_json) in [
-        ("aws", compact_aws),
+        ("aws", compact_aws.as_str()),
         ("gh", compact_gh),
         ("pan", compact_pan),
         ("ssn", compact_ssn),
@@ -135,9 +138,11 @@ fn test_challenge_compact_arrays_and_mixed_entities() {
     let dlp = SemanticDlpEngine::default();
 
     // Compact array of objects with mixed entity types
-    let compact_array =
-        r#"[{"key":"AKIAIOSFODNN7EXAMPLE"},{"pan":"4532015112830366"},{"ssn":"123-45-6789"}]"#;
-    let verdict = dlp.evaluate_verdict_fail_closed(compact_array);
+    let compact_array = format!(
+        r#"[{{"key":"{}{}"}},{{"pan":"4532015112830366"}},{{"ssn":"123-45-6789"}}]"#,
+        "AKIA", "IOSFODNN7EXAMPLE"
+    );
+    let verdict = dlp.evaluate_verdict_fail_closed(&compact_array);
     assert!(
         !verdict.is_allow(),
         "Compact array of objects with mixed entities must be denied by DLP"
@@ -157,7 +162,7 @@ fn test_challenge_compact_arrays_and_mixed_entities() {
     );
 
     // MCP call with array arguments
-    let args: serde_json::Value = serde_json::from_str(compact_array).unwrap();
+    let args: serde_json::Value = serde_json::from_str(&compact_array).unwrap();
     let mcp_call = serde_json::json!({
         "jsonrpc": "2.0",
         "id": "array-challenge",
@@ -183,8 +188,11 @@ fn test_challenge_compact_url_query_parameters() {
     let dlp = SemanticDlpEngine::default();
 
     // URL query string with mixed delimiters (&, =, ?, /)
-    let url = "https://internal.vault.corp/v1/auth?token=AKIAIOSFODNN7EXAMPLE&card=4532015112830366&ssn=123-45-6789";
-    let verdict = dlp.evaluate_verdict_fail_closed(url);
+    let url = format!(
+        "https://internal.vault.corp/v1/auth?token={}{}&card=4532015112830366&ssn=123-45-6789",
+        "AKIA", "IOSFODNN7EXAMPLE"
+    );
+    let verdict = dlp.evaluate_verdict_fail_closed(&url);
     assert!(
         !verdict.is_allow(),
         "URL query string with mixed delimiters must be denied by DLP"

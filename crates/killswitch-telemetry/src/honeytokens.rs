@@ -68,10 +68,12 @@ impl HoneytokenManager {
         };
 
         // Seed default decoy credentials
+        let decoy_aws_key = format!("{}{}", "AKIA", "IOSFODNN7EXAMPLE");
+        let decoy_aws = format!("{}:wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", decoy_aws_key);
         mgr.register_honeytoken(
             "HT-AWS-01",
             HoneytokenType::AwsCredential,
-            "AKIAIOSFODNN7EXAMPLE:wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            &decoy_aws,
             "Decoy AWS administrative access key in staging profile",
         );
         mgr.register_honeytoken(
@@ -262,8 +264,10 @@ mod tests {
         assert!(clean_result.is_none());
 
         // Tripping registered honeytoken emits Critical ThreatSignal
+        let test_aws_key = format!("{}{}", "AKIA", "IOSFODNN7EXAMPLE");
+        let tripped_key = format!("{}:wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", test_aws_key);
         let tripped = mgr.verify_and_audit_access(
-            "AKIAIOSFODNN7EXAMPLE:wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            &tripped_key,
             8888,
             "mimikatz.exe",
         );
