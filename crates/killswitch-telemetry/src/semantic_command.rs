@@ -278,7 +278,11 @@ impl DynamicBinaryMetadataProbe {
 fn scan_xml_requested_execution_level(content: &str) -> Option<ElevationRequirement> {
     let lower = content.to_ascii_lowercase();
     let idx = lower.find("requestedexecutionlevel")?;
-    let snippet = &lower[idx..std::cmp::min(lower.len(), idx + 300)];
+    let mut end = std::cmp::min(lower.len(), idx + 300);
+    while end > idx && !lower.is_char_boundary(end) {
+        end -= 1;
+    }
+    let snippet = &lower[idx..end];
 
     if snippet.contains("requireadministrator") {
         Some(ElevationRequirement::RequireAdministrator)
