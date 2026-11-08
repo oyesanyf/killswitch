@@ -583,12 +583,11 @@ fn test_c14_4_category_breakout_defense_coordinator() {
     assert!(!t2.technical.is_clean);
 
     // 2. Operational: API tokens and credentials
-    let o1_payload = format!("export AWS_SECRET_ACCESS_KEY={}{}", "AKIA", "IOSFODNN7EXAMPLE");
-    let o1 = coordinator.evaluate_action(
-        "env",
-        "app",
-        &o1_payload,
+    let o1_payload = format!(
+        "export AWS_SECRET_ACCESS_KEY={}{}",
+        "AKIA", "IOSFODNN7EXAMPLE"
     );
+    let o1 = coordinator.evaluate_action("env", "app", &o1_payload);
     assert!(!o1.is_clean);
     assert!(!o1.operational.is_clean);
 
