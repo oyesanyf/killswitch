@@ -845,10 +845,14 @@ impl CageWarrantToken {
 /// Human consensus approval ticket for Tier 6.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HitlConsensusApproval {
+    #[serde(alias = "reviewer_id")]
     pub operator_id: String,
     pub is_approved: bool,
+    #[serde(default)]
     pub rationale: String,
+    #[serde(default, alias = "timestamp_ms")]
     pub approved_at_ms: u64,
+    #[serde(default)]
     pub signature_hex: Option<String>,
 }
 
@@ -1577,12 +1581,18 @@ pub enum GovernanceTraceEventType {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GovernanceTraceEvent {
     pub step: usize,
+    #[serde(default)]
     pub timestamp_ms: u64,
     pub kind: GovernanceTraceEventType,
+    #[serde(default)]
     pub tier: Option<CageTier>,
+    #[serde(default)]
     pub verdict: Option<CageVerdict>,
+    #[serde(default)]
     pub rule_id: Option<String>,
+    #[serde(default)]
     pub requires_warrant: bool,
+    #[serde(default)]
     pub details: String,
 }
 

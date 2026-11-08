@@ -773,10 +773,12 @@ fn test_adversarial_weight_priority_and_wfp_source_coverage() {
         "FWPM_LAYER_OUTBOUND_TRANSPORT_V6",
         "FWPM_LAYER_INBOUND_TRANSPORT_V4",
         "FWPM_LAYER_INBOUND_TRANSPORT_V6",
-        "FWPM_LAYER_OUTBOUND_IPPACKET_V4",
-        "FWPM_LAYER_OUTBOUND_IPPACKET_V6",
-        "FWPM_LAYER_INBOUND_IPPACKET_V4",
-        "FWPM_LAYER_INBOUND_IPPACKET_V6",
+        "FWPM_LAYER_DATAGRAM_DATA_V4",
+        "FWPM_LAYER_DATAGRAM_DATA_V6",
+        "FWPM_LAYER_OUTBOUND_ICMP_ERROR_V4",
+        "FWPM_LAYER_OUTBOUND_ICMP_ERROR_V6",
+        "FWPM_LAYER_INBOUND_ICMP_ERROR_V4",
+        "FWPM_LAYER_INBOUND_ICMP_ERROR_V6",
     ];
 
     let block_section_start = wfp_src
@@ -796,7 +798,7 @@ fn test_adversarial_weight_priority_and_wfp_source_coverage() {
         );
     }
 
-    println!("Confirmed: All 12 layers are explicitly registered in block_layers array in wfp.rs.");
+    println!("Confirmed: All active IP-condition-capable layers are explicitly registered in block_layers array in wfp.rs.");
 }
 
 #[test]

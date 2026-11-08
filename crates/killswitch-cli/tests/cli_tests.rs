@@ -38,6 +38,7 @@ async fn test_unified_runtime_boot_and_shutdown() {
         port: 0, // OS assigned ephemeral port for testing
         mode: OrchestratorMode::Autonomous,
         db_dir: Some(temp_dir.path().to_path_buf()),
+        open_browser: false,
     };
 
     let runtime = UnifiedRuntime::boot(config)
@@ -175,3 +176,24 @@ fn test_wfp_kernel_apply_invalid_action_rejected() {
     #[cfg(windows)]
     assert!(_err_msg.contains("Unknown --wfp-kernel-apply action 'invalid_action'"));
 }
+
+#[test]
+fn test_unified_config_open_browser_defaults_to_false() {
+    let cfg = UnifiedConfig::default();
+    assert!(!cfg.open_browser);
+}
+
+#[tokio::test]
+async fn test_native_service_cli_invalid_action() {
+    let res = killswitch_cli::commands::handle_native_service_cli("invalid_test_action").await;
+    assert!(res.is_err());
+    let err_msg = res.unwrap_err().to_string();
+    assert!(err_msg.contains("Unsupported service action"));
+}
+
+#[tokio::test]
+async fn test_native_service_cli_status() {
+    let res = killswitch_cli::commands::handle_native_service_cli("status").await;
+    assert!(res.is_ok());
+}
+

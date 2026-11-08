@@ -1,4 +1,4 @@
-# Project: Standalone Rust KillSwitch Security Agent Workspace
+# Project: KillSwitch Cross-Platform Service, Launcher & Multi-Repo Migration
 
 ## Architecture
 Standalone, three-platform native (Windows, Linux, macOS) Rust KillSwitch security agent workspace extracted and adapted from `D:\harfile\OshoosiClaw\`.
@@ -19,21 +19,9 @@ Zero external OS CLI utilities (`netsh`, `iptables`, `nft`, `taskkill`, `kill`, 
      - Linux: Pure Rust `systemd` service unit generation and direct filesystem installation (`/etc/systemd/system/killswitch.service` or user unit) + `NOTIFY_SOCKET` (`sd_notify` UNIX datagram) + POSIX signals. Zero `systemctl`.
      - macOS: Pure Rust `launchd` `.plist` XML generation and direct filesystem installation (`/Library/LaunchDaemons/com.oshoosi.killswitch.plist` or LaunchAgents) + POSIX signals. Zero `launchctl`.
      - Unconditional automatic host disarm on service stop/shutdown (`execute_host_disarm_unauthenticated()`).
-3. `crates/killswitch-adjudication`: Zero-false-positive adjudication engine:
-   - REA engine (`AutonomousReaEngine`) with 4-layer defense.
-   - Multi-voter consensus (`orchestrate_evidence`) across evidence classes with single-voter penalty, integrating DLP Lineage Evidence from `EndpointLineageEngine`.
-   - Authenticode & Windows Catalog validation (`win_trust.rs`).
-   - Protected binary BLAKE3 inventory (`PROTECTED_LOCAL_BINARY_HASHES`) & critical PID whitelist (`is_critical_system_pid`) with parent ancestry traversal up to depth 5.
-   - Byzantine killswitch fraud proof builder (`build_kill_switch_fraud_proof`) and peer veto (`veto_peer_kill_switch_candidate`).
-4. `crates/killswitch-telemetry`: EDR, DLP Lineage, and Octopus anomaly multi-ring triggers:
-   - EDR: Phase-lock Lyapunov monitor (`edr-phaselock`), causal graph provenance (`ProcessInstanceIdentity`), attack graph, event correlator, canaries, hardware watchdog, honeytokens.
-   - Hybrid OpenTelemetry & OpenLineage DLP Engine (`otel_lineage.rs`): `EndpointLineageEngine`, composite `ProcessKey`/`FileKey`, sticky W3C `TaintBaggage` escalation & merge, OpenLineage datasets/facets, `seed_sensitive_file`, `on_process_create`, `on_file_read`, `on_file_write`, fast inline `evaluate_egress` DashMap check returning `EgressVerdict::Block { reason, trace_id }`.
-   - Octopus: `ArmContainmentRing` with monotonic generation epoch advancement (`Gen N -> Gen N+1`), HMAC-SHA256 `MeshGuard`, `HomologicalBoundaryAuditor`, case-insensitive lateral sink isolation (`LAW1_STICKY_TAINT_VETO`), `BreakoutDefenseCoordinator`, mathematical IPv4/IPv6 SSRF guards and safe `Path::join` traversal defenses.
-5. `crates/killswitch-orchestrator`: Native Rust LangGraph stateful execution engine:
-   - Cyclic `StateGraph` with typed state (`KillSwitchGraphState`), 10-node lifecycle transitions, persistent checkpointer, BLAKE3 execution trace.
-   - DLP Lineage Trigger Node: evaluates `EgressVerdict::Block` and routes high-confidence exfiltration to containment while preserving critical system PIDs.
-   - Local Ollama node adhering to Dynamic Available Memory Law with 400ms timeout and offline fallback.
-   - Autonomous mode (3 clean probes early restore, 30-min failsafe) and Manual mode (HITL checkpoint, constant-time `CONFIRM ISOLATE`/`RESTORE`).
+3. `crates/killswitch-adjudication`: Zero-false-positive adjudication engine.
+4. `crates/killswitch-telemetry`: EDR, DLP Lineage, and Octopus anomaly multi-ring triggers.
+5. `crates/killswitch-orchestrator`: Native Rust LangGraph stateful execution engine.
 6. `crates/killswitch-server`: Local HTTP/JSON control API on port 3030 (Axum) preserving loopback and port 3030 during quarantine, plus `/service/status` and `/lineage/*`.
 7. `crates/killswitch-cli`: Command-line interface tool (`killswitch-cli` / `killswitch`) including `killswitch service` and `killswitch lineage`.
 
@@ -42,75 +30,80 @@ Zero external OS CLI utilities (`netsh`, `iptables`, `nft`, `taskkill`, `kill`, 
 ## Feature Inventory
 | # | Feature | Description | Milestone | Source |
 |---|---------|-------------|-----------|--------|
-| 1 | Workspace Cargo & Types | Scaffolding Cargo workspace, crates layout, common types, traits, error definitions | M1 | ORIGINAL_REQUEST §R1-R4 |
-| 2 | Windows Native WFP Isolation | `fwpuclnt.dll` dynamic sessions with `FWPM_SESSION_FLAG_DYNAMIC` and atomic transactions, preserving loopback, DNS/DHCP, port 3030 | M2 | ORIGINAL_REQUEST §R1 |
-| 3 | Windows Native BFE Registry | `HKLM\SYSTEM\...\FirewallRules` management via `winreg` | M2 | ORIGINAL_REQUEST §R1 |
-| 4 | Windows Direct TCP Reset | `iphlpapi.dll` `GetTcpTable` + `SetTcpEntry` (`MIB_TCP_STATE_DELETE_TCB = 12`) | M2 | ORIGINAL_REQUEST §R1 |
-| 5 | Linux Netlink & Landlock Isolation | Raw Netlink sockets, `/proc/net/tcp` parsing, and Landlock LSM syscalls with zero `iptables`/`nft` calls | M2 | ORIGINAL_REQUEST §R1 |
-| 6 | Native Process Freeze & Resume | `NtSuspendProcess`/`NtResumeProcess` (Windows), `SIGSTOP`/`SIGCONT` (Linux & macOS) | M2 | ORIGINAL_REQUEST §R1, Follow-up |
-| 7 | Active Process Tarpit | Thread-level Toolhelp32 snapshot, suspend/resume duty cycle | M2 | ORIGINAL_REQUEST §R1 |
-| 8 | Operator Credential Verification | `subtle::ConstantTimeEq`, BLAKE3/SHA-256 hashes, shadow `crypt(3)` FFI, no `unix_chkpwd`/`dscl`/`LogonUserW` | M2 | ORIGINAL_REQUEST §R1 |
-| 9 | Anti-Lockout & Caller Validation | 3-strike 300s rate-limit lockout, `validate_killchain_caller` blocking frozen/quarantined callers | M2 | ORIGINAL_REQUEST §R1 |
-| 10 | BLAKE3 State Ledger | Atomic `killchain_state.json` persistence with BLAKE3 cryptographic hash chaining | M2 | ORIGINAL_REQUEST §R3 |
-| 11 | REA Adjudication Engine | `AutonomousReaEngine` 4-layer defense, anti-masquerade, dev process calibration | M3 | ORIGINAL_REQUEST §R2 |
-| 12 | Multi-Voter Consensus | 6 evidence classes + DLP Lineage, support/mass weighting, single-voter penalty (`0.52`), threshold >= 0.94 | M3 | ORIGINAL_REQUEST §R2, Follow-up #2 |
-| 13 | Authenticode & Catalog Validation | WinVerifyTrust and CatRoot hash verification with offline fallback | M3 | ORIGINAL_REQUEST §R2 |
-| 14 | Protected Binary Inventory & Lineage Immunity | In-memory BLAKE3 set, `is_critical_system_pid` whitelist (Windows, Linux, macOS), parent ancestry traversal up to depth 5 | M3 | ORIGINAL_REQUEST §R2, Follow-up |
-| 15 | Byzantine Fraud Proof Builder | `build_kill_switch_fraud_proof` BLAKE3 seal, `veto_peer_kill_switch_candidate` | M3 | ORIGINAL_REQUEST §R2 |
-| 16 | EDR Phase-Lock Monitor | 4D delay embedding ($m=4$, $\tau=2$), Lyapunov exponent divergence calculation | M4 | ORIGINAL_REQUEST §R2 |
-| 17 | Causal & Attack Graph Correlation | `ProcessInstanceIdentity` BLAKE3 provenance, multi-stage kill-chain correlation, time-decay correlator | M4 | ORIGINAL_REQUEST §R2 |
-| 18 | Canaries, Watchdog & Honeytokens | Ghost traps, dynamic assets, hardware CPU/memory watchdog HMAC-SHA256 challenge | M4 | ORIGINAL_REQUEST §R2 |
-| 19 | Octopus Arm Containment Ring | Monotonic generation epoch advancement (`Gen N -> Gen N+1`), surgical autotomy | M4 | ORIGINAL_REQUEST §R2 |
-| 20 | MeshGuard & Boundary Audit | Constant-time HMAC-SHA256 message verification, homological boundary audit ($\partial^2 = 0$), sticky taint veto | M4 | ORIGINAL_REQUEST §R2 |
-| 21 | Breakout Defense & SSRF / Path Guards | 4-category breakout coordinator, mathematical IPv4/IPv6 literal parser, safe `Path::join` traversal defense | M4 | ORIGINAL_REQUEST §R2 |
-| 22 | Native Rust LangGraph StateGraph | Typed state, node registry, conditional edges, cyclic health-probing loops, checkpointer, BLAKE3 trace | M5 | ORIGINAL_REQUEST §R2 |
-| 23 | Local Ollama Reasoning Node | Dynamic free RAM/VRAM sizing law, 400ms timeout, deterministic offline fallback | M5 | ORIGINAL_REQUEST §R2 |
-| 24 | Autonomous & Manual Reversible Modes | 3 clean probes early restoration, 30-min failsafe; HITL `CONFIRM ISOLATE`/`RESTORE` | M5 | ORIGINAL_REQUEST §R3 |
-| 25 | Local HTTP/JSON API on Port 3030 | Axum API (`/status`, `/history`, `/engage`, `/disarm`, `/health-probe`, `/graph/step`, `/graph/state`, `/mode`, `/octopus/arms`, `/edr/ingest`, `/service/status`, `/lineage/*`) | M5 | ORIGINAL_REQUEST §R3, Follow-up #1 & #2 |
-| 26 | CLI Binary Interface | Clap CLI (`killswitch-cli` / `killswitch`) commands, flags, `service`, and `lineage` | M5 | ORIGINAL_REQUEST §R3, Follow-up #1 & #2 |
-| 27 | Opaque-Box E2E Testing Suite (Tiers 1-4) | Comprehensive Category-Partition, BVA, Pairwise, Real-World test suite in `tests/` | M6 / E2E Track | ORIGINAL_REQUEST §Acceptance |
-| 28 | Adversarial Coverage Hardening (Tier 5) | White-box stress testing, chaos fuzzing, gap analysis | M6 / E2E Track | ORIGINAL_REQUEST §Acceptance |
-| 29 | macOS Native PF Isolation | Darwin `/dev/pf` device ioctl (`DIOCSTART`, `DIOCXBEGIN`, `DIOCADDRULE`, `DIOCXCOMMIT`), `sysctl`/`proc_pidinfo` sockets, loopback/DNS/DHCP/port 3030 | M2 | ORIGINAL_REQUEST §Follow-up |
-| 30 | macOS Process Freeze & System Whitelist | `libc::kill(SIGSTOP/SIGCONT)`, macOS system whitelist (`launchd`, `WindowServer`, `loginwindow`, etc.) | M2 | ORIGINAL_REQUEST §Follow-up |
-| 31 | Native OS Service Lifecycle & Auto-Disarm | Win32 SCM FFI, systemd unit + sd_notify, launchd plist, zero CLI tools, unconditional shutdown disarm, CLI & HTTP service commands | M2, M5 | ORIGINAL_REQUEST §Follow-up |
-| 32 | OpenTelemetry & OpenLineage DLP Engine | `EndpointLineageEngine`: composite keys, sticky `TaintBaggage` merge, OpenLineage datasets/facets, W3C trace propagation, fast inline `evaluate_egress` DashMap block, LangGraph DLP trigger | M3, M4, M5 | ORIGINAL_REQUEST §Follow-up #2 |
-| 33 | Unified `killswitch.exe` / `start.exe` All-In-One Loader | Binary targets `killswitch` and `start`, unified executable `killswitch.exe` ("load it all" + CLI) and alias `start.exe`, boots and wires 100% of subsystems into single unified runtime, supports `--verify`/`--check`, copied to `d:\harfile\killswitch\killswitch.exe` and `d:\harfile\killswitch\start.exe` | M5, M6 | ORIGINAL_REQUEST §Follow-up #4 & #6 |
-| 34 | Automatic Port Fallback & Dynamic Allowlist | When port 3030 is in use, automatically fall back to ports 3031..=3050 (or ephemeral 0), log clear message, dynamically allowlist actual port in WFP/Netlink/PF quarantine, persist in active_port.txt for CLI discovery | M5, M6 | ORIGINAL_REQUEST §Follow-up #5 |
-
+| 1 | Workspace Cargo & Types | Scaffolding Cargo workspace, crates layout, common types, traits, error definitions | M0 (Prior) | ORIGINAL_REQUEST |
+| 2 | Windows Native WFP Isolation | `fwpuclnt.dll` dynamic sessions with loopback, DNS/DHCP, port 3030 preservation | M0 (Prior) | ORIGINAL_REQUEST |
+| 3 | Windows Native BFE Registry | `HKLM\SYSTEM\...\FirewallRules` management via `winreg` | M0 (Prior) | ORIGINAL_REQUEST |
+| 4 | Windows Direct TCP Reset | `iphlpapi.dll` `GetTcpTable` + `SetTcpEntry` (`MIB_TCP_STATE_DELETE_TCB = 12`) | M0 (Prior) | ORIGINAL_REQUEST |
+| 5 | Linux Netlink & Landlock Isolation | Raw Netlink sockets, `/proc/net/tcp` parsing, Landlock LSM syscalls | M0 (Prior) | ORIGINAL_REQUEST |
+| 6 | Native Process Freeze & Resume | `NtSuspendProcess`/`NtResumeProcess`, `SIGSTOP`/`SIGCONT` | M0 (Prior) | ORIGINAL_REQUEST |
+| 7 | Active Process Tarpit | Thread-level Toolhelp32 snapshot, suspend/resume duty cycle | M0 (Prior) | ORIGINAL_REQUEST |
+| 8 | Operator Credential Verification | `subtle::ConstantTimeEq`, BLAKE3/SHA-256 hashes, shadow `crypt(3)` FFI | M0 (Prior) | ORIGINAL_REQUEST |
+| 9 | Anti-Lockout & Caller Validation | 3-strike 300s rate-limit lockout, `validate_killchain_caller` | M0 (Prior) | ORIGINAL_REQUEST |
+| 10 | BLAKE3 State Ledger | Atomic `killchain_state.json` persistence with BLAKE3 hash chaining | M0 (Prior) | ORIGINAL_REQUEST |
+| 11 | REA Adjudication Engine | `AutonomousReaEngine` 4-layer defense, anti-masquerade | M0 (Prior) | ORIGINAL_REQUEST |
+| 12 | Multi-Voter Consensus | 6 evidence classes + DLP Lineage, support/mass weighting | M0 (Prior) | ORIGINAL_REQUEST |
+| 13 | Authenticode & Catalog Validation | WinVerifyTrust and CatRoot hash verification | M0 (Prior) | ORIGINAL_REQUEST |
+| 14 | Protected Binary Inventory | In-memory BLAKE3 set, `is_critical_system_pid` whitelist (Win/Linux/macOS) | M0 (Prior) | ORIGINAL_REQUEST |
+| 15 | Byzantine Fraud Proof Builder | `build_kill_switch_fraud_proof` BLAKE3 seal, peer veto | M0 (Prior) | ORIGINAL_REQUEST |
+| 16 | EDR Phase-Lock Monitor | 4D delay embedding, Lyapunov exponent divergence calculation | M0 (Prior) | ORIGINAL_REQUEST |
+| 17 | Causal & Attack Graph Correlation | `ProcessInstanceIdentity` BLAKE3 provenance, multi-stage correlation | M0 (Prior) | ORIGINAL_REQUEST |
+| 18 | Canaries, Watchdog & Honeytokens | Ghost traps, dynamic assets, hardware CPU/memory watchdog | M0 (Prior) | ORIGINAL_REQUEST |
+| 19 | Octopus Arm Containment Ring | Monotonic generation epoch advancement (`Gen N -> Gen N+1`) | M0 (Prior) | ORIGINAL_REQUEST |
+| 20 | MeshGuard & Boundary Audit | Constant-time HMAC-SHA256 message verification, boundary audit | M0 (Prior) | ORIGINAL_REQUEST |
+| 21 | Breakout Defense & SSRF / Path Guards | 4-category breakout coordinator, mathematical IPv4/IPv6 parser | M0 (Prior) | ORIGINAL_REQUEST |
+| 22 | Native Rust LangGraph StateGraph | Typed state, node registry, cyclic health-probing loops | M0 (Prior) | ORIGINAL_REQUEST |
+| 23 | Local Ollama Reasoning Node | Dynamic free RAM/VRAM sizing law, 400ms timeout | M0 (Prior) | ORIGINAL_REQUEST |
+| 24 | Autonomous & Manual Reversible Modes | 3 clean probes early restoration, 30-min failsafe; HITL mode | M0 (Prior) | ORIGINAL_REQUEST |
+| 25 | Local HTTP/JSON API on Port 3030 | Axum API preserving loopback and port 3030 | M0 (Prior) | ORIGINAL_REQUEST |
+| 26 | CLI Binary Interface | Clap CLI (`killswitch-cli` / `killswitch`) | M0 (Prior) | ORIGINAL_REQUEST |
+| 27 | Opaque-Box E2E Testing Suite | Comprehensive Category-Partition, BVA, Pairwise test suite in `tests/` | M0 (Prior) | ORIGINAL_REQUEST |
+| 28 | Adversarial Coverage Hardening | White-box stress testing, chaos fuzzing, gap analysis | M0 (Prior) | ORIGINAL_REQUEST |
+| 29 | macOS Native PF Isolation | Darwin `/dev/pf` device ioctl, loopback/port 3030 preservation | M0 (Prior) | ORIGINAL_REQUEST |
+| 30 | macOS Process Freeze & System Whitelist | `libc::kill(SIGSTOP/SIGCONT)`, macOS system whitelist | M0 (Prior) | ORIGINAL_REQUEST |
+| 31 | Native OS Service Lifecycle Engine | Win32 SCM FFI, systemd unit + sd_notify, launchd plist | M0 (Prior) | ORIGINAL_REQUEST |
+| 32 | OpenTelemetry & OpenLineage DLP Engine | `EndpointLineageEngine`: composite keys, sticky `TaintBaggage` | M0 (Prior) | ORIGINAL_REQUEST |
+| 33 | Unified `killswitch.exe` / `start.exe` Loader | Binary targets `killswitch` and `start`, unified runtime loader | M0 (Prior) | ORIGINAL_REQUEST |
+| 34 | Automatic Port Fallback & Dynamic Allowlist | Fallback ports 3031..=3050, `active_port.txt`, dynamic allowlist | M0 (Prior) | ORIGINAL_REQUEST |
+| 35 | Cross-Platform `--service` Lifecycle | `--service install`, `delete`, `uninstall`, `start`, `stop`, `restart`, `status`, `run` on `killswitch` and `start` across Windows SCM, systemd, launchd | M1 | ORIGINAL_REQUEST §R1 |
+| 36 | CLI vs Launcher Browser Launch Behavior | `killswitch` CLI headless by default (`--open-browser` / `--browser` required); `start.exe` auto-opens `http://127.0.0.1:3030` | M1 | ORIGINAL_REQUEST §R1 |
+| 37 | Zero-Touch PATH WiX Packaging | `installer/killswitch.wxs` installing native Windows service with `--service run` and post-install browser launch; zero `<Environment Id="PATH">` | M1 | ORIGINAL_REQUEST §R1 |
+| 38 | Release Workflow Packaging | Linux `.deb` (systemd unit, postinst/prerm, browser launch) & macOS `.pkg` (launchd plist, postinstall, browser launch) in `.github/workflows/release.yml` | M1 | ORIGINAL_REQUEST §R1 |
+| 39 | WebUI Button Auth & Route Alignment | `POST /disarm` control-plane auth accepting `KILLCHAIN_RESTORE_CONFIRMATION_PHRASE`, clean UTF-8 strings, scenario and preset aliases in handlers | M2 | ORIGINAL_REQUEST §R2 |
+| 40 | Release Builds & Button Verification | Build release `killswitch.exe` and `start.exe`; run `verify_all_webui_buttons.py` with 100% pass rate & 0 fetch errors | M2 | ORIGINAL_REQUEST §R2 |
+| 41 | Killswitch Shipping & CI Remediation | Stage, commit, ship via `scripts/solo_pr_ship.ps1`, verify and remediate GitHub Actions workflows to 100% green | M2 | ORIGINAL_REQUEST §R2 |
+| 42 | OshoosiClaw Sequential Migration | Migrate service management, browser behavior, and WebUI fixes to `D:\harfile\OshoosiClaw`, build `osoosi.exe`, run `cargo test --workspace`, ship via solo PR, verify 100% green CI | M3 | ORIGINAL_REQUEST §R3 |
+| 43 | AgentOctopus Sequential Migration | Migrate service management, browser behavior, and WebUI fixes to `D:\harfile\AgentOctopus`, build `agent_octopus.exe` and `start.exe`, run `cargo test`, ship, verify 100% green CI | M4 | ORIGINAL_REQUEST §R4 |
+| 44 | Cross-Repository Forensic Integrity Audit | Independent verification of zero mocks, repository boundary compliance, and final completion handoff to Sentinel | M5 | ORIGINAL_REQUEST §Acceptance |
 
 ---
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| M1 | Workspace Foundation & Common Types | Cargo workspace setup, `crates/killswitch-types`, error definitions, core traits | none | DONE (commit `141ad63`, 54 tests passed, 0 warnings) |
-| M2 | Zero-OS-Tool Native Containment & Service Engine | `crates/killswitch-core`: WFP/BFE/iphlpapi, Netlink/Landlock, macOS /dev/pf, Native Freeze/Resume (Win/Linux/macOS), Tarpit, Auth & Anti-Lockout, BLAKE3 Ledger, Native OS Service Engine | M1 | DONE (commit `0708dfe`, 149 tests passed workspace-wide, 0 clippy warnings, Gate PASSED) |
-| M3 | Zero-False-Positive Adjudication & Veto | `crates/killswitch-adjudication`: REA engine, Multi-Voter consensus (including DLP Lineage evidence), WinTrust, Lineage immunity (depth 5, including Win/Linux/macOS), Byzantine fraud proofs | M1 | DONE (commit `139d9d0`, 198 tests passed workspace-wide, 0 clippy warnings, Gate PASSED) |
-| M4 | EDR Telemetry, DLP Lineage & Octopus Triggers | `crates/killswitch-telemetry`: Phase-lock, Causal/Attack graph, Correlator, Canaries/Watchdog, EndpointLineageEngine (OTel + OpenLineage), ArmContainmentRing, MeshGuard, Breakout Defense, SSRF/Path guards | M1 | DONE (commit `fa2d34c`, 81 crate tests, 328 workspace tests passed, 0 clippy warnings, Gate PASSED) |
-| M5 | LangGraph Stateful Orchestrator, CLI & HTTP API, start.exe Loader | `crates/killswitch-orchestrator`, `crates/killswitch-server`, `crates/killswitch-cli`: StateGraph (including DLP lineage trigger node), Ollama node, Reversible modes, Axum API (port 3030 with `/service/status` and `/lineage/*`), CLI (including `service` and `lineage`), and unified `start.exe` all-in-one loader | M2, M3, M4 | IN_PROGRESS |
-| M6 | Final Verification, 100% E2E Test Pass & Tier 5 Hardening | Complete E2E integration test pass (Tiers 1-4, including Multi-Hop DLP Exfiltration Fan-In test and `start.exe --verify`), Tier 5 Adversarial Coverage Hardening, Zero-OS-Tool audit, Sentinel report | M5, TEST_READY.md | PLANNED |
-
-In parallel:
-- **E2E Testing Track**: Dispatched independently to develop `TEST_INFRA.md`, test harness, and Tiers 1-4 test suites, publishing `TEST_READY.md`. (Status: `TEST_INFRA.md` published).
+| M1 | Killswitch Service Management, Browser Behavior & Installer Packaging | Features 35, 36, 37, 38 in `killswitch` (R1) | none | DONE (Gate PASSED: 132/132 tests passed, 0 clippy warnings, Reviewers APPROVE, Challengers APPROVE, Auditor CLEAN) |
+| M2 | Killswitch WebUI Button Fixes, Release Builds, Button Verification & CI Remediation | Features 39, 40, 41 in `killswitch` (R2) | M1 | IN_PROGRESS |
+| M3 | OshoosiClaw Sequential Migration, Verification & Remote CI | Feature 42 in `D:\harfile\OshoosiClaw` (R3) | M2 | PLANNED |
+| M4 | AgentOctopus Sequential Migration, Verification & Remote CI | Feature 43 in `D:\harfile\AgentOctopus` (R4) | M3 | PLANNED |
+| M5 | Final Cross-Repository Forensic Integrity Audit & Sentinel Handoff | Feature 44 across all three repositories | M4 | PLANNED |
 
 ---
 
-## Interface Contracts
-### `killswitch-core` Service Manager Interface
-- `NativeServiceManager`:
-  - `fn install_service(&self, config: &ServiceConfig) -> Result<(), ServiceError>;`
-  - `fn uninstall_service(&self, service_name: &str) -> Result<(), ServiceError>;`
-  - `fn start_service(&self, service_name: &str) -> Result<(), ServiceError>;`
-  - `fn stop_service(&self, service_name: &str) -> Result<(), ServiceError>;`
-  - `fn service_status(&self, service_name: &str) -> Result<ServiceStatus, ServiceError>;`
-  - `fn run_service_daemon(&self) -> Result<(), ServiceError>;`
-- Unconditional shutdown hook: When receiving stop/shutdown signal (`SERVICE_CONTROL_STOP`, `SIGTERM`, `SIGINT`), invokes `execute_host_disarm_unauthenticated()`.
+## Code Layout
+### `d:\harfile\killswitch`
+- `crates/killswitch-core/src/service.rs`: Pure Win32 SCM, Linux systemd, macOS launchd service engine
+- `crates/killswitch-server/src/server.rs`: Axum HTTP server configuration (`open_browser: bool`), browser launcher
+- `crates/killswitch-server/src/handlers.rs`: REST API endpoints, control-plane auth, service control handlers
+- `crates/killswitch-cli/src/loader.rs`: Unified runtime config and bootloader
+- `crates/killswitch-cli/src/bin/killswitch.rs`: CLI binary entry point (`--open-browser`, `--service <action>`, `service <action>`)
+- `crates/killswitch-cli/src/bin/start.rs`: Launcher binary entry point (auto-open browser default, `--no-browser`, `--service <action>`, `service <action>`)
+- `crates/killswitch-cli/src/commands/mod.rs`: Native service CLI handler invoking `default_service_manager()` directly
+- `installer/killswitch.wxs`: Windows WiX MSI installer definition (Zero-Touch PATH compliant)
+- `.github/workflows/release.yml`: GitHub Actions release pipeline for Linux deb and macOS pkg
 
-### `killswitch-telemetry` Endpoint Lineage Engine Interface
-- `EndpointLineageEngine`:
-  - `fn seed_sensitive_file(&self, file_key: FileKey, path: &str, sha256: &str, classification: DlpClassification, policy: DlpPolicy);`
-  - `fn on_process_create(&self, parent_key: Option<ProcessKey>, child_key: ProcessKey, exe_path: &str);`
-  - `fn on_file_read(&self, proc_key: ProcessKey, file_key: FileKey);`
-  - `fn on_file_write(&self, proc_key: ProcessKey, out_file_key: FileKey, out_path: &str, out_sha256: &str);`
-  - `fn evaluate_egress(&self, proc_key: ProcessKey, destination_url: &str) -> EgressVerdict;`
+### `D:\harfile\OshoosiClaw`
+- CLI binary `osoosi` / `start`
+- Crate structure: `osoosi-core`, `osoosi-dp`, `osoosi-telemetry`, `osoosi-agent-anomaly`, `osoosi-dashboard`, `osoosi-cli`
 
+### `D:\harfile\AgentOctopus`
+- CLI binary `agent_octopus` / `start`
+- Crate structure: `crates/octopus-core`, `crates/octopus-server`, etc.

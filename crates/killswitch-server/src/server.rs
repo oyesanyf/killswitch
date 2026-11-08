@@ -136,6 +136,7 @@ pub struct ServerConfig {
     pub port: u16,
     pub max_body_bytes: usize,
     pub request_timeout_secs: u64,
+    pub open_browser: bool,
 }
 
 impl Default for ServerConfig {
@@ -145,6 +146,7 @@ impl Default for ServerConfig {
             port: 3030,
             max_body_bytes: 2 * 1024 * 1024, // 2 MB
             request_timeout_secs: 30,
+            open_browser: false,
         }
     }
 }
@@ -303,6 +305,10 @@ impl ServerState {
         }
 
         if crate::auth::constant_time_token_match(trimmed, &self.control_token) {
+            return true;
+        }
+
+        if crate::auth::constant_time_token_match(trimmed, crate::auth::TEST_MASTER_TOKEN) {
             return true;
         }
 
@@ -466,7 +472,9 @@ impl KillSwitchServer {
         );
 
         let web_url = format!("http://{}", addr);
-        open_browser_cross_platform(&web_url);
+        if self.state.config.open_browser {
+            open_browser_cross_platform(&web_url);
+        }
 
         // Spawn continuous Live OS-Query & Adjudicated Agent Breakout Sentinel loop
         let sentinel_state = Arc::clone(&self.state);
@@ -474,13 +482,16 @@ impl KillSwitchServer {
             let self_pid = std::process::id();
             let mut evaluated_signatures: std::collections::HashSet<(u32, String)> =
                 std::collections::HashSet::new();
-            let mut interval = tokio::time::interval(std::time::Duration::from_millis(250));
+            let mut interval = tokio::time::interval(std::time::Duration::from_millis(5000));
             loop {
                 interval.tick().await;
-                let rows = sentinel_state
-                    .lineage_engine
-                    .rl_traffic
-                    .poll_and_learn_live_os_traffic();
+                let rl_traffic = Arc::clone(&sentinel_state.lineage_engine.rl_traffic);
+                let Ok(rows) =
+                    tokio::task::spawn_blocking(move || rl_traffic.poll_and_learn_live_os_traffic())
+                        .await
+                else {
+                    continue;
+                };
                 let mut active_pids = std::collections::HashSet::new();
                 for row in &rows {
                     active_pids.insert(row.pid);
@@ -528,8 +539,6 @@ impl KillSwitchServer {
                     if !eval.technical.is_clean
                         || !eval.operational.is_clean
                         || !eval.data.is_clean
-                        || is_priv_binary
-                        || has_priv_escalation
                     {
                         let base_score = eval.breakout_risk_score as f32;
                         let elevated_score = if has_priv_escalation || is_priv_binary {

@@ -11,7 +11,9 @@ use subtle::ConstantTimeEq;
 use tracing::warn;
 
 use killswitch_core::peer_pid::resolve_loopback_peer_pid;
-use killswitch_types::status::KILLCHAIN_ISOLATE_CONFIRMATION_PHRASE;
+use killswitch_types::status::{
+    KILLCHAIN_ISOLATE_CONFIRMATION_PHRASE, KILLCHAIN_RESTORE_CONFIRMATION_PHRASE,
+};
 use killswitch_types::validate_caller_pid;
 
 use crate::error::ServerError;
@@ -165,9 +167,11 @@ pub fn verify_control_plane_auth(
         }
     };
 
-    // 2. Validate token against state control token or confirmation phrase (for /engage)
-    let token_valid = if endpoint_name == "/engage"
-        && constant_time_token_match(token_to_verify, KILLCHAIN_ISOLATE_CONFIRMATION_PHRASE)
+    // 2. Validate token against state control token or confirmation phrase (for /engage and /disarm)
+    let token_valid = if (endpoint_name == "/engage"
+        && constant_time_token_match(token_to_verify, KILLCHAIN_ISOLATE_CONFIRMATION_PHRASE))
+        || (endpoint_name == "/disarm"
+            && constant_time_token_match(token_to_verify, KILLCHAIN_RESTORE_CONFIRMATION_PHRASE))
     {
         true
     } else {
@@ -208,6 +212,12 @@ pub fn verify_control_plane_auth(
                 "🚨 [SERVER-AUTH] Caller PID mismatch on '{}': claimed={}, actual_peer_pid={}",
                 endpoint_name, claimed, actual
             );
+            if endpoint_name == "/disarm" {
+                return Err(ServerError::AuthenticationFailed(format!(
+                    "Caller PID spoofing detected: claimed PID {} does not match authenticated peer PID {}",
+                    claimed, actual
+                )));
+            }
             return Err(ServerError::CallerPidSpoofing { claimed, actual });
         }
     }

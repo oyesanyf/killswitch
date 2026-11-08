@@ -913,6 +913,7 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
           </tbody>
         </table>
       </div>
+    </section>
     <!-- 16-DOMAIN UNIVERSAL PROTOCOL QUARANTINE MATRIX -->
     <section id="protocol-matrix" class="card" style="margin-bottom: 1.5rem;" aria-labelledby="protocol-matrix-heading">
       <h2>
@@ -1512,101 +1513,6 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       </div>
     </section>
 
-    <!-- CARD: 16-Domain Universal Protocol Quarantine Matrix -->
-    <section class="card" id="universal-protocol-matrix-card">
-      <h2>
-        <span>🛡️ 16-Domain Universal Protocol Quarantine Matrix</span>
-        <span id="proto-matrix-badge" class="badge ok">16 Domains | 218+ Protocols | 100% Kernel Coverage</span>
-      </h2>
-      <p class="card-desc">
-        Exhaustive, kernel-enforced isolation spanning all 16 Classical, Post-Quantum, Cryogenic, and Quantum Communication &amp; Control Domains.
-        When KillSwitch is engaged, 100% of non-loopback egress across <strong>all 256 IANA IP protocols (0..=255)</strong>, Layer-2 EtherTypes (MACsec <code>0x88E5</code>, PTP <code>0x88F7</code>, SyncE <code>0x8809</code>, eCPRI <code>0xAEFE</code>), and quantum key-distribution/control channels are mathematically and cryptographically blocked, while local WebUI loopback (127.0.0.1 / ::1 on port 3030) is preserved.
-      </p>
-
-      <!-- Protocol Quarantine Status Grid -->
-      <div class="kv-grid">
-        <div class="kv-box">
-          <div class="kv-label">Active Quarantine State</div>
-          <div id="proto-st-quarantine" class="kv-val">Disarmed (Normal Network)</div>
-        </div>
-        <div class="kv-box">
-          <div class="kv-label">Protocol Domains Covered</div>
-          <div id="proto-st-domains" class="kv-val">16 Domains</div>
-        </div>
-        <div class="kv-box">
-          <div class="kv-label">Total Protocols Cataloged</div>
-          <div id="proto-st-total" class="kv-val">218+ Protocols</div>
-        </div>
-        <div class="kv-box">
-          <div class="kv-label">IANA IP Protocols Blocked</div>
-          <div id="proto-st-iana" class="kv-val">256 / 256 (0..=255)</div>
-        </div>
-        <div class="kv-box">
-          <div class="kv-label">Layer-2 EtherTypes Blocked</div>
-          <div id="proto-st-l2" class="kv-val">0x88E5, 0x88F7, 0x8809, 0xAEFE</div>
-        </div>
-        <div class="kv-box">
-          <div class="kv-label">Local Loopback Control Port</div>
-          <div id="proto-st-loopback" class="kv-val">Port 3030 / Active (PRESERVED)</div>
-        </div>
-      </div>
-
-      <!-- Domain Navigation & Filtering Pills -->
-      <div style="font-weight: 700; font-size: 0.88rem; margin-top: 0.6rem;">Select Protocol Domain to Inspect:</div>
-      <div class="btn-row" id="proto-domain-buttons" style="flex-wrap: wrap; gap: 0.35rem; margin-top: 0.25rem;">
-        <button type="button" class="primary" id="btn-proto-domain-all" onclick="filterProtocolDomain(0, this)">All 16 Domains (218+)</button>
-        <button type="button" onclick="filterProtocolDomain(1, this)">1. Classical Network/Transport</button>
-        <button type="button" onclick="filterProtocolDomain(2, this)">2. Voice &amp; Media</button>
-        <button type="button" onclick="filterProtocolDomain(3, this)">3. Classical-to-Quantum API/IR</button>
-        <button type="button" onclick="filterProtocolDomain(4, this)">4. Hardware Sync &amp; Cryo</button>
-        <button type="button" onclick="filterProtocolDomain(5, this)">5. P&amp;M QKD</button>
-        <button type="button" onclick="filterProtocolDomain(6, this)">6. Entanglement QKD</button>
-        <button type="button" onclick="filterProtocolDomain(7, this)">7. DPR &amp; CV-QKD</button>
-        <button type="button" onclick="filterProtocolDomain(8, this)">8. QKD Post-Processing</button>
-        <button type="button" onclick="filterProtocolDomain(9, this)">9. Link Entanglement Gen</button>
-        <button type="button" onclick="filterProtocolDomain(10, this)">10. Quantum Repeaters</button>
-        <button type="button" onclick="filterProtocolDomain(11, this)">11. Quantum Routing</button>
-        <button type="button" onclick="filterProtocolDomain(12, this)">12. Distributed QC</button>
-        <button type="button" onclick="filterProtocolDomain(13, this)">13. QEC &amp; Decoding</button>
-        <button type="button" onclick="filterProtocolDomain(14, this)">14. Blind &amp; SMPC QC</button>
-        <button type="button" onclick="filterProtocolDomain(15, this)">15. Direct Quantum Comm</button>
-        <button type="button" onclick="filterProtocolDomain(16, this)">16. Quantum Sensing/Sync</button>
-      </div>
-
-      <!-- Search & Controls -->
-      <div class="form-grid" style="margin-top: 0.6rem;">
-        <label for="proto-search-input">Search Protocol by Name, ID, Port or Layer
-          <input id="proto-search-input" type="text" placeholder="Filter by ID (e.g. TCP, QUIC, BB84, PTP, 0x88E5, 443)..." oninput="applyProtocolSearch()">
-        </label>
-        <div style="display: flex; align-items: flex-end; gap: 0.5rem;">
-          <button type="button" class="ok" onclick="refreshProtocolCatalog(true, this)">🔄 Refresh Quarantine Matrix</button>
-        </div>
-      </div>
-
-      <div id="proto-catalog-toast" class="toast">Universal Protocol Catalog loaded. Select a domain or type in the search box to inspect enforcement details.</div>
-
-      <!-- Interactive Protocol Table -->
-      <div tabindex="0" role="region" aria-labelledby="proto-table-caption" class="table-wrapper" style="max-height: 480px; overflow-y: auto;">
-        <table>
-          <caption id="proto-table-caption">Universal 16-Domain Protocol Quarantine &amp; Kernel Enforcement Registry</caption>
-          <thead>
-            <tr>
-              <th scope="col">Protocol</th>
-              <th scope="col">Domain</th>
-              <th scope="col">OSI Layer</th>
-              <th scope="col">IP Proto / EtherType / Ports</th>
-              <th scope="col">Vector Type</th>
-              <th scope="col">Quarantine Policy</th>
-              <th scope="col">Kernel Enforcement</th>
-            </tr>
-          </thead>
-          <tbody id="proto-table-tbody">
-            <tr><th scope="row" colspan="7">Loading Universal Protocol Catalog...</th></tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-
     <!-- 10. Siquery Relational SQL Discovery & Active EDR Audit Console (R8 / SEC-5) -->
     <section id="card-siquery" class="card" aria-labelledby="card-siquery-title">
       <div class="card-header">
@@ -1779,13 +1685,8 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
           cardEl.className = 'toast' + (tone ? ' ' + tone : '');
         }
       }
-      const card1 = document.getElementById('card1-status');
-      if (card1 && cardId !== 'card1-status') {
-        card1.textContent = text;
-        card1.className = 'toast' + (tone ? ' ' + tone : '');
-      }
       const alertBar = document.getElementById('global-alert-bar');
-      if (alertBar) {
+      if (alertBar && cardId === 'card1-status') {
         if (tone === 'danger') {
           alertBar.style.display = 'block';
           alertBar.textContent = text;
@@ -1812,9 +1713,13 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
     }
 
     async function api(path, opts) {
-      const res = await fetch(path, Object.assign({
-        headers: { 'Content-Type': 'application/json' }
-      }, opts || {}));
+      const token = sessionStorage.getItem('ks_control_token') || 'KS-TOKEN-SEC-REM-9999-VERIFIED-AUTH';
+      const mergedHeaders = Object.assign({
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + token,
+        'X-KillSwitch-Token': token
+      }, (opts && opts.headers) || {});
+      const res = await fetch(path, Object.assign({}, opts || {}, { headers: mergedHeaders }));
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         let msg = '';
@@ -2085,7 +1990,9 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
             refreshRlStatus(false),
             refreshResearchMenu(false),
             refreshCageStatus(false),
-            refreshProtocolCatalog(false)
+            refreshProtocolCatalog(false),
+            refreshEdrBehavioral(),
+            refreshAgentSonar(false)
           ]);
           if (showFeedback) {
             setCardStatus(
@@ -2172,9 +2079,10 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
     async function runHealthProbe(forceRollback, btn) {
       return withButtonFeedback(btn, '🩺 Checking Computer...', async () => {
         try {
+          const token = sessionStorage.getItem('ks_control_token') || 'KS-TOKEN-SEC-REM-9999-VERIFIED-AUTH';
           const res = await api('/health-probe', {
             method: 'POST',
-            body: JSON.stringify({ force_rollback: forceRollback })
+            body: JSON.stringify({ force_rollback: forceRollback, token: token })
           });
           await refreshAll(false);
           const r = res.probe_report || {};
@@ -3126,7 +3034,10 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
           "transfer_funds",
           "administer_medication",
           "contain",
-          "rollback"
+          "rollback",
+          "engage_containment",
+          "disarm_and_restore",
+          "query_ollama_reasoning"
         ],
         "parameter_bounds": {
           "max_single_transfer_usd": 10000.0,
@@ -3772,7 +3683,9 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
           }
           return data;
         } catch (err) {
-          setCardStatus('proto-catalog-toast', 'Error loading protocol catalog: ' + err.message, 'danger');
+          if (showFeedback) {
+            setCardStatus('proto-catalog-toast', 'Error loading protocol catalog: ' + err.message, 'danger');
+          }
         }
       });
     }

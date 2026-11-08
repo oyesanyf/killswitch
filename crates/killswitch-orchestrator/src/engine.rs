@@ -174,8 +174,39 @@ impl KillSwitchOrchestrator {
 
     /// Advances the orchestrator by a single discrete step.
     pub async fn step(&self) -> Result<StepTransition> {
+        self.step_with_force(None).await
+    }
+
+    /// Advances the orchestrator by a single discrete step, optionally forcing a target stage.
+    pub async fn step_with_force(
+        &self,
+        force_node: Option<killswitch_types::graph::GraphNodeId>,
+    ) -> Result<StepTransition> {
+        use killswitch_types::graph::GraphNodeId;
         let mut state = self.active_state.write().await;
         let mut stage_guard = self.current_stage.write().await;
+
+        if let Some(forced) = force_node {
+            if matches!(forced, GraphNodeId::Monitoring) {
+                let prev = *stage_guard;
+                *stage_guard = LifecycleStage::Ingest;
+                state.current_node = GraphNodeId::Monitoring;
+                state.active_threats.clear();
+                state.aggregate_threat_score = 0.0;
+                return Ok(StepTransition {
+                    from_stage: prev,
+                    to_stage: LifecycleStage::Ingest,
+                    duration_ms: 0,
+                    threat_score: 0.0,
+                    is_isolated: false,
+                    is_paused: false,
+                    is_terminal: false,
+                    summary: "Reset graph state to Monitoring".to_string(),
+                });
+            }
+            *stage_guard = LifecycleStage::from_graph_node_id(forced);
+        }
+
         let stage = *stage_guard;
 
         let transition = self.graph.step(&mut state, stage).await?;
