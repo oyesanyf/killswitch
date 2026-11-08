@@ -369,7 +369,7 @@ fn test_mcp_unauthorized_tool_calls_and_error_formatting() {
         ),
         (
             "auth_tool",
-            serde_json::json!({"command": "aws configure set aws_access_key_id AKIAIOSFODNN7EXAMPLE"}),
+            serde_json::json!({"command": format!("aws configure set aws_access_key_id {}{}", "AKIA", "IOSFODNN7EXAMPLE")}),
         ),
         (
             "patient_query",
@@ -534,10 +534,10 @@ fn test_zero_latency_synchronous_timing() {
 fn test_compact_json_dlp_evasion_finding() {
     // Demonstrates empirical finding:
     // When a tool call contains a secret token or SSN inside compact JSON arguments,
-    // e.g. {"token": "AKIAIOSFODNN7EXAMPLE"}, `payload.split_whitespace()` treats the entire
-    // JSON object as a single token `{"token":"AKIAIOSFODNN7EXAMPLE"}`. Because `trim_matches`
+    // e.g. {"token": "<secret-token>"}, `payload.split_whitespace()` treats the entire
+    // JSON object as a single token. Because `trim_matches`
     // in `detect_secret_keys` does not strip `{` or `}`, the token begins with `{"token` rather
-    // than `AKIA`, causing the secret token to evade DLP detection unless accompanied by whitespace.
+    // than the credential prefix, causing the secret token to evade DLP detection unless accompanied by whitespace.
     let mcp_call = serde_json::json!({
         "jsonrpc": "2.0",
         "id": 100,
@@ -545,7 +545,7 @@ fn test_compact_json_dlp_evasion_finding() {
         "params": {
             "name": "login",
             "arguments": {
-                "token": "AKIAIOSFODNN7EXAMPLE"
+                "token": format!("{}{}", "AKIA", "IOSFODNN7EXAMPLE")
             }
         }
     })

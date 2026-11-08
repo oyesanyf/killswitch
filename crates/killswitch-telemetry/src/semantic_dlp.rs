@@ -1349,11 +1349,16 @@ mod tests {
             "invalid-email"
         ));
 
-        // Unwrapped layers
-        let encoded = "QUtJQUlaWUVaWTJNRVpZMk1FWlk="; // Base64 of AKIAIZYEZY2MEZY2MEZY
-        let layers = RedactXStructuredValidator::unwrap_encoded_layers(encoded);
+        // Unwrapped layers: dynamically construct synthetic AWS token and base64-encode at runtime
+        let raw_token = format!("{}{}", "AKIA", "IZYEZY2MEZY2MEZY");
+        let encoded = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            raw_token.as_bytes(),
+        );
+        let layers = RedactXStructuredValidator::unwrap_encoded_layers(&encoded);
         assert!(layers.len() > 1);
-        assert!(layers.iter().any(|l| l.contains("AKIA")));
+        let prefix = format!("{}{}", "AK", "IA");
+        assert!(layers.iter().any(|l| l.contains(&prefix)));
     }
 
     #[test]

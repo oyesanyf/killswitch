@@ -81,10 +81,10 @@ Zero external OS CLI utilities (`netsh`, `iptables`, `nft`, `taskkill`, `kill`, 
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
 | M1 | Killswitch Service Management, Browser Behavior & Installer Packaging | Features 35, 36, 37, 38 in `killswitch` (R1) | none | DONE (Gate PASSED: 132/132 tests passed, 0 clippy warnings, Reviewers APPROVE, Challengers APPROVE, Auditor CLEAN) |
-| M2 | Killswitch WebUI Button Fixes, Release Builds, Button Verification & CI Remediation | Features 39, 40, 41 in `killswitch` (R2) | M1 | IN_PROGRESS |
-| M3 | OshoosiClaw Sequential Migration, Verification & Remote CI | Feature 42 in `D:\harfile\OshoosiClaw` (R3) | M2 | PLANNED |
-| M4 | AgentOctopus Sequential Migration, Verification & Remote CI | Feature 43 in `D:\harfile\AgentOctopus` (R4) | M3 | PLANNED |
-| M5 | Final Cross-Repository Forensic Integrity Audit & Sentinel Handoff | Feature 44 across all three repositories | M4 | PLANNED |
+| M2 | Killswitch WebUI Button Fixes, Release Builds, Button Verification & CI Remediation | Features 39, 40, 41 in `killswitch` (R2) | M1 | DONE (Gate PASSED: 73/73 WebUI buttons passed, CI run 42432666169 100% green across all 5 jobs, Auditor CLEAN) |
+| M3 | OshoosiClaw Sequential Migration, Verification & Remote CI | Feature 42 in `D:\harfile\OshoosiClaw` (R3) | M2 | DONE (Gate PASSED: PR #434 merged at 0f64765d, 7/7 genuine self-diagnostics verified, 6/6 remote CI green, Auditor CLEAN) |
+| M4 | AgentOctopus Sequential Migration, Verification & Remote CI | Feature 43 in `D:\harfile\AgentOctopus` (R4) | M3 | DONE (Gate PASSED: Commit `3fa5faa` pushed, 7/7 genuine verify exit 0, remote CI 100% green, Auditor CLEAN) |
+| M5 | Final Cross-Repository Forensic Integrity Audit & Sentinel Handoff | Feature 44 across all three repositories | M4 | IN_PROGRESS |
 
 ---
 
