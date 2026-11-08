@@ -610,7 +610,8 @@ impl NativeServiceManager for MacOsServiceManager {
             );
             return Ok(());
         }
-        let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("/usr/local/bin/killswitch"));
+        let exe =
+            std::env::current_exe().unwrap_or_else(|_| PathBuf::from("/usr/local/bin/killswitch"));
         std::process::Command::new(exe)
             .args(["--service", "run"])
             .stdin(std::process::Stdio::null())

@@ -507,7 +507,8 @@ async fn main() -> Result<()> {
                     std::process::exit(0);
                 }
             }
-            boot_unified_webui_runtime(cli.host, cli.port, cli.mode, cli.db_dir, cli.open_browser).await?;
+            boot_unified_webui_runtime(cli.host, cli.port, cli.mode, cli.db_dir, cli.open_browser)
+                .await?;
         }
         Some(Commands::Status) => handle_status(&client).await?,
         Some(Commands::Isolate {
