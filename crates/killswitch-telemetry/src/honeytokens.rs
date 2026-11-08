@@ -266,11 +266,7 @@ mod tests {
         // Tripping registered honeytoken emits Critical ThreatSignal
         let test_aws_key = format!("{}{}", "AKIA", "IOSFODNN7EXAMPLE");
         let tripped_key = format!("{}:wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", test_aws_key);
-        let tripped = mgr.verify_and_audit_access(
-            &tripped_key,
-            8888,
-            "mimikatz.exe",
-        );
+        let tripped = mgr.verify_and_audit_access(&tripped_key, 8888, "mimikatz.exe");
 
         assert!(tripped.is_some());
         let sig = tripped.unwrap();

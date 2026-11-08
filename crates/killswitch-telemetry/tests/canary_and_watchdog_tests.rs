@@ -56,11 +56,7 @@ fn test_t1_f18_02_honeytoken_access_detection() {
     // Querying with seeded decoy AWS credential -> Critical alert
     let test_aws_key = format!("{}{}", "AKIA", "IOSFODNN7EXAMPLE");
     let decoy_payload = format!("{}:wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", test_aws_key);
-    let tripped = mgr.verify_and_audit_access(
-        &decoy_payload,
-        200,
-        "stealer.exe",
-    );
+    let tripped = mgr.verify_and_audit_access(&decoy_payload, 200, "stealer.exe");
     assert!(tripped.is_some());
     let sig = tripped.unwrap();
     assert_eq!(sig.target_pid, 200);
