@@ -486,9 +486,10 @@ impl KillSwitchServer {
             loop {
                 interval.tick().await;
                 let rl_traffic = Arc::clone(&sentinel_state.lineage_engine.rl_traffic);
-                let Ok(rows) =
-                    tokio::task::spawn_blocking(move || rl_traffic.poll_and_learn_live_os_traffic())
-                        .await
+                let Ok(rows) = tokio::task::spawn_blocking(move || {
+                    rl_traffic.poll_and_learn_live_os_traffic()
+                })
+                .await
                 else {
                     continue;
                 };
@@ -536,9 +537,7 @@ impl KillSwitchServer {
                         &row.image_path,
                         &row.command_line,
                     );
-                    if !eval.technical.is_clean
-                        || !eval.operational.is_clean
-                        || !eval.data.is_clean
+                    if !eval.technical.is_clean || !eval.operational.is_clean || !eval.data.is_clean
                     {
                         let base_score = eval.breakout_risk_score as f32;
                         let elevated_score = if has_priv_escalation || is_priv_binary {

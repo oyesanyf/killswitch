@@ -61,10 +61,7 @@ pub fn build_router(state: Arc<ServerState>) -> Router {
             "/api/edr-bench/ingest",
             post(handlers::post_edr_bench_evaluate),
         )
-        .route(
-            "/edr-bench/ingest",
-            post(handlers::post_edr_bench_evaluate),
-        )
+        .route("/edr-bench/ingest", post(handlers::post_edr_bench_evaluate))
         // 7. Connected Peers Inspection & 1-Click Disable/Enable Control
         .route("/peers/status", get(handlers::get_peers_status))
         .route("/api/peers/status", get(handlers::get_peers_status))

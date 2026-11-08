@@ -19,9 +19,9 @@
 //!    - GET /service/status & /api/service/status
 //!    - POST /service/control with valid & invalid actions
 
-use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use std::sync::Arc;
 use tower::ServiceExt;
 
 use killswitch_core::killchain::HostContainmentManager;
@@ -469,7 +469,8 @@ async fn test_swe_bench_anti_blind_killswitch_vetoes_isolation_in_engage() {
     let app = build_router(state);
 
     // Overbroad candidate rule submitted to /engage
-    let bad_rule = killswitch_adjudication::edr_bench::EdrBenchHarness::canonical_overbroad_blind_rule();
+    let bad_rule =
+        killswitch_adjudication::edr_bench::EdrBenchHarness::canonical_overbroad_blind_rule();
 
     let req = Request::builder()
         .uri("/engage")

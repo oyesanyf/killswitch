@@ -196,4 +196,3 @@ async fn test_native_service_cli_status() {
     let res = killswitch_cli::commands::handle_native_service_cli("status").await;
     assert!(res.is_ok());
 }
-

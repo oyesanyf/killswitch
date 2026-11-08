@@ -100,7 +100,10 @@ pub async fn handle_native_service_cli(action: &str) -> Result<()> {
 
     match action.to_lowercase().as_str() {
         "install" => {
-            println!("🔧 Installing native OS background service '{}'...", service_name);
+            println!(
+                "🔧 Installing native OS background service '{}'...",
+                service_name
+            );
             let cfg = killswitch_types::service::ServiceConfig {
                 name: service_name.to_string(),
                 arguments: vec!["--service".to_string(), "run".to_string()],
@@ -110,45 +113,55 @@ pub async fn handle_native_service_cli(action: &str) -> Result<()> {
             println!("✅ Service '{}' installed successfully.", service_name);
         }
         "delete" | "uninstall" => {
-            println!("🔧 Uninstalling native OS background service '{}'...", service_name);
+            println!(
+                "🔧 Uninstalling native OS background service '{}'...",
+                service_name
+            );
             let _ = killswitch_core::killchain::execute_host_disarm_unauthenticated();
             sm.uninstall_service(service_name)?;
             println!("✅ Service '{}' uninstalled successfully.", service_name);
         }
         "start" => {
-            println!("🔧 Starting native OS background service '{}'...", service_name);
+            println!(
+                "🔧 Starting native OS background service '{}'...",
+                service_name
+            );
             sm.start_service(service_name)?;
             println!("✅ Service '{}' started.", service_name);
         }
         "stop" => {
-            println!("🔧 Stopping native OS background service '{}'...", service_name);
+            println!(
+                "🔧 Stopping native OS background service '{}'...",
+                service_name
+            );
             let _ = killswitch_core::killchain::execute_host_disarm_unauthenticated();
             sm.stop_service(service_name)?;
             println!("✅ Service '{}' stopped.", service_name);
         }
         "restart" => {
-            println!("🔧 Restarting native OS background service '{}'...", service_name);
+            println!(
+                "🔧 Restarting native OS background service '{}'...",
+                service_name
+            );
             sm.restart_service(service_name)?;
             println!("✅ Service '{}' restarted.", service_name);
         }
-        "status" => {
-            match sm.service_status(service_name) {
-                Ok(status) => {
-                    println!("\n================================================================================");
-                    println!("🔧 NATIVE OS SERVICE STATUS: {}", status.name);
-                    println!("================================================================================");
-                    println!("  Display Name: {}", status.display_name);
-                    println!("  State:        {}", status.state);
-                    println!("  Installed:    {}", status.is_installed);
-                    println!("  PID:          {:?}", status.pid);
-                    println!("  Binary Path:  {}", status.binary_path.unwrap_or_default());
-                    println!("================================================================================\n");
-                }
-                Err(e) => {
-                    eprintln!("⚠️ Failed to query native OS service manager: {}", e);
-                }
+        "status" => match sm.service_status(service_name) {
+            Ok(status) => {
+                println!("\n================================================================================");
+                println!("🔧 NATIVE OS SERVICE STATUS: {}", status.name);
+                println!("================================================================================");
+                println!("  Display Name: {}", status.display_name);
+                println!("  State:        {}", status.state);
+                println!("  Installed:    {}", status.is_installed);
+                println!("  PID:          {:?}", status.pid);
+                println!("  Binary Path:  {}", status.binary_path.unwrap_or_default());
+                println!("================================================================================\n");
             }
-        }
+            Err(e) => {
+                eprintln!("⚠️ Failed to query native OS service manager: {}", e);
+            }
+        },
         "run" => {
             println!("🚀 Running native OS background service daemon loop...");
             sm.run_service_daemon()?;
