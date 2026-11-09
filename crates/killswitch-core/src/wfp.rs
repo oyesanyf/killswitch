@@ -2018,6 +2018,26 @@ impl WfpDynamicSession {
                     "INBOUND_ICMP_ERROR_V6",
                     "Block-All-ICMPError-In-v6",
                 ),
+                (
+                    FWPM_LAYER_IPFORWARD_V4,
+                    "IPFORWARD_V4",
+                    "Block-All-IPForward-WSL2-NAT-v4",
+                ),
+                (
+                    FWPM_LAYER_IPFORWARD_V6,
+                    "IPFORWARD_V6",
+                    "Block-All-IPForward-WSL2-NAT-v6",
+                ),
+                (
+                    FWPM_LAYER_IPFORWARD_V4_SDK,
+                    "IPFORWARD_V4_SDK",
+                    "Block-All-IPForward-SDK-WSL2-NAT-v4",
+                ),
+                (
+                    FWPM_LAYER_IPFORWARD_V6_SDK,
+                    "IPFORWARD_V6_SDK",
+                    "Block-All-IPForward-SDK-WSL2-NAT-v6",
+                ),
             ];
 
             for (layer, layer_name, filter_name) in block_layers {
