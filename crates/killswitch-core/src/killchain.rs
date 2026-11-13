@@ -1136,6 +1136,7 @@ pub fn is_critical_system_pid(pid: u32, name: &str) -> bool {
             | "code.exe"
             | "antigravity.exe"
             | "windowsterminal.exe"
+            | "wt.exe"
             | "cursor.exe"
             | "cursor"
             | "openconsole.exe"
