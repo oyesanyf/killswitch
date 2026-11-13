@@ -12,8 +12,8 @@ use std::time::Duration;
 use tracing::{info, warn};
 
 use killswitch_adjudication::ZeroFalsePositiveAdjudicator;
-use killswitch_core::killchain::HostContainmentManager;
 use killswitch_core::auth::{is_forbidden_static_token, try_load_host_control_secret};
+use killswitch_core::killchain::HostContainmentManager;
 use killswitch_core::service::default_service_manager;
 use killswitch_orchestrator::engine::{KillSwitchOrchestrator, OrchestratorConfig};
 use killswitch_server::types::*;
@@ -342,7 +342,11 @@ impl KillSwitchClient {
             } else {
                 let status = resp.status();
                 let msg = resp.text().await.unwrap_or_default();
-                anyhow::bail!("Disarm rejected by KillSwitch server (HTTP {}): {}", status, msg);
+                anyhow::bail!(
+                    "Disarm rejected by KillSwitch server (HTTP {}): {}",
+                    status,
+                    msg
+                );
             }
         }
 
@@ -463,7 +467,11 @@ impl KillSwitchClient {
             } else {
                 let status = resp.status();
                 let msg = resp.text().await.unwrap_or_default();
-                anyhow::bail!("Mode change rejected by KillSwitch server (HTTP {}): {}", status, msg);
+                anyhow::bail!(
+                    "Mode change rejected by KillSwitch server (HTTP {}): {}",
+                    status,
+                    msg
+                );
             }
         }
 

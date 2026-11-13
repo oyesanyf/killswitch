@@ -709,16 +709,12 @@ async fn test_http_rate_limit_allowlist_auth_boundaries() {
 // 8. CALLER QUARANTINE & ANTI-SPOOFING VERIFICATION
 // ============================================================================
 
-fn setup_challenge_state_with_frozen_pid(
-    frozen_pid: u32,
-) -> (Arc<ServerState>, tempfile::TempDir) {
+fn setup_challenge_state_with_frozen_pid(frozen_pid: u32) -> (Arc<ServerState>, tempfile::TempDir) {
     let temp_dir = tempfile::tempdir().unwrap();
     let isolator = killswitch_core::killchain::default_network_isolator();
     let freezer = Arc::new(killswitch_core::freeze::NativeProcessFreezer::new());
-    let mut auth = killswitch_core::auth::OperatorAuthManager::new(
-        None,
-        Some(temp_dir.path().to_path_buf()),
-    );
+    let mut auth =
+        killswitch_core::auth::OperatorAuthManager::new(None, Some(temp_dir.path().to_path_buf()));
     auth.set_custom_master_token(CHALLENGE_MASTER_TOKEN.to_string());
     let auth = Arc::new(auth);
     let ledger = Arc::new(parking_lot::RwLock::new(

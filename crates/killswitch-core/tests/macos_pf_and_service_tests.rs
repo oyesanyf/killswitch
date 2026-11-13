@@ -5,9 +5,9 @@
 
 use killswitch_core::{
     default_service_manager, generate_launchd_plist, generate_quarantine_rules,
-    generate_systemd_unit, get_active_darwin_sockets, is_critical_system_pid,
-    LinuxServiceManager, MacOsPfIsolator, MacOsServiceManager, NativeProcessFreezer,
-    NativeServiceManager, StateLedger, PF_DEVICE_PATH,
+    generate_systemd_unit, get_active_darwin_sockets, is_critical_system_pid, LinuxServiceManager,
+    MacOsPfIsolator, MacOsServiceManager, NativeProcessFreezer, NativeServiceManager, StateLedger,
+    PF_DEVICE_PATH,
 };
 use killswitch_types::{
     service::{ServiceConfig, ServiceError, ServiceState},

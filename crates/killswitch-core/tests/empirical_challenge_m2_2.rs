@@ -893,15 +893,16 @@ async fn test_health_probe_progression_1_2_3_clean_probes_early_rollback() {
 
     let status3 = manager.get_status();
     assert_eq!(status3.consecutive_healthy_probes, 3);
-    assert!(status3.isolated, "Host must remain isolated until authenticated disarm");
+    assert!(
+        status3.isolated,
+        "Host must remain isolated until authenticated disarm"
+    );
 
     // Verify unauthenticated disarm (None credentials) is rejected fail-closed
-    assert!(
-        manager
-            .disarm_isolation("test_admin", "Unauthenticated probe completion", None)
-            .await
-            .is_err()
-    );
+    assert!(manager
+        .disarm_isolation("test_admin", "Unauthenticated probe completion", None)
+        .await
+        .is_err());
     assert!(manager.get_status().isolated);
 }
 
@@ -1005,12 +1006,10 @@ async fn test_three_clean_probes_do_not_trigger_automatic_rollback() {
     );
 
     // Unauthenticated disarm without creds MUST fail closed
-    assert!(
-        manager
-            .disarm_isolation("sec_bot", "Unauthenticated attempt", None)
-            .await
-            .is_err()
-    );
+    assert!(manager
+        .disarm_isolation("sec_bot", "Unauthenticated attempt", None)
+        .await
+        .is_err());
     assert!(manager.get_status().isolated);
 
     // Authenticated disarm with operator credentials must succeed cleanly
@@ -1066,12 +1065,10 @@ async fn test_fail_closed_disarm_rejection_and_authenticated_recovery() {
     assert!(manager.get_status().isolated);
 
     // Unauthenticated disarm must fail closed
-    assert!(
-        manager
-            .disarm_isolation("admin", "No creds attempt", None)
-            .await
-            .is_err()
-    );
+    assert!(manager
+        .disarm_isolation("admin", "No creds attempt", None)
+        .await
+        .is_err());
     assert!(manager.get_status().isolated);
 
     // Authenticated disarm must succeed

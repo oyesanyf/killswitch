@@ -193,8 +193,12 @@ impl OperatorAuthManager {
                         for key in &["password_hash", "hash", "token", "pin_hash"] {
                             if let Some(stored) = json_val.get(*key).and_then(|v| v.as_str()) {
                                 let clean = stored.trim();
-                                if verify_stored_hash_digest(trimmed, &computed_b3, &computed_sha, clean)
-                                {
+                                if verify_stored_hash_digest(
+                                    trimmed,
+                                    &computed_b3,
+                                    &computed_sha,
+                                    clean,
+                                ) {
                                     return true;
                                 }
                             }
@@ -203,8 +207,7 @@ impl OperatorAuthManager {
                 } else {
                     // Plain text hash file
                     let clean = content.trim();
-                    if verify_stored_hash_digest(trimmed, &computed_b3, &computed_sha, clean)
-                    {
+                    if verify_stored_hash_digest(trimmed, &computed_b3, &computed_sha, clean) {
                         return true;
                     }
                 }
@@ -635,8 +638,7 @@ pub fn generate_csprng_token_hex() -> Result<String, String> {
 #[cfg(target_os = "windows")]
 fn fill_os_csprng(buf: &mut [u8]) -> Result<(), String> {
     use std::ffi::c_void;
-    type FnBCryptGenRandom =
-        unsafe extern "system" fn(*mut c_void, *mut u8, u32, u32) -> i32;
+    type FnBCryptGenRandom = unsafe extern "system" fn(*mut c_void, *mut u8, u32, u32) -> i32;
     #[link(name = "kernel32")]
     extern "system" {
         fn LoadLibraryA(lp_lib_file_name: *const u8) -> *mut c_void;
@@ -660,7 +662,10 @@ fn fill_os_csprng(buf: &mut [u8]) -> Result<(), String> {
             BCRYPT_USE_SYSTEM_PREFERRED_RNG,
         );
         if status != 0 {
-            return Err(format!("BCryptGenRandom failed with NTSTATUS 0x{:08x}", status));
+            return Err(format!(
+                "BCryptGenRandom failed with NTSTATUS 0x{:08x}",
+                status
+            ));
         }
     }
     Ok(())
@@ -891,8 +896,13 @@ pub fn seal_and_store_operator_secret(
     if trimmed.len() < 32 || is_forbidden_static_token(trimmed) {
         return Err("Refusing to store weak or static control secret".to_string());
     }
-    std::fs::create_dir_all(dir)
-        .map_err(|e| format!("Failed to create runtime secret dir {}: {}", dir.display(), e))?;
+    std::fs::create_dir_all(dir).map_err(|e| {
+        format!(
+            "Failed to create runtime secret dir {}: {}",
+            dir.display(),
+            e
+        )
+    })?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -911,7 +921,11 @@ pub fn seal_and_store_operator_secret(
         .map_err(|e| format!("Serialize control secret envelope failed: {}", e))?;
 
     let final_path = dir.join(CONTROL_SECRET_FILE);
-    let tmp_path = dir.join(format!("{}.tmp.{}", CONTROL_SECRET_FILE, std::process::id()));
+    let tmp_path = dir.join(format!(
+        "{}.tmp.{}",
+        CONTROL_SECRET_FILE,
+        std::process::id()
+    ));
 
     #[cfg(unix)]
     {
@@ -1112,8 +1126,10 @@ fn harden_windows_secret_dacl(path: &std::path::Path) -> Result<(), String> {
         attributes: u32,
     }
 
-    type FnConvertSddl = unsafe extern "system" fn(*const u16, u32, *mut *mut c_void, *mut u32) -> i32;
-    type FnGetDacl = unsafe extern "system" fn(*mut c_void, *mut i32, *mut *mut c_void, *mut i32) -> i32;
+    type FnConvertSddl =
+        unsafe extern "system" fn(*const u16, u32, *mut *mut c_void, *mut u32) -> i32;
+    type FnGetDacl =
+        unsafe extern "system" fn(*mut c_void, *mut i32, *mut *mut c_void, *mut i32) -> i32;
     type FnSetNamedSec = unsafe extern "system" fn(
         *const u16,
         u32,
@@ -1151,7 +1167,9 @@ fn harden_windows_secret_dacl(path: &std::path::Path) -> Result<(), String> {
         }
         let p_sddl = GetProcAddress(
             h_adv,
-            c"ConvertStringSecurityDescriptorToSecurityDescriptorW".as_ptr().cast(),
+            c"ConvertStringSecurityDescriptorToSecurityDescriptorW"
+                .as_ptr()
+                .cast(),
         );
         let p_dacl = GetProcAddress(h_adv, c"GetSecurityDescriptorDacl".as_ptr().cast());
         let p_set = GetProcAddress(h_adv, c"SetNamedSecurityInfoW".as_ptr().cast());
@@ -1234,7 +1252,8 @@ fn harden_windows_secret_dacl(path: &std::path::Path) -> Result<(), String> {
         };
         let sddl_w: Vec<u16> = sddl.encode_utf16().chain(std::iter::once(0)).collect();
         let mut p_sd: *mut c_void = std::ptr::null_mut();
-        if convert_sddl(sddl_w.as_ptr(), 1, &mut p_sd, std::ptr::null_mut()) == 0 || p_sd.is_null() {
+        if convert_sddl(sddl_w.as_ptr(), 1, &mut p_sd, std::ptr::null_mut()) == 0 || p_sd.is_null()
+        {
             return Err("ConvertStringSecurityDescriptorToSecurityDescriptorW failed".to_string());
         }
 
@@ -1262,7 +1281,10 @@ fn harden_windows_secret_dacl(path: &std::path::Path) -> Result<(), String> {
         );
         let _ = LocalFree(p_sd);
         if rc != 0 {
-            return Err(format!("SetNamedSecurityInfoW failed with Win32 error {}", rc));
+            return Err(format!(
+                "SetNamedSecurityInfoW failed with Win32 error {}",
+                rc
+            ));
         }
         Ok(())
     }

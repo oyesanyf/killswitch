@@ -69,7 +69,11 @@ async fn test_client_offline_disarm_fails_closed_without_credentials() {
     );
     assert!(
         client
-            .disarm("test_operator", "Static phrase bypass attempt", Some("CONFIRM RESTORE"))
+            .disarm(
+                "test_operator",
+                "Static phrase bypass attempt",
+                Some("CONFIRM RESTORE")
+            )
             .await
             .is_err(),
         "Offline disarm with legacy static phrase must fail closed"

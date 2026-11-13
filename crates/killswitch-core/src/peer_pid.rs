@@ -400,13 +400,8 @@ pub fn resolve_loopback_peer_pid(
             if pid <= 0 {
                 continue;
             }
-            let fd_bytes = libc::proc_pidinfo(
-                pid,
-                libc::PROC_PIDLISTFDS,
-                0,
-                std::ptr::null_mut(),
-                0,
-            );
+            let fd_bytes =
+                libc::proc_pidinfo(pid, libc::PROC_PIDLISTFDS, 0, std::ptr::null_mut(), 0);
             if fd_bytes <= 0 {
                 continue;
             }

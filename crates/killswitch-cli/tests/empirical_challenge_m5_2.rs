@@ -533,12 +533,10 @@ async fn test_dlp_lineage_autonomous_trigger_containment_and_state_ledger() {
             );
 
             // Verify unauthenticated disarm is rejected fail-closed; then disarm with valid credentials
-            assert!(
-                containment_mgr
-                    .disarm_isolation("teardown", "Unauthenticated attempt", None)
-                    .await
-                    .is_err()
-            );
+            assert!(containment_mgr
+                .disarm_isolation("teardown", "Unauthenticated attempt", None)
+                .await
+                .is_err());
             let teardown_creds = OperatorCredentials {
                 operator_id: "teardown_operator".to_string(),
                 auth_token: Some(M5_2_DLP_TOKEN.to_string()),
@@ -841,11 +839,10 @@ async fn test_reversible_mode_emergency_unauthenticated_disarm() {
             );
 
             // 3. Unauthenticated disarm (None) MUST be rejected fail-closed; authenticated disarm must succeed
-            assert!(
-                mgr.disarm_isolation("intruder", "Unauthenticated attempt", None)
-                    .await
-                    .is_err()
-            );
+            assert!(mgr
+                .disarm_isolation("intruder", "Unauthenticated attempt", None)
+                .await
+                .is_err());
             assert!(mgr.get_status().isolated);
 
             let creds = OperatorCredentials {
@@ -887,17 +884,14 @@ async fn test_reversible_mode_emergency_unauthenticated_disarm() {
             );
             let disarm_entry = history.first().unwrap();
             assert_eq!(disarm_entry.action, "DISARMED");
-            assert!(disarm_entry
-                .reason
-                .contains("Authenticated disarm test"));
+            assert!(disarm_entry.reason.contains("Authenticated disarm test"));
         }
         Err(KillSwitchError::InsufficientPrivileges { .. }) => {
             // In non-root environments, unauthenticated disarm still fails closed
-            assert!(
-                mgr.disarm_isolation("intruder", "Unauthenticated attempt", None)
-                    .await
-                    .is_err()
-            );
+            assert!(mgr
+                .disarm_isolation("intruder", "Unauthenticated attempt", None)
+                .await
+                .is_err());
         }
         Err(e) => panic!("Engage isolation failed unexpectedly: {:?}", e),
     }
@@ -1022,7 +1016,11 @@ async fn test_client_server_disarm_integration_and_offline_fallback() {
     // 3. Test KillSwitchClient offline fail-closed rejection when credentials are missing or server is unreachable
     let offline_client = KillSwitchClient::new("127.0.0.1", 64433);
     let fallback_err = offline_client
-        .disarm("emergency_user", "Server is dead, unauthenticated restore", None)
+        .disarm(
+            "emergency_user",
+            "Server is dead, unauthenticated restore",
+            None,
+        )
         .await;
     assert!(
         fallback_err.is_err(),
@@ -1033,11 +1031,7 @@ async fn test_client_server_disarm_integration_and_offline_fallback() {
     let test_tok = "ks-m5-2-client-offline-0123456789abcdef0123456789abcdef";
     std::env::set_var("KILLSWITCH_MASTER_TOKEN", test_tok);
     let auth_res = offline_client
-        .disarm(
-            "operator",
-            "Authenticated offline recovery",
-            Some(test_tok),
-        )
+        .disarm("operator", "Authenticated offline recovery", Some(test_tok))
         .await
         .expect("Offline client disarm with valid token must succeed");
     assert!(auth_res.success);
@@ -1066,7 +1060,11 @@ async fn test_idempotent_disarm_and_rapid_oscillation_stress() {
     assert!(!mgr.get_status().isolated);
     for i in 1..=5 {
         let res = mgr
-            .disarm_isolation("stress_operator", &format!("Idempotent disarm {}", i), Some(&creds))
+            .disarm_isolation(
+                "stress_operator",
+                &format!("Idempotent disarm {}", i),
+                Some(&creds),
+            )
             .await
             .expect("Authenticated disarming of already disarmed system must succeed cleanly");
         assert!(!res.isolated, "System must remain disarmed");

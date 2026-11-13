@@ -139,8 +139,7 @@ impl KillChainHostManager {
     ) -> Result<Self> {
         let isolator = default_network_isolator();
         let freezer = Arc::new(crate::freeze::NativeProcessFreezer::new());
-        let mut auth =
-            crate::auth::OperatorAuthManager::new(None, custom_dir.map(PathBuf::from));
+        let mut auth = crate::auth::OperatorAuthManager::new(None, custom_dir.map(PathBuf::from));
         auth.set_custom_master_token(master_token);
         let ledger = Arc::new(RwLock::new(StateLedger::open_or_init(custom_dir)?));
         Ok(Self::new(isolator, freezer, Arc::new(auth), ledger))
@@ -153,8 +152,7 @@ impl KillChainHostManager {
     ) -> Result<Self> {
         let isolator = Arc::new(SimulatedNetworkIsolator);
         let freezer = Arc::new(crate::freeze::NativeProcessFreezer::new());
-        let mut auth =
-            crate::auth::OperatorAuthManager::new(None, custom_dir.map(PathBuf::from));
+        let mut auth = crate::auth::OperatorAuthManager::new(None, custom_dir.map(PathBuf::from));
         auth.set_custom_master_token(master_token);
         let ledger = Arc::new(RwLock::new(StateLedger::open_or_init(custom_dir)?));
         Ok(Self::new(isolator, freezer, Arc::new(auth), ledger))
@@ -1200,10 +1198,7 @@ mod tests {
         let ledger = Arc::new(RwLock::new(
             StateLedger::open_or_init(Some(dir.path())).unwrap(),
         ));
-        let mut auth = crate::auth::OperatorAuthManager::new(
-            Some(dir.path().to_path_buf()),
-            None,
-        );
+        let mut auth = crate::auth::OperatorAuthManager::new(Some(dir.path().to_path_buf()), None);
         let test_token = "ks-test-operator-token-0123456789abcdef0123456789abcdef";
         auth.set_custom_master_token(test_token.to_string());
         let auth = Arc::new(auth);
@@ -1233,12 +1228,10 @@ mod tests {
         assert!(!probe.eligible_for_early_rollback);
 
         // Unauthenticated disarm (None credentials) MUST fail closed
-        assert!(
-            manager
-                .disarm_isolation("test_operator", "Missing creds bypass attempt", None)
-                .await
-                .is_err()
-        );
+        assert!(manager
+            .disarm_isolation("test_operator", "Missing creds bypass attempt", None)
+            .await
+            .is_err());
         assert!(manager.get_status().isolated);
 
         // Disarm isolation with valid operator credentials

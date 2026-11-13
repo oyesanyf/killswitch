@@ -324,9 +324,8 @@ pub async fn handle_cage_release(
     // tamper or operator lock is active (never unauthenticated emergency-disarm).
     if state.journal.unexpired_leases().is_empty() {
         let last_cause = state.last_trigger_cause.read().await.clone();
-        let tamper_active =
-            killswitch_telemetry::tamper_and_process_killswitch::KILLSWITCH_ACTIVE
-                .load(std::sync::atomic::Ordering::SeqCst);
+        let tamper_active = killswitch_telemetry::tamper_and_process_killswitch::KILLSWITCH_ACTIVE
+            .load(std::sync::atomic::Ordering::SeqCst);
         if last_cause.is_none() && !tamper_active {
             match state
                 .containment_manager

@@ -134,7 +134,10 @@ pub async fn handle_native_service_cli(action: &str) -> Result<()> {
                 service_name
             );
             sm.stop_service(service_name)?;
-            println!("✅ Service '{}' stopped (active ledger/kernel isolation remains fail-closed).", service_name);
+            println!(
+                "✅ Service '{}' stopped (active ledger/kernel isolation remains fail-closed).",
+                service_name
+            );
         }
         "restart" => {
             println!(

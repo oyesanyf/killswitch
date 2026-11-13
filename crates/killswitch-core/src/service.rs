@@ -989,7 +989,12 @@ unsafe fn harden_win32_service_dacl(
     let convert_sddl: FnConvertSddl = std::mem::transmute(convert_ptr);
     let set_service_sec: FnSetServiceSec = std::mem::transmute(set_sec_ptr);
     let mut sd: *mut c_void = std::ptr::null_mut();
-    let ok_sddl = convert_sddl(sddl.as_ptr(), SDDL_REVISION_1, &mut sd, std::ptr::null_mut());
+    let ok_sddl = convert_sddl(
+        sddl.as_ptr(),
+        SDDL_REVISION_1,
+        &mut sd,
+        std::ptr::null_mut(),
+    );
     if ok_sddl == 0 || sd.is_null() {
         return Err("ConvertStringSecurityDescriptorToSecurityDescriptorW failed".to_string());
     }
@@ -997,7 +1002,10 @@ unsafe fn harden_win32_service_dacl(
     let _ = LocalFree(sd);
     if ok_set == 0 {
         let err = windows_sys::Win32::Foundation::GetLastError();
-        return Err(format!("SetServiceObjectSecurity failed: Win32 0x{:08X}", err));
+        return Err(format!(
+            "SetServiceObjectSecurity failed: Win32 0x{:08X}",
+            err
+        ));
     }
     Ok(())
 }

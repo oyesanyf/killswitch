@@ -857,7 +857,10 @@ fn test_stress_fail_closed_shutdown_preserves_isolation_state() {
 
     // 3. Verify state ledger remains isolated fail-closed across service stops
     let reloaded = StateLedger::open_or_init(Some(temp.path())).expect("reload ledger");
-    assert!(reloaded.status().isolated, "Host MUST remain isolated across shutdown/stop");
+    assert!(
+        reloaded.status().isolated,
+        "Host MUST remain isolated across shutdown/stop"
+    );
     assert!(reloaded.status().network_isolated);
 
     std::env::remove_var("KILLSWITCH_DATABASE_DIR");

@@ -268,7 +268,11 @@ impl LocalMySqlTamperGuard {
             reason = reason,
             "CRITICAL TAMPER DETECTED — ENGAGING ACTIVE FAIL-CLOSED KILLSWITCH CONTAINMENT"
         );
-        if let Some(cb) = TAMPER_CONTAINMENT_CALLBACK.read().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        if let Some(cb) = TAMPER_CONTAINMENT_CALLBACK
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
             cb(reason);
         } else if std::env::var_os("CARGO").is_none()
             && std::env::var_os("RUST_TEST_THREADS").is_none()
@@ -276,7 +280,9 @@ impl LocalMySqlTamperGuard {
             if let Ok(handle) = tokio::runtime::Handle::try_current() {
                 let reason_owned = reason.to_string();
                 handle.spawn(async move {
-                    if let Ok(mgr) = killswitch_core::killchain::HostContainmentManager::new_default(None) {
+                    if let Ok(mgr) =
+                        killswitch_core::killchain::HostContainmentManager::new_default(None)
+                    {
                         let _ = Arc::new(mgr)
                             .engage_isolation(
                                 "tamper_guard",

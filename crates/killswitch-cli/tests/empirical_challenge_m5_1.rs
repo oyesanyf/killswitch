@@ -198,7 +198,13 @@ async fn test_challenge_cyclic_langgraph_recursion_limit_enforcement() {
 async fn test_challenge_cyclic_langgraph_rollback_and_probe_lifecycle() {
     // Build a graph containing: Contain -> Monitor -> [Conditional: eligible -> Rollback, else -> Terminal] -> Terminal
     let temp_dir = tempfile::tempdir().unwrap();
-    let containment = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
+    let containment = Arc::new(
+        HostContainmentManager::new_default_with_master_token(
+            Some(temp_dir.path()),
+            TEST_MASTER_TOKEN.to_string(),
+        )
+        .unwrap(),
+    );
 
     // 1. Ineligible for rollback: should transition to Terminal without rolling back
     {
@@ -622,25 +628,6 @@ async fn test_challenge_axum_server_3_strike_rate_limit_lockout_and_bypass() {
     let http = reqwest::Client::new();
     let base_url = format!("http://127.0.0.1:{}", port);
 
-    // 0. Legacy static confirmation phrase "CONFIRM ISOLATE" must be rejected with 401 Unauthorized
-    let legacy_engage_body = serde_json::json!({
-        "operator": "secops_admin",
-        "reason": "Legacy static phrase attempt",
-        "token": "CONFIRM ISOLATE",
-        "level": "network_quarantine"
-    });
-    let legacy_resp = http
-        .post(format!("{}/engage", base_url))
-        .json(&legacy_engage_body)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        legacy_resp.status(),
-        reqwest::StatusCode::UNAUTHORIZED,
-        "Legacy 'CONFIRM ISOLATE' phrase on /engage must fail closed with 401"
-    );
-
     // 1. Authenticated /engage over real loopback socket
     let engage_body = serde_json::json!({
         "operator": "secops_admin",
@@ -750,6 +737,27 @@ async fn test_challenge_axum_server_3_strike_rate_limit_lockout_and_bypass() {
             "Lockout must be cleared following master token bypass"
         );
         assert_eq!(post_bypass_lockout.failed_attempts, 0);
+    }
+
+    // Legacy static confirmation phrase "CONFIRM ISOLATE" must be rejected with 401 Unauthorized
+    {
+        let legacy_engage_body = serde_json::json!({
+            "operator": "secops_admin",
+            "reason": "Legacy static phrase attempt",
+            "token": "CONFIRM ISOLATE",
+            "level": "network_quarantine"
+        });
+        let legacy_resp = http
+            .post(format!("{}/engage", base_url))
+            .json(&legacy_engage_body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            legacy_resp.status(),
+            reqwest::StatusCode::UNAUTHORIZED,
+            "Legacy 'CONFIRM ISOLATE' phrase on /engage must fail closed with 401"
+        );
     }
 
     server_handle.abort();
