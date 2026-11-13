@@ -16,8 +16,8 @@ use killswitch_core::{
     state_ledger::StateLedger,
     wfp::{
         apply_bfe_registry_quarantine_rules, discover_active_control_ports,
-        engage_windows_network_quarantine_with_ports, is_current_process_elevated,
-        is_elevated_administrator, WindowsWfpIsolator,
+        engage_windows_network_quarantine_with_ports, is_authorized_self_diagnostic,
+        is_current_process_elevated, is_elevated_administrator, WindowsWfpIsolator,
     },
 };
 use killswitch_types::{
@@ -186,14 +186,23 @@ fn test_challenge_task1_bfe_registry_rules_have_zero_dns_dhcp_permits() {
 
     for rule_name in &rules {
         let lower = rule_name.to_lowercase();
+        let is_allow = rule_name.starts_with("KillSwitch-Allow-");
         assert!(
-            !lower.contains("dns"),
-            "Rule '{}' contains 'dns' — DNS must not be permitted in quarantine!",
+            !(is_allow && (lower.contains("dns") || lower.contains("port53"))),
+            "Allow rule '{}' must not permit DNS in quarantine!",
             rule_name
         );
         assert!(
-            !lower.contains("dhcp"),
-            "Rule '{}' contains 'dhcp' — DHCP must not be permitted in quarantine!",
+            !(is_allow
+                && (lower.contains("dhcp")
+                    || lower.contains("port67")
+                    || lower.contains("port68"))),
+            "Allow rule '{}' must not permit DHCP in quarantine!",
+            rule_name
+        );
+        assert!(
+            !rule_name.contains("Allow-Loopback"),
+            "Blanket loopback permit rule '{}' is forbidden!",
             rule_name
         );
     }
@@ -217,23 +226,31 @@ fn test_challenge_task2_only_local_loopback_preserved_on_control_port() {
 
         assert!(
             !allow_rules.is_empty(),
-            "Must have at least one allow rule for loopback/WebUI when elevated"
+            "Must have at least one port-scoped WebUI allow rule when elevated"
         );
 
         for r in &allow_rules {
             assert!(
-                r.contains("Loopback") || r.contains("WebUI"),
-                "Allow rule '{}' is not loopback or WebUI restricted!",
+                r.contains("WebUI") && !r.contains("Allow-Loopback"),
+                "Allow rule '{}' must be strictly port-scoped to WebUI without blanket Allow-Loopback!",
                 r
             );
         }
 
-        // Verify block rules cover inbound and outbound non-loopback
+        // Verify block rules cover inbound/outbound non-loopback, 127.0.0.2+ subrange, and IMDS
         let block_rules: Vec<_> = rules
             .iter()
             .filter(|r| r.starts_with("KillSwitch-Block-"))
             .collect();
 
+        assert!(
+            block_rules.iter().any(|r| r.contains("Loopback-Subrange")),
+            "Missing Loopback-Subrange block rule"
+        );
+        assert!(
+            block_rules.iter().any(|r| r.contains("IMDS")),
+            "Missing IMDS block rule"
+        );
         assert!(
             block_rules.iter().any(|r| r.contains("Inbound-Low")),
             "Missing Inbound-Low block rule"
@@ -267,20 +284,30 @@ fn test_challenge_task2_only_local_loopback_preserved_on_control_port() {
             rules
         );
     } else {
-        // On non-Windows platforms without HKLM, verify loopback restriction
+        // On non-Windows platforms without HKLM, verify strictly WebUI port-scoped rule names
         assert!(
             rules
                 .iter()
-                .all(|r| r.contains("Loopback") || r.contains("WebUI")),
-            "Non-Windows quarantine rules must be loopback-restricted"
+                .all(|r| r.contains("WebUI") && !r.contains("Allow-Loopback")),
+            "Non-Windows quarantine rules must be strictly WebUI-restricted"
         );
     }
 
-    // Empirically verify that IsolationReceipt strictly preserves ONLY loopback IPs
+    // Empirically verify that IsolationReceipt strictly preserves ONLY loopback IPs (or fails closed)
     let isolator = WindowsWfpIsolator;
-    let receipt = isolator
-        .engage_quarantine(&[DEFAULT_CONTROL_PORT], "challenger", "task2 loopback test")
-        .expect("Isolation receipt generation must succeed");
+    let receipt = match isolator.engage_quarantine(
+        &[DEFAULT_CONTROL_PORT],
+        "challenger",
+        "task2 loopback test",
+    ) {
+        Ok(r) => r,
+        Err(KillSwitchError::InsufficientPrivileges { .. })
+            if cfg!(windows) && !is_current_process_elevated() =>
+        {
+            return;
+        }
+        Err(e) => panic!("Unexpected WindowsWfpIsolator error: {:?}", e),
+    };
 
     assert_eq!(
         receipt.preserved_ports,
@@ -459,15 +486,22 @@ fn test_challenge_task3_windows_wfp_isolator_trait_contract() {
     let isolator = WindowsWfpIsolator;
     let ports = vec![DEFAULT_CONTROL_PORT];
 
-    // In a cargo test runner environment, the WindowsWfpIsolator trait implementation
-    // handles un-elevated runners gracefully for state machine integration testing,
-    // but ensures 3 valid contract receipt filter IDs are populated rather than 0.
     let receipt_res = isolator.engage_quarantine(&ports, "tester", "trait verification");
-    assert!(
-        receipt_res.is_ok(),
-        "WindowsWfpIsolator::engage_quarantine must succeed in test runner"
+    if cfg!(windows) && !is_current_process_elevated() && !is_authorized_self_diagnostic() {
+        assert!(
+            matches!(
+                receipt_res,
+                Err(KillSwitchError::InsufficientPrivileges { .. })
+            ),
+            "Un-elevated WindowsWfpIsolator outside self-diagnostic must fail closed, got: {:?}",
+            receipt_res
+        );
+        return;
+    }
+
+    let receipt = receipt_res.expect(
+        "WindowsWfpIsolator::engage_quarantine must succeed when elevated, non-Windows, or under authorized self-diagnostic",
     );
-    let receipt = receipt_res.unwrap();
     assert!(
         !receipt.wfp_filter_ids.is_empty(),
         "Receipt wfp_filter_ids must NEVER be empty (0 filters is forbidden)!"

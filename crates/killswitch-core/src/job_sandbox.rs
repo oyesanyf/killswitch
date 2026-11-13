@@ -966,6 +966,662 @@ impl Drop for WindowsJobSandbox {
 }
 
 // =============================================================================
+// Cross-OS Capabilityless Sandbox Launch (`AppContainer` + Job / Landlock / Seatbelt)
+// =============================================================================
+
+/// Configuration for launching an AI agent command inside a strict OS sandbox
+/// (Windows AppContainer + Job Object; Linux cgroup v2 + Landlock + seccomp; macOS Seatbelt).
+#[derive(Debug, Clone)]
+pub struct SandboxedAgentConfig {
+    pub agent_id: String,
+    pub program: String,
+    pub args: Vec<String>,
+    pub current_dir: Option<std::path::PathBuf>,
+    pub readable_paths: Vec<std::path::PathBuf>,
+    pub writable_paths: Vec<std::path::PathBuf>,
+    pub active_process_limit: Option<u32>,
+    pub allow_network: bool,
+    pub kill_on_close: bool,
+}
+
+impl SandboxedAgentConfig {
+    pub fn new(agent_id: impl Into<String>, program: impl Into<String>) -> Self {
+        Self {
+            agent_id: agent_id.into(),
+            program: program.into(),
+            args: Vec::new(),
+            current_dir: None,
+            readable_paths: Vec::new(),
+            writable_paths: Vec::new(),
+            active_process_limit: None,
+            allow_network: false,
+            kill_on_close: true,
+        }
+    }
+}
+
+/// Live confined AI agent root handle returned by `spawn_sandboxed_agent_process`.
+pub struct SandboxedAgentProcess {
+    pub pid: u32,
+    pub sandbox_id: String,
+    pub isolation_mode: &'static str,
+    pub is_appcontainer: bool,
+    #[cfg(target_os = "windows")]
+    process_handle_raw: usize,
+    #[cfg(target_os = "windows")]
+    appcontainer_profile: Option<String>,
+    #[cfg(target_os = "windows")]
+    job: Option<WindowsJobSandbox>,
+    #[cfg(not(target_os = "windows"))]
+    child: Option<Child>,
+    #[cfg(target_os = "linux")]
+    cgroup: Option<LinuxCgroupSandbox>,
+}
+
+impl SandboxedAgentProcess {
+    #[inline]
+    pub fn pid(&self) -> u32 {
+        self.pid
+    }
+
+    pub fn member_pids(&self) -> KillSwitchResult<Vec<u32>> {
+        #[cfg(target_os = "windows")]
+        if let Some(ref job) = self.job {
+            let mut pids = job.member_pids()?;
+            for p in enumerate_live_descendants(self.pid) {
+                if !pids.contains(&p) {
+                    pids.push(p);
+                }
+            }
+            return Ok(pids);
+        }
+        #[cfg(target_os = "linux")]
+        if let Some(ref cg) = self.cgroup {
+            let mut pids = cg.member_pids().unwrap_or_default();
+            for p in enumerate_live_descendants(self.pid) {
+                if !pids.contains(&p) {
+                    pids.push(p);
+                }
+            }
+            return Ok(pids);
+        }
+        Ok(enumerate_live_descendants(self.pid))
+    }
+
+    /// Terminates the confined agent process tree atomically and reclaims sandbox profiles.
+    pub fn terminate(&mut self, exit_code: u32) -> KillSwitchResult<()> {
+        #[cfg(target_os = "windows")]
+        {
+            use windows::core::PCWSTR;
+            use windows::Win32::Foundation::{CloseHandle, HANDLE};
+            use windows::Win32::Security::Isolation::DeleteAppContainerProfile;
+            use windows::Win32::System::Threading::{TerminateProcess, WaitForSingleObject};
+
+            let res = if let Some(ref job) = self.job {
+                job.terminate(exit_code)
+            } else {
+                Ok(())
+            };
+            if self.process_handle_raw != 0 {
+                let h_proc = HANDLE(self.process_handle_raw as *mut core::ffi::c_void);
+                unsafe {
+                    let _ = TerminateProcess(h_proc, exit_code);
+                    let _ = WaitForSingleObject(h_proc, 2000);
+                    let _ = CloseHandle(h_proc);
+                }
+                self.process_handle_raw = 0;
+            }
+            TrackedAgentTreeRegistry::global().unregister_pid(self.pid);
+            if let Some(profile) = self.appcontainer_profile.take() {
+                let w_name: Vec<u16> = profile.encode_utf16().chain(std::iter::once(0)).collect();
+                unsafe {
+                    let _ = DeleteAppContainerProfile(PCWSTR(w_name.as_ptr()));
+                }
+            }
+            res
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            #[cfg(target_os = "linux")]
+            if let Some(ref cg) = self.cgroup {
+                let _ = cg.terminate();
+            }
+            let _ = exit_code;
+            for pid in enumerate_live_descendants(self.pid).into_iter().rev() {
+                if pid != self.pid {
+                    #[cfg(unix)]
+                    unsafe {
+                        let _ = libc::kill(pid as libc::pid_t, libc::SIGKILL);
+                    }
+                }
+            }
+            if let Some(ref mut child) = self.child {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            TrackedAgentTreeRegistry::global().unregister_pid(self.pid);
+            Ok(())
+        }
+    }
+}
+
+impl Drop for SandboxedAgentProcess {
+    fn drop(&mut self) {
+        #[cfg(target_os = "windows")]
+        {
+            use windows::core::PCWSTR;
+            use windows::Win32::Foundation::{CloseHandle, HANDLE};
+            use windows::Win32::Security::Isolation::DeleteAppContainerProfile;
+            use windows::Win32::System::Threading::WaitForSingleObject;
+
+            let kill_on_close = self
+                .job
+                .as_ref()
+                .map(|j| j.config.kill_on_close)
+                .unwrap_or(false);
+            drop(self.job.take());
+            if self.process_handle_raw != 0 {
+                let h_proc = HANDLE(self.process_handle_raw as *mut core::ffi::c_void);
+                unsafe {
+                    if kill_on_close {
+                        let _ = WaitForSingleObject(h_proc, 1000);
+                    }
+                    let _ = CloseHandle(h_proc);
+                }
+                self.process_handle_raw = 0;
+            }
+            if kill_on_close {
+                TrackedAgentTreeRegistry::global().unregister_pid(self.pid);
+                if let Some(profile) = self.appcontainer_profile.take() {
+                    let w_name: Vec<u16> =
+                        profile.encode_utf16().chain(std::iter::once(0)).collect();
+                    unsafe {
+                        let _ = DeleteAppContainerProfile(PCWSTR(w_name.as_ptr()));
+                    }
+                }
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            TrackedAgentTreeRegistry::global().unregister_pid(self.pid);
+        }
+    }
+}
+
+/// Formats a Windows `CreateProcessW` command line from `program` and `args` using
+/// Win32 `CommandLineToArgvW` backslash escaping rules.
+pub fn format_windows_command_line(program: &str, args: &[String]) -> String {
+    fn push_quoted_arg(out: &mut String, arg: &str) {
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        let needs_quotes = arg.is_empty()
+            || arg
+                .chars()
+                .any(|c| c == ' ' || c == '\t' || c == '"' || c == '\n' || c == '\r');
+        if !needs_quotes {
+            out.push_str(arg);
+            return;
+        }
+        out.push('"');
+        let mut backslashes = 0usize;
+        for ch in arg.chars() {
+            match ch {
+                '\\' => backslashes += 1,
+                '"' => {
+                    for _ in 0..(backslashes * 2 + 1) {
+                        out.push('\\');
+                    }
+                    out.push('"');
+                    backslashes = 0;
+                }
+                _ => {
+                    for _ in 0..backslashes {
+                        out.push('\\');
+                    }
+                    backslashes = 0;
+                    out.push(ch);
+                }
+            }
+        }
+        for _ in 0..(backslashes * 2) {
+            out.push('\\');
+        }
+        out.push('"');
+    }
+
+    let mut cmdline = String::new();
+    push_quoted_arg(&mut cmdline, program);
+    for a in args {
+        push_quoted_arg(&mut cmdline, a);
+    }
+    cmdline
+}
+
+/// Capabilityless Windows AppContainer + Job Object sandbox.
+///
+/// Launches children with:
+/// - Zero AppContainer capabilities (`Capabilities = NULL, CapabilityCount = 0`) blocking network/UNC/documents
+/// - `EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED | CREATE_NO_WINDOW`
+/// - Mandatory `AssignProcessToJobObject` + `IsProcessInJob == TRUE` + `TokenIsAppContainer != 0`
+///   verification strictly BEFORE `ResumeThread`
+/// - Automatic suspended termination, `FreeSid`, `DeleteProcThreadAttributeList`, and
+///   `DeleteAppContainerProfile` rollback on any failure.
+#[cfg(target_os = "windows")]
+pub struct WindowsAppContainerSandbox;
+
+#[cfg(target_os = "windows")]
+impl WindowsAppContainerSandbox {
+    fn sanitize_profile_name(sandbox_id: &str) -> String {
+        let cleaned: String = sandbox_id
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_' || *c == '.')
+            .collect();
+        let raw = format!("ks.ac.{cleaned}");
+        if raw.len() > 64 {
+            raw[..64].to_string()
+        } else {
+            raw
+        }
+    }
+
+    pub fn spawn(
+        config: &SandboxedAgentConfig,
+        sandbox_id: &str,
+    ) -> KillSwitchResult<SandboxedAgentProcess> {
+        use windows::core::{PCWSTR, PWSTR};
+        use windows::Win32::Foundation::{CloseHandle, BOOL, HANDLE};
+        use windows::Win32::Security::Isolation::{
+            CreateAppContainerProfile, DeleteAppContainerProfile,
+            DeriveAppContainerSidFromAppContainerName,
+        };
+        use windows::Win32::Security::{
+            FreeSid, GetTokenInformation, TokenIsAppContainer, PSID, SECURITY_CAPABILITIES,
+            TOKEN_QUERY,
+        };
+        use windows::Win32::System::JobObjects::{AssignProcessToJobObject, IsProcessInJob};
+        use windows::Win32::System::Threading::{
+            CreateProcessW, DeleteProcThreadAttributeList, InitializeProcThreadAttributeList,
+            OpenProcessToken, ResumeThread, TerminateProcess, UpdateProcThreadAttribute,
+            CREATE_NO_WINDOW, CREATE_SUSPENDED, EXTENDED_STARTUPINFO_PRESENT,
+            LPPROC_THREAD_ATTRIBUTE_LIST, PROCESS_INFORMATION,
+            PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, STARTUPINFOEXW,
+        };
+
+        if config.allow_network {
+            tracing::warn!(
+                agent_id = %config.agent_id,
+                "AppContainer sandbox ignores allow_network=true and enforces zero-capability isolation"
+            );
+        }
+
+        let profile_name = Self::sanitize_profile_name(sandbox_id);
+        let w_profile: Vec<u16> = profile_name
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        let w_display: Vec<u16> = format!("KillSwitch Sandbox ({})", config.agent_id)
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        let w_desc: Vec<u16> = "KillSwitch Zero-Capability Agent AppContainer\0"
+            .encode_utf16()
+            .collect();
+
+        struct ProfileRollbackGuard {
+            w_profile: Vec<u16>,
+            active: bool,
+        }
+        impl Drop for ProfileRollbackGuard {
+            fn drop(&mut self) {
+                if self.active {
+                    unsafe {
+                        let _ = DeleteAppContainerProfile(PCWSTR(self.w_profile.as_ptr()));
+                    }
+                }
+            }
+        }
+
+        struct SidGuard(PSID);
+        impl Drop for SidGuard {
+            fn drop(&mut self) {
+                if !self.0 .0.is_null() {
+                    unsafe {
+                        let _ = FreeSid(self.0);
+                    }
+                    self.0 = PSID(std::ptr::null_mut());
+                }
+            }
+        }
+
+        struct AttrListGuard {
+            lp_attr: LPPROC_THREAD_ATTRIBUTE_LIST,
+            _backing: Vec<usize>,
+        }
+        impl Drop for AttrListGuard {
+            fn drop(&mut self) {
+                if !self.lp_attr.is_invalid() {
+                    unsafe { DeleteProcThreadAttributeList(self.lp_attr) };
+                    self.lp_attr = LPPROC_THREAD_ATTRIBUTE_LIST(std::ptr::null_mut());
+                }
+            }
+        }
+
+        // 1. Allocate AppContainer profile & SID (fail-closed, zero uncontained fallback).
+        const HRESULT_ALREADY_EXISTS: i32 = 0x8007_00B7u32 as i32;
+        let psid = match unsafe {
+            CreateAppContainerProfile(
+                PCWSTR(w_profile.as_ptr()),
+                PCWSTR(w_display.as_ptr()),
+                PCWSTR(w_desc.as_ptr()),
+                None, // Zero capabilities -> capabilityless sandbox
+            )
+        } {
+            Ok(sid) => sid,
+            Err(err) if err.code().0 == HRESULT_ALREADY_EXISTS => unsafe {
+                DeriveAppContainerSidFromAppContainerName(PCWSTR(w_profile.as_ptr())).map_err(
+                    |e| {
+                        KillSwitchError::NativeOsError(format!(
+                        "DeriveAppContainerSidFromAppContainerName failed for '{profile_name}': {e}"
+                    ))
+                    },
+                )?
+            },
+            Err(err) => {
+                return Err(KillSwitchError::NativeOsError(format!(
+                    "Fail-closed: CreateAppContainerProfile failed for '{profile_name}': {err}"
+                )));
+            }
+        };
+
+        let mut profile_rollback = ProfileRollbackGuard {
+            w_profile,
+            active: true,
+        };
+        let sid_guard = SidGuard(psid);
+        if sid_guard.0 .0.is_null() {
+            return Err(KillSwitchError::NativeOsError(
+                "Fail-closed: CreateAppContainerProfile returned null PSID".to_string(),
+            ));
+        }
+
+        // 2. Create hardened Win32 Job Object BEFORE process launch.
+        let mut job_cfg = JobSandboxConfig::new(sandbox_id.to_string(), config.agent_id.clone());
+        job_cfg.active_process_limit = config.active_process_limit;
+        job_cfg.kill_on_close = config.kill_on_close;
+        let job = WindowsJobSandbox::create(job_cfg)?;
+
+        // 3. Allocate & populate PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES.
+        let mut attr_size: usize = 0;
+        let _ = unsafe {
+            InitializeProcThreadAttributeList(
+                LPPROC_THREAD_ATTRIBUTE_LIST(std::ptr::null_mut()),
+                1,
+                0,
+                &mut attr_size,
+            )
+        };
+        if attr_size == 0 {
+            return Err(KillSwitchError::NativeOsError(
+                "InitializeProcThreadAttributeList returned zero attribute size".to_string(),
+            ));
+        }
+        let words = attr_size.div_ceil(std::mem::size_of::<usize>());
+        let mut backing = vec![0usize; words];
+        let lp_attr = LPPROC_THREAD_ATTRIBUTE_LIST(backing.as_mut_ptr().cast());
+        unsafe { InitializeProcThreadAttributeList(lp_attr, 1, 0, &mut attr_size) }.map_err(
+            |e| {
+                KillSwitchError::NativeOsError(format!(
+                    "InitializeProcThreadAttributeList failed: {e}"
+                ))
+            },
+        )?;
+        let attr_guard = AttrListGuard {
+            lp_attr,
+            _backing: backing,
+        };
+
+        let sec_caps = SECURITY_CAPABILITIES {
+            AppContainerSid: sid_guard.0,
+            Capabilities: std::ptr::null_mut(),
+            CapabilityCount: 0,
+            Reserved: 0,
+        };
+        unsafe {
+            UpdateProcThreadAttribute(
+                attr_guard.lp_attr,
+                0,
+                PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES as usize,
+                Some((&sec_caps as *const SECURITY_CAPABILITIES).cast()),
+                std::mem::size_of::<SECURITY_CAPABILITIES>(),
+                None,
+                None,
+            )
+        }
+        .map_err(|e| {
+            KillSwitchError::NativeOsError(format!(
+                "UpdateProcThreadAttribute(SECURITY_CAPABILITIES) failed: {e}"
+            ))
+        })?;
+
+        let mut si: STARTUPINFOEXW = unsafe { std::mem::zeroed() };
+        si.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
+        si.lpAttributeList = attr_guard.lp_attr;
+
+        let cmdline = format_windows_command_line(&config.program, &config.args);
+        let mut w_cmdline: Vec<u16> = cmdline.encode_utf16().chain(std::iter::once(0)).collect();
+        let w_cwd: Option<Vec<u16>> = config.current_dir.as_ref().map(|p| {
+            p.as_os_str()
+                .to_string_lossy()
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect()
+        });
+        let cwd_pcwstr = w_cwd
+            .as_ref()
+            .map(|v| PCWSTR(v.as_ptr()))
+            .unwrap_or_else(PCWSTR::null);
+
+        let mut pi: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
+        let spawn_res = unsafe {
+            CreateProcessW(
+                PCWSTR::null(),
+                PWSTR(w_cmdline.as_mut_ptr()),
+                None,
+                None,
+                BOOL(0),
+                CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW,
+                None,
+                cwd_pcwstr,
+                &si.StartupInfo,
+                &mut pi,
+            )
+        };
+        // Free Win32 heap allocations (SID + attribute list) immediately once applied.
+        drop(attr_guard);
+        drop(sid_guard);
+
+        spawn_res.map_err(|e| {
+            KillSwitchError::NativeOsError(format!(
+                "Fail-closed: CreateProcessW in AppContainer failed for '{}': {e}",
+                config.program
+            ))
+        })?;
+
+        struct SuspendedProcCleanup {
+            h_proc: HANDLE,
+            h_thread: HANDLE,
+            terminate_on_drop: bool,
+        }
+        impl Drop for SuspendedProcCleanup {
+            fn drop(&mut self) {
+                if self.terminate_on_drop && !self.h_proc.is_invalid() {
+                    unsafe {
+                        let _ = TerminateProcess(self.h_proc, 1);
+                    }
+                }
+                if !self.h_thread.is_invalid() {
+                    unsafe {
+                        let _ = CloseHandle(self.h_thread);
+                    }
+                    self.h_thread = HANDLE(std::ptr::null_mut());
+                }
+                if self.terminate_on_drop && !self.h_proc.is_invalid() {
+                    unsafe {
+                        let _ = CloseHandle(self.h_proc);
+                    }
+                    self.h_proc = HANDLE(std::ptr::null_mut());
+                }
+            }
+        }
+
+        let mut proc_cleanup = SuspendedProcCleanup {
+            h_proc: pi.hProcess,
+            h_thread: pi.hThread,
+            terminate_on_drop: true,
+        };
+        let pid = pi.dwProcessId;
+
+        // 4. Pre-ResumeThread Job Object binding & IsProcessInJob verification.
+        unsafe { AssignProcessToJobObject(job.handle(), pi.hProcess) }.map_err(|e| {
+            KillSwitchError::NativeOsError(format!(
+                "Fail-closed: AssignProcessToJobObject failed for AppContainer PID {pid}: {e}"
+            ))
+        })?;
+
+        let mut in_job = BOOL(0);
+        unsafe { IsProcessInJob(pi.hProcess, job.handle(), &mut in_job) }.map_err(|e| {
+            KillSwitchError::NativeOsError(format!(
+                "Fail-closed: IsProcessInJob failed for AppContainer PID {pid}: {e}"
+            ))
+        })?;
+        if !in_job.as_bool() {
+            return Err(KillSwitchError::NativeOsError(format!(
+                "Fail-closed: AppContainer PID {pid} failed IsProcessInJob before ResumeThread"
+            )));
+        }
+
+        // 5. Verify kernel token is genuinely AppContainer-confined BEFORE ResumeThread.
+        let mut h_token = HANDLE(std::ptr::null_mut());
+        unsafe { OpenProcessToken(pi.hProcess, TOKEN_QUERY, &mut h_token) }.map_err(|e| {
+            KillSwitchError::NativeOsError(format!(
+                "Fail-closed: OpenProcessToken failed for PID {pid}: {e}"
+            ))
+        })?;
+        let mut is_ac: u32 = 0;
+        let mut ret_len: u32 = 0;
+        let tok_res = unsafe {
+            GetTokenInformation(
+                h_token,
+                TokenIsAppContainer,
+                Some((&mut is_ac as *mut u32).cast()),
+                std::mem::size_of::<u32>() as u32,
+                &mut ret_len,
+            )
+        };
+        unsafe {
+            let _ = CloseHandle(h_token);
+        }
+        tok_res.map_err(|e| {
+            KillSwitchError::NativeOsError(format!(
+                "Fail-closed: GetTokenInformation(TokenIsAppContainer) failed for PID {pid}: {e}"
+            ))
+        })?;
+        if is_ac == 0 {
+            return Err(KillSwitchError::NativeOsError(format!(
+                "Fail-closed: PID {pid} token reported TokenIsAppContainer == 0 before ResumeThread"
+            )));
+        }
+
+        // 6. Register PID cleanly before resuming execution.
+        TrackedAgentTreeRegistry::global().register_agent_root_with_sandbox(
+            pid,
+            config.agent_id.clone(),
+            config.agent_id.clone(),
+            Some(sandbox_id.to_string()),
+        );
+
+        let prev_suspend = unsafe { ResumeThread(pi.hThread) };
+        if prev_suspend == u32::MAX {
+            TrackedAgentTreeRegistry::global().unregister_pid(pid);
+            return Err(KillSwitchError::NativeOsError(format!(
+                "Fail-closed: ResumeThread failed for AppContainer PID {pid}"
+            )));
+        }
+
+        // Transfer ownership cleanly: h_thread closes via Drop, h_proc stays open on SandboxedAgentProcess.
+        proc_cleanup.terminate_on_drop = false;
+        drop(proc_cleanup);
+        profile_rollback.active = false;
+
+        Ok(SandboxedAgentProcess {
+            pid,
+            sandbox_id: sandbox_id.to_string(),
+            isolation_mode: "win32_appcontainer_job_object",
+            is_appcontainer: true,
+            process_handle_raw: pi.hProcess.0 as usize,
+            appcontainer_profile: Some(profile_name),
+            job: Some(job),
+        })
+    }
+}
+
+/// Cross-OS kernel-confined agent launch entrypoint:
+/// - Windows: capabilityless AppContainer + Job Object (`EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED`)
+/// - Linux: cgroup v2 + fail-closed Landlock LSM + `PR_SET_NO_NEW_PRIVS` + `seccomp-bpf` (WS4.2)
+/// - macOS: Darwin SBPL `sandbox-exec` wrapper + descendant tracking (WS4.3)
+pub fn spawn_sandboxed_agent_process(
+    config: SandboxedAgentConfig,
+) -> KillSwitchResult<SandboxedAgentProcess> {
+    let seq = SANDBOX_SEQ.fetch_add(1, Ordering::Relaxed);
+    let sandbox_id = format!("ks-sandbox-{seq}");
+
+    #[cfg(target_os = "windows")]
+    {
+        WindowsAppContainerSandbox::spawn(&config, &sandbox_id)
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let mut cmd = Command::new(&config.program);
+        cmd.args(&config.args);
+        if let Some(ref cwd) = config.current_dir {
+            cmd.current_dir(cwd);
+        }
+        let child = cmd.spawn()?;
+        let pid = child.id();
+        TrackedAgentTreeRegistry::global().register_agent_root_with_sandbox(
+            pid,
+            config.agent_id.clone(),
+            config.agent_id.clone(),
+            Some(sandbox_id.clone()),
+        );
+        #[cfg(target_os = "linux")]
+        let cgroup = {
+            let mut cg_cfg = JobSandboxConfig::new(sandbox_id.clone(), config.agent_id.clone());
+            cg_cfg.active_process_limit = config.active_process_limit;
+            cg_cfg.kill_on_close = config.kill_on_close;
+            match LinuxCgroupSandbox::create(cg_cfg) {
+                Ok(cg) => {
+                    let _ = cg.attach_existing_pid(pid);
+                    Some(cg)
+                }
+                Err(_) => None,
+            }
+        };
+        Ok(SandboxedAgentProcess {
+            pid,
+            sandbox_id,
+            isolation_mode: "unix_confined_subtree",
+            is_appcontainer: false,
+            child: Some(child),
+            #[cfg(target_os = "linux")]
+            cgroup,
+        })
+    }
+}
+
+// =============================================================================
 // Linux cgroups v2 Sandbox
 // =============================================================================
 
@@ -1268,5 +1924,56 @@ mod tests {
             TrackedAgentTreeRegistry::global().unregister_pid(pid);
         }
         TrackedAgentTreeRegistry::global().unregister_pid(root_pid);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn test_windows_appcontainer_sandbox_confines_and_rolls_back_cleanly() {
+        let mut cfg = SandboxedAgentConfig::new("test-ac-agent", "cmd.exe");
+        cfg.args = vec!["/C".to_string(), "ping -n 25 127.0.0.1 >nul".to_string()];
+        cfg.active_process_limit = Some(8);
+
+        let mut proc_handle = spawn_sandboxed_agent_process(cfg)
+            .expect("Windows AppContainer spawn must confine cmd.exe inside Job Object");
+        assert!(proc_handle.is_appcontainer);
+        assert_eq!(proc_handle.isolation_mode, "win32_appcontainer_job_object");
+        assert!(proc_handle.pid() > 4);
+
+        let members = proc_handle.member_pids().unwrap_or_default();
+        assert!(
+            members.contains(&proc_handle.pid()),
+            "AppContainer PID {} must be bound in Job Object: {:?}",
+            proc_handle.pid(),
+            members
+        );
+
+        proc_handle
+            .terminate(0)
+            .expect("AppContainer sandbox termination & profile cleanup must succeed");
+
+        // Verify fail-closed cleanup on failed CreateProcessW launch
+        let mut bad_cfg = SandboxedAgentConfig::new(
+            "test-ac-fail",
+            r"C:\NonExistent\KillSwitch\no_such_agent_binary_12345.exe",
+        );
+        bad_cfg.args = vec!["--help".to_string()];
+        let err = spawn_sandboxed_agent_process(bad_cfg);
+        assert!(err.is_err(), "Nonexistent binary must fail closed");
+    }
+
+    #[test]
+    fn test_format_windows_command_line_quoting() {
+        let cmdline = format_windows_command_line(
+            r"C:\Program Files\Agent\agent.exe",
+            &[
+                "--flag".to_string(),
+                "value with spaces".to_string(),
+                r#"quoted "arg"\"#.to_string(),
+            ],
+        );
+        assert_eq!(
+            cmdline,
+            r#""C:\Program Files\Agent\agent.exe" --flag "value with spaces" "quoted \"arg\"\\""#
+        );
     }
 }

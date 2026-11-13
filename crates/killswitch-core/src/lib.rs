@@ -39,10 +39,13 @@ pub use agent_registry::{AgentLineageClass, SubtreeResolution, TrackedAgentRoot}
 pub use auth::{FrozenPidsProvider, OperatorAuthManager};
 pub use fprime::{FPrimeDispatchResult, FPrimeOpcode, FPrimeSupervisor, FPrimeTopologyStatus};
 pub use freeze::NativeProcessFreezer;
+#[cfg(target_os = "windows")]
+pub use job_sandbox::WindowsAppContainerSandbox;
 pub use job_sandbox::{
-    enumerate_live_descendants, enumerate_process_subtree, freeze_process_subtree,
-    freeze_subtree_kernel, resume_process_subtree, spawn_confined_process, ConfinedChild,
-    JobSandboxConfig, SubtreeFreezeReport,
+    enumerate_live_descendants, enumerate_process_subtree, format_windows_command_line,
+    freeze_process_subtree, freeze_subtree_kernel, resume_process_subtree, spawn_confined_process,
+    spawn_sandboxed_agent_process, ConfinedChild, JobSandboxConfig, SandboxedAgentConfig,
+    SandboxedAgentProcess, SubtreeFreezeReport,
 };
 pub use killchain::{
     default_network_isolator, is_critical_system_pid, is_developer_or_agent_runtime,
