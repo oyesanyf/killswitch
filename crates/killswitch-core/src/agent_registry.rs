@@ -495,24 +495,45 @@ impl TrackedAgentTreeRegistry {
             }
         }
 
-        // 3. Otherwise climb only across offending/non-host-boundary ancestors, stopping
-        //    strictly below any uninvolved interactive shell or desktop boundary.
-        let mut stop_idx = 0usize;
+        // 3. Otherwise climb only across confirmed-threat ancestors or live named non-host
+        //    ancestors, stopping strictly at the highest confirmed threat or below any
+        //    uninvolved interactive shell / desktop boundary.
         let mut stopped_below_host = false;
-        for (idx, (anc_pid, anc_name)) in raw_chain.iter().enumerate() {
-            if idx == 0 {
-                continue;
-            }
+        let mut highest_confirmed_idx: Option<usize> = self
+            .confirmed_threat_pids
+            .contains_key(&trigger_pid)
+            .then_some(0);
+
+        for (idx, (anc_pid, anc_name)) in raw_chain.iter().enumerate().skip(1) {
             if self.confirmed_threat_pids.contains_key(anc_pid) {
-                stop_idx = idx;
+                highest_confirmed_idx = Some(idx);
                 continue;
             }
             if is_host_boundary_name(anc_name) || is_interactive_host_shell_name(anc_name) {
                 stopped_below_host = true;
                 break;
             }
-            stop_idx = idx;
         }
+
+        let stop_idx = if let Some(conf_idx) = highest_confirmed_idx {
+            if conf_idx + 1 < raw_chain.len() {
+                stopped_below_host = true;
+            }
+            conf_idx
+        } else {
+            let mut non_host_top = 0usize;
+            for (idx, (_, anc_name)) in raw_chain.iter().enumerate().skip(1) {
+                if anc_name.is_empty()
+                    || is_host_boundary_name(anc_name)
+                    || is_interactive_host_shell_name(anc_name)
+                {
+                    stopped_below_host = true;
+                    break;
+                }
+                non_host_top = idx;
+            }
+            non_host_top
+        };
 
         let (root_pid, root_name_str) = raw_chain
             .get(stop_idx)
