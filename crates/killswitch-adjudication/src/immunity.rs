@@ -117,6 +117,16 @@ fn is_blanket_immunity_denied(name: &str) -> bool {
 /// Inspect target PID and traverse its parent ancestry up to depth 5.
 pub fn inspect_process_lineage(target_pid: u32, proc_name: Option<&str>) -> LineageImmunityVerdict {
     let p_name = proc_name.unwrap_or("");
+    let registry = killswitch_core::TrackedAgentTreeRegistry::global();
+    if !is_immutable_os_kernel_pid(target_pid, p_name) && registry.is_tracked_pid(target_pid) {
+        let res = registry.resolve_offending_process_subtree(target_pid, proc_name, &[]);
+        return LineageImmunityVerdict::AgentRuntimeChild {
+            ancestor_pid: res.root_pid,
+            ancestor_name: res.root_name.unwrap_or_else(|| p_name.to_string()),
+            depth: res.ancestor_chain.len().saturating_sub(1),
+        };
+    }
+
     let denied = is_blanket_immunity_denied(p_name);
 
     // 1. Direct Target Immunity Check

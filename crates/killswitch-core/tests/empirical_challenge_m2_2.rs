@@ -456,9 +456,6 @@ fn test_windows_critical_os_binaries_immunity_matrix() {
         "smartscreen.exe",
         "sihost.exe",
         "runtimebroker.exe",
-        "cmd.exe",
-        "powershell.exe",
-        "pwsh.exe",
         "conhost.exe",
         "windowsterminal.exe",
     ];
@@ -475,6 +472,21 @@ fn test_windows_critical_os_binaries_immunity_matrix() {
             name
         );
     }
+
+    // Interactive/scripting LOLBin shells MUST NOT receive unconditional immunity
+    for shell in [
+        "cmd.exe",
+        "powershell.exe",
+        "pwsh.exe",
+        "wsl.exe",
+        "docker.exe",
+    ] {
+        assert!(
+            !is_critical_system_pid(12345, shell),
+            "Shell/container runtime '{}' must NOT receive unconditional ambient immunity",
+            shell
+        );
+    }
 }
 
 #[test]
@@ -488,11 +500,6 @@ fn test_linux_baseline_critical_binaries_immunity() {
         "systemd-resolved",
         "sshd",
         "dbus-daemon",
-        "bash",
-        "sh",
-        "zsh",
-        "fish",
-        "sudo",
         "login",
         "init",
     ];
@@ -507,6 +514,15 @@ fn test_linux_baseline_critical_binaries_immunity() {
             freezer.is_immune(12345, name),
             "NativeProcessFreezer::is_immune failed for Linux binary: {}",
             name
+        );
+    }
+
+    // Privilege escalation and Unix shells must NOT receive unconditional immunity
+    for unshielded in ["bash", "sh", "zsh", "fish", "sudo", "su"] {
+        assert!(
+            !is_critical_system_pid(12345, unshielded),
+            "Linux binary '{}' must NOT receive unconditional ambient immunity",
+            unshielded
         );
     }
 }
@@ -584,24 +600,34 @@ fn test_developer_tools_and_system_pids_immunity() {
         "antigravity.exe",
         "git",
         "git.exe",
+    ];
+
+    for name in dev_binaries {
+        assert!(
+            is_critical_system_pid(8888, name),
+            "Build compiler / VCS binary must stay protected: {}",
+            name
+        );
+        assert!(
+            freezer.is_immune(8888, name),
+            "Freezer must consider build compiler / VCS binary immune: {}",
+            name
+        );
+    }
+
+    // Scripting interpreters (python, node) must NOT receive blanket immunity from containment
+    for interp in [
         "python",
         "python.exe",
         "python3",
         "python3.exe",
         "node",
         "node.exe",
-    ];
-
-    for name in dev_binaries {
+    ] {
         assert!(
-            is_critical_system_pid(8888, name),
-            "Developer binary must be protected: {}",
-            name
-        );
-        assert!(
-            freezer.is_immune(8888, name),
-            "Freezer must consider developer binary immune: {}",
-            name
+            !is_critical_system_pid(8888, interp),
+            "Scripting interpreter '{}' must NOT receive blanket ambient immunity",
+            interp
         );
     }
 
@@ -632,7 +658,7 @@ fn test_immunity_case_insensitivity_and_path_normalization() {
         // Linux case variants and paths
         ("/usr/lib/systemd/systemd", 3000),
         ("/usr/bin/SYSTEMD-LOGIND", 3001),
-        ("/bin/bash", 3002),
+        ("/usr/bin/git", 3002),
         // macOS case variants and paths
         ("/System/Library/CoreServices/WindowServer", 4000),
         ("wInDoWsErVeR", 4001),

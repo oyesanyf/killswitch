@@ -17,6 +17,7 @@ use killswitch_types::{
     },
 };
 use parking_lot::{Mutex, RwLock};
+use std::collections::HashSet;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -24,7 +25,16 @@ use std::time::Instant;
 use sysinfo::System;
 use tracing::{error, info, warn};
 
+pub use crate::agent_registry::{
+    AgentLineageClass, SubtreeResolution, TrackedAgentRoot, TrackedAgentTreeRegistry,
+};
 use crate::state_ledger::StateLedger;
+
+/// Resolves an offending PID and all live descendants safely, excluding `std::process::id()`,
+/// kernel PIDs `<= 4`, `exclude_pids`, and immutable OS kernel anchors.
+pub fn resolve_offending_process_subtree(target_pid: u32, exclude_pids: &HashSet<u32>) -> Vec<u32> {
+    crate::job_sandbox::enumerate_process_subtree(target_pid, exclude_pids)
+}
 
 pub type HostContainmentManager = KillChainHostManager;
 
@@ -206,6 +216,19 @@ impl KillChainHostManager {
         level: ContainmentLevel,
         caller_pid: Option<u32>,
     ) -> Result<KillChainStatus> {
+        self.engage_isolation_for_target(operator, reason, level, caller_pid, None)
+            .await
+    }
+
+    /// Engages host containment targeting an optional offending PID and its entire descendant subtree.
+    pub async fn engage_isolation_for_target(
+        self: &Arc<Self>,
+        operator: &str,
+        reason: &str,
+        level: ContainmentLevel,
+        caller_pid: Option<u32>,
+        target_pid: Option<u32>,
+    ) -> Result<KillChainStatus> {
         // Hold exclusive engagement lock across entire isolation sequence
         let _engagement_guard = self.engagement_lock.lock().await;
 
@@ -296,6 +319,16 @@ impl KillChainHostManager {
             level,
             ContainmentLevel::ProcessFreeze | ContainmentLevel::HermeticIsolation
         ) {
+            let mut immune_set = crate::freeze::NativeProcessFreezer::new().get_immune_pids();
+            immune_set.insert(std::process::id());
+            if let Some(cpid) = caller_pid {
+                if Some(cpid) != target_pid
+                    && !TrackedAgentTreeRegistry::global().is_tracked_pid(cpid)
+                {
+                    immune_set.insert(cpid);
+                }
+            }
+
             let high_risk_markers = [
                 "untrusted_payload",
                 "suspicious_exfil",
@@ -303,14 +336,23 @@ impl KillChainHostManager {
                 "test_malware",
             ];
 
-            let candidate_pids: Vec<u32> = {
+            let mut seed_pids: Vec<u32> = {
                 let mut sys = self.process_scanner.lock();
                 sys.refresh_processes_specifics(sysinfo::ProcessRefreshKind::new());
                 sys.processes()
                     .iter()
                     .filter_map(|(pid_raw, proc)| {
                         let pid = pid_raw.as_u32();
+                        if immune_set.contains(&pid) {
+                            return None;
+                        }
                         let name = proc.name();
+                        if is_immutable_os_kernel_pid(pid, name) {
+                            return None;
+                        }
+                        if TrackedAgentTreeRegistry::global().is_tracked_pid(pid) {
+                            return Some(pid);
+                        }
                         if self.process_freezer.is_immune(pid, name)
                             || is_critical_system_pid(pid, name)
                         {
@@ -333,20 +375,33 @@ impl KillChainHostManager {
                     .collect()
             };
 
-            for pid in candidate_pids {
-                match self.process_freezer.freeze_process(pid) {
-                    Ok(state) => {
-                        frozen_pids.push(pid);
-                        process_records.push(state);
-                    }
-                    Err(err) => {
-                        warn!("⚠️ [KILLCHAIN] Could not freeze PID {}: {}", pid, err);
-                    }
+            if let Some(tpid) = target_pid {
+                if !immune_set.contains(&tpid) && !seed_pids.contains(&tpid) {
+                    seed_pids.push(tpid);
                 }
             }
+            for root_pid in TrackedAgentTreeRegistry::global().tracked_roots() {
+                if !immune_set.contains(&root_pid) && !seed_pids.contains(&root_pid) {
+                    seed_pids.push(root_pid);
+                }
+            }
+
+            let report = crate::job_sandbox::freeze_subtree_kernel(
+                &seed_pids,
+                &immune_set,
+                self.process_freezer.as_ref(),
+            );
+            for state in report.frozen_records {
+                if !frozen_pids.contains(&state.pid) {
+                    frozen_pids.push(state.pid);
+                }
+                process_records.push(state);
+            }
             info!(
-                "🚨 [KILLCHAIN] Suspended {} untrusted user-space processes.",
-                frozen_pids.len()
+                "🚨 [KILLCHAIN] Suspended {} untrusted/subtree processes via {} (job_bound={}).",
+                frozen_pids.len(),
+                report.kernel_mechanism,
+                report.job_bound_pids.len()
             );
         }
 
@@ -540,7 +595,8 @@ impl KillChainHostManager {
         }
         crate::tarpit::ActiveProcessTarpit::global().release_all();
 
-        // 2. Resume Frozen Processes
+        // 2. Resume Frozen Processes and release managed confinement Job Objects
+        crate::job_sandbox::release_all_sandbox_jobs();
         let process_records = self.get_process_records();
         for proc in &process_records {
             if proc.status == killswitch_types::ProcessFreezeStatus::Frozen {
@@ -887,6 +943,37 @@ impl HealthProbeRunner for KillChainHostManager {
     }
 }
 
+fn is_untrusted_temp_or_public_path(path_or_name: &str) -> bool {
+    let norm = path_or_name
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .replace('/', "\\")
+        .to_ascii_lowercase();
+    norm.contains("\\temp\\")
+        || norm.contains("\\tmp\\")
+        || norm.contains("\\var\\tmp\\")
+        || norm.contains("\\dev\\shm\\")
+        || norm.contains("\\appdata\\local\\temp\\")
+        || norm.contains("\\users\\public\\")
+}
+
+fn is_exact_killswitch_executable_name(base_lc: &str) -> bool {
+    let stem = base_lc.strip_suffix(".exe").unwrap_or(base_lc);
+    matches!(
+        stem,
+        "killswitch"
+            | "killswitch-server"
+            | "killswitch-cli"
+            | "killswitch-daemon"
+            | "killswitch-agent"
+            | "killswitch-test"
+            | "oshoosi"
+            | "oshoosiclaw"
+            | "osoosi"
+    )
+}
+
 /// Helper function strictly for immutable OS kernel anchors (PID 0, 1, 4, csrss, smss, wininit, systemd, launchd, etc.).
 /// Decoupled from developer tools and agent runtimes (wsl.exe, sudo, su, bash, powershell.exe, node, python, cursor, code.exe).
 pub fn is_immutable_os_kernel_pid(pid: u32, name: &str) -> bool {
@@ -899,8 +986,13 @@ pub fn is_immutable_os_kernel_pid(pid: u32, name: &str) -> bool {
     let base = trimmed.rsplit(['\\', '/']).next().unwrap_or(trimmed);
     let name_lc = base.to_ascii_lowercase();
 
-    // 2. KillSwitch Self-Preservation
-    if name_lc.contains("killswitch") || name_lc.contains("osoosi") || name_lc.contains("oshoosi") {
+    // Reject binaries running from temp/world-writable staging paths before name matching
+    if is_untrusted_temp_or_public_path(trimmed) {
+        return false;
+    }
+
+    // 2. KillSwitch Self-Preservation (exact binary stem, never substring)
+    if is_exact_killswitch_executable_name(&name_lc) {
         return true;
     }
 
@@ -975,23 +1067,36 @@ pub fn is_developer_or_agent_runtime(name: &str) -> bool {
     )
 }
 
-/// Helper function to classify critical system and developer processes.
+/// Helper function to classify critical system and developer build/UI infrastructure.
+///
+/// NOTE: Privilege escalation binaries (`sudo`, `su`), container/VM runtimes (`wsl*`, `docker*`),
+/// shells (`bash`, `sh`, `zsh`, `fish`, `cmd.exe`, `powershell.exe`, `pwsh.exe`), exfiltration tools
+/// (`scp`, `sftp`, `rsync`), scripting interpreters (`python*`, `node*`), and tracked AI agent subtrees
+/// are NEVER granted ambient immunity.
 pub fn is_critical_system_pid(pid: u32, name: &str) -> bool {
     // 1. Kernel, Idle, and Self PIDs
     if pid <= 4 || pid == std::process::id() {
         return true;
     }
 
+    // Any PID inside an actively tracked AI agent process tree loses ambient immunity
+    if TrackedAgentTreeRegistry::global().is_tracked_pid(pid) {
+        return false;
+    }
+
     let trimmed = name.trim().trim_matches('"').trim_matches('\'');
+    if is_untrusted_temp_or_public_path(trimmed) {
+        return false;
+    }
     let base = trimmed.rsplit(['\\', '/']).next().unwrap_or(trimmed);
     let name_lc = base.to_ascii_lowercase();
 
-    // 2. KillSwitch Self-Preservation
-    if name_lc.contains("killswitch") || name_lc.contains("osoosi") || name_lc.contains("oshoosi") {
+    // 2. KillSwitch Self-Preservation (exact stem only)
+    if is_exact_killswitch_executable_name(&name_lc) {
         return true;
     }
 
-    // 3. Exhaustive OS and Developer Binary Catalog
+    // 3. Critical OS Kernel Daemons, UI Hosts, Interactive Terminals, and Build Compilers
     matches!(
         name_lc.as_str(),
         "system"
@@ -1033,22 +1138,6 @@ pub fn is_critical_system_pid(pid: u32, name: &str) -> bool {
             | "windowsterminal.exe"
             | "openconsole.exe"
             | "conhost.exe"
-            | "powershell.exe"
-            | "pwsh.exe"
-            | "cmd.exe"
-            | "wsl.exe"
-            | "wslservice.exe"
-            | "wslhost.exe"
-            | "vmmem"
-            | "vmmemwsl"
-            | "docker.exe"
-            | "dockerd.exe"
-            | "python.exe"
-            | "python"
-            | "python3"
-            | "python3.exe"
-            | "node.exe"
-            | "node"
             | "git.exe"
             | "git"
             | "cargo.exe"
@@ -1070,18 +1159,7 @@ pub fn is_critical_system_pid(pid: u32, name: &str) -> bool {
             | "sshd"
             | "tmux"
             | "screen"
-            | "sudo"
-            | "su"
             | "login"
-            | "bash"
-            | "sh"
-            | "zsh"
-            | "fish"
-            | "ls"
-            | "ssh"
-            | "scp"
-            | "sftp"
-            | "rsync"
             // Browsers (Never falsely suspended or quarantined)
             | "chrome.exe"
             | "chrome"
@@ -1095,10 +1173,7 @@ pub fn is_critical_system_pid(pid: u32, name: &str) -> bool {
             | "opera.exe"
             | "vivaldi.exe"
             | "arc.exe"
-            // IDEs & Developer Toolchains
-            | "cursor.exe"
-            | "cursor"
-            | "windsurf.exe"
+            // Compilers & Build Toolchains
             | "devenv.exe"
             | "rider64.exe"
             | "idea64.exe"
@@ -1128,7 +1203,7 @@ pub fn is_critical_system_pid(pid: u32, name: &str) -> bool {
             | "make"
             | "cmake"
             | "ninja"
-            // macOS Critical System Daemons, UI & Developer Tools
+            // macOS Critical System Daemons & Interactive Terminal UI
             | "launchd"
             | "windowserver"
             | "loginwindow"
@@ -1275,5 +1350,56 @@ mod tests {
                 pid
             );
         }
+    }
+
+    #[test]
+    fn test_immutable_kernel_rejects_spoofed_killswitch_substrings_and_temp_paths() {
+        assert!(!is_immutable_os_kernel_pid(7777, "killswitch_evil.exe"));
+        assert!(!is_immutable_os_kernel_pid(7778, "/tmp/killswitch"));
+        assert!(!is_immutable_os_kernel_pid(
+            7779,
+            "C:\\Users\\Public\\killswitch.exe"
+        ));
+        assert!(!is_immutable_os_kernel_pid(
+            7780,
+            "C:\\Users\\Alice\\AppData\\Local\\Temp\\killswitch.exe"
+        ));
+        assert!(is_immutable_os_kernel_pid(
+            std::process::id(),
+            "/tmp/killswitch_evil.exe"
+        ));
+        assert!(is_immutable_os_kernel_pid(
+            7781,
+            "C:\\Program Files\\KillSwitch\\killswitch.exe"
+        ));
+    }
+
+    #[test]
+    fn test_tracked_agent_tree_registry_revokes_immunity_and_resolves_subtree() {
+        let reg = TrackedAgentTreeRegistry::global();
+        let root_pid = 8_001_100;
+        let child_shell = 8_001_101;
+        let grandchild_py = 8_001_102;
+
+        reg.register_agent_root(root_pid, "cursor.exe");
+        reg.register_child(child_shell, root_pid);
+        reg.register_child(grandchild_py, child_shell);
+
+        assert!(reg.is_tracked_pid(root_pid));
+        assert!(reg.is_tracked_pid(child_shell));
+        assert!(reg.is_tracked_pid(grandchild_py));
+        assert!(!is_critical_system_pid(grandchild_py, "python3"));
+        assert!(!is_critical_system_pid(child_shell, "windowsterminal.exe"));
+
+        let subtree = resolve_offending_process_subtree(root_pid, &HashSet::new());
+        assert!(subtree.contains(&root_pid));
+        assert!(subtree.contains(&child_shell));
+        assert!(subtree.contains(&grandchild_py));
+        assert!(!subtree.contains(&std::process::id()));
+        assert!(!subtree.contains(&4));
+
+        reg.unregister_pid(grandchild_py);
+        reg.unregister_pid(child_shell);
+        reg.unregister_pid(root_pid);
     }
 }

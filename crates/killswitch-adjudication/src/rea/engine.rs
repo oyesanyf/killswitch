@@ -28,9 +28,17 @@ pub fn has_active_lotl_or_exploit_indicators(text: &str) -> bool {
         "lsass",
         "-enc ",
         "-encodedcommand",
+        " -ec ",
         "frombase64string",
         "downloadstring",
         "invoke-expression",
+        "invoke-webrequest",
+        "invoke-restmethod",
+        "net.webclient",
+        "-executionpolicy bypass",
+        "-ep bypass",
+        "-windowstyle hidden",
+        "-w hidden",
         "iex(",
         "canarytraptripped",
         "canaryalert",
@@ -48,6 +56,42 @@ pub fn has_active_lotl_or_exploit_indicators(text: &str) -> bool {
         "cobalt",
         "meterpreter",
         "reverse_tcp",
+        "reverse shell",
+        "/dev/tcp/",
+        "/dev/udp/",
+        "mkfifo",
+        "nc -e",
+        "ncat -e",
+        "socat exec:",
+        "python -c",
+        "python3 -c",
+        "perl -e",
+        "ruby -e",
+        "os.system(",
+        "subprocess.popen",
+        "curl ",
+        "wget ",
+        "certutil -urlcache",
+        "bitsadmin /transfer",
+        "mshta http",
+        "regsvr32 ",
+        "ld_preload=",
+        "/proc/self/mem",
+        "ptrace",
+        "nsenter",
+        "/var/run/docker.sock",
+        "release_agent",
+        ".aws/credentials",
+        ".ssh/id_rsa",
+        ".ssh/id_ed25519",
+        ".kube/config",
+        ".docker/config.json",
+        "/etc/shadow",
+        "169.254.169.254",
+        "metadata.google.internal",
+        "crownjewel",
+        "[token escalation detected]",
+        "[privileged binary metadata probed]",
     ];
     ACTIVE_ATTACK_MARKERS.iter().any(|m| lower.contains(m))
 }
@@ -411,7 +455,9 @@ pub fn is_rea_benign_system_or_dev_process(proc_or_path: &str, reason: Option<&s
         return false;
     }
 
-    // Benign Developer Tools & System Whitelist
+    // Benign Developer Compilers, IDEs & Immutable System Daemons
+    // NOTE: Interactive shells and scripting interpreters (powershell, pwsh, cmd, python, node)
+    // are intentionally excluded so LOTL or agent-spawned children cannot hijack REA benign vetoes.
     matches!(
         base_lower.as_str(),
         "cargo.exe"
@@ -426,17 +472,9 @@ pub fn is_rea_benign_system_or_dev_process(proc_or_path: &str, reason: Option<&s
             | "antigravity.exe"
             | "git.exe"
             | "git"
-            | "node.exe"
-            | "node"
-            | "python.exe"
-            | "python"
-            | "python3"
             | "cl.exe"
             | "link.exe"
             | "lld-link.exe"
-            | "cmd.exe"
-            | "powershell.exe"
-            | "pwsh.exe"
             | "svchost.exe"
             | "explorer.exe"
             | "systemd"

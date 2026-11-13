@@ -3,10 +3,13 @@
 //! Native Zero-OS-Tool containment engine, process freeze, active tarpit,
 //! 4-tier hybrid operator authentication, TPM 2.0 hardware sealing, and BLAKE3-chained state ledger.
 
+pub mod agent_registry;
 pub mod auth;
 pub mod exec_sensor;
 pub mod fprime;
 pub mod freeze;
+pub mod job_sandbox;
+pub use job_sandbox as sandbox;
 pub mod killchain;
 pub mod landlock;
 pub mod peer_pid;
@@ -32,13 +35,19 @@ pub use exec_sensor::{
 
 pub use peer_pid::resolve_loopback_peer_pid;
 
+pub use agent_registry::{AgentLineageClass, SubtreeResolution, TrackedAgentRoot};
 pub use auth::{FrozenPidsProvider, OperatorAuthManager};
 pub use fprime::{FPrimeDispatchResult, FPrimeOpcode, FPrimeSupervisor, FPrimeTopologyStatus};
 pub use freeze::NativeProcessFreezer;
+pub use job_sandbox::{
+    enumerate_live_descendants, enumerate_process_subtree, freeze_process_subtree,
+    freeze_subtree_kernel, resume_process_subtree, spawn_confined_process, ConfinedChild,
+    JobSandboxConfig, SubtreeFreezeReport,
+};
 pub use killchain::{
     default_network_isolator, is_critical_system_pid, is_developer_or_agent_runtime,
     is_immutable_os_kernel_pid, HostContainmentManager, KillChainHostManager,
-    SimulatedNetworkIsolator,
+    SimulatedNetworkIsolator, TrackedAgentTreeRegistry,
 };
 pub use landlock::{
     apply_landlock_sandbox, get_active_non_loopback_connections, get_landlock_abi_version,

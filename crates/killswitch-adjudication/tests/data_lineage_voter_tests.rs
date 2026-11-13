@@ -163,10 +163,9 @@ async fn test_uncompromised_admin_powershell_veto() {
 }
 
 #[tokio::test]
-async fn test_compromised_admin_powershell_exfiltration_preserves_shell() {
+async fn test_compromised_admin_powershell_exfiltration_triggers_containment() {
     // When powershell.exe itself attempts egress of CrownJewel data,
-    // DataLineageVoter emits an Isolate vote but explicitly notes
-    // that the shell PID must not be frozen/bricked, recommending network isolation.
+    // DataLineageVoter must NOT exempt it from process freeze containment.
     let voter = DataLineageVoter::new();
 
     let baggage = TaintBaggage::new(
@@ -211,7 +210,7 @@ async fn test_compromised_admin_powershell_exfiltration_preserves_shell() {
     assert_eq!(v.confidence, 0.96);
     assert!(v
         .explanation
-        .contains("Preserving PID from freeze termination; network isolation recommended"));
+        .contains("Verified Multi-Hop DLP Exfiltration"));
 }
 
 #[tokio::test]

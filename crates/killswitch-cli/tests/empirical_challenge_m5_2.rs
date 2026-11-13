@@ -610,27 +610,37 @@ fn test_critical_system_pid_immunity_exhaustive_catalog() {
         );
     }
 
-    // 3. Developer and Toolchain Infrastructure
+    // 3. Developer Build Infrastructure & Interactive Terminals
     let critical_dev = [
         "code.exe",
-        "powershell.exe",
-        "pwsh.exe",
-        "cmd.exe",
         "windowsterminal.exe",
         "conhost.exe",
-        "wsl.exe",
-        "docker.exe",
         "cargo.exe",
         "rustc.exe",
         "git.exe",
-        "python.exe",
-        "node.exe",
     ];
     for name in critical_dev {
         assert!(
             is_critical_system_pid(8888, name),
-            "Developer binary '{}' must be immune from killswitch containment",
+            "Developer build binary '{}' must remain immune from ambient containment",
             name
+        );
+    }
+
+    // Shells, VM/container bridges, and scripting runtimes must NOT hold blanket immunity
+    for agent_shell in [
+        "powershell.exe",
+        "pwsh.exe",
+        "cmd.exe",
+        "wsl.exe",
+        "docker.exe",
+        "python.exe",
+        "node.exe",
+    ] {
+        assert!(
+            !is_critical_system_pid(8888, agent_shell),
+            "Shell / interpreter / bridge '{}' must NOT be blindly immune",
+            agent_shell
         );
     }
 

@@ -13,7 +13,7 @@ use killswitch_adjudication::voters::{
     TaintBaggage as AdjBaggage,
 };
 use killswitch_adjudication::ZeroFalsePositiveAdjudicator;
-use killswitch_core::killchain::is_critical_system_pid;
+use killswitch_core::killchain::is_immutable_os_kernel_pid;
 use killswitch_telemetry::otel_lineage::{
     DlpClassification, DlpPolicy, EgressVerdict, EndpointLineageEngine,
 };
@@ -67,7 +67,7 @@ impl LineageTriggerEvaluator {
                 if policy == DlpPolicy::Quarantine
                     || classification == DlpClassification::CrownJewel
                 {
-                    let is_critical = is_critical_system_pid(proc_key.pid, &proc.exe_path);
+                    let is_critical = is_immutable_os_kernel_pid(proc_key.pid, &proc.exe_path);
 
                     let adj_verdict = AdjEgressVerdict::Block {
                         reason: reason.clone(),
@@ -142,10 +142,23 @@ impl LineageTriggerEvaluator {
                         EvidenceClass::Behavior,
                     );
 
+                    let process_ancestry: Vec<(u32, String)> = proc
+                        .provenance_hops
+                        .iter()
+                        .map(|hop| {
+                            if let Some((name, pid_str)) = hop.rsplit_once(':') {
+                                let pid = pid_str.trim().parse::<u32>().unwrap_or(0);
+                                (pid, name.to_string())
+                            } else {
+                                (0, hop.clone())
+                            }
+                        })
+                        .collect();
+
                     let context = AdjudicationContext {
                         lineage_evidence: Some(evidence),
                         security_event: None,
-                        process_ancestry: vec![],
+                        process_ancestry,
                         is_dev_environment: false,
                     };
 

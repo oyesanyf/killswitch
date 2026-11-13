@@ -52,7 +52,9 @@ impl NativeProcessFreezer {
             let mut depth = 0;
             while let Some(parent_pid) = proc.parent() {
                 let p_u32 = parent_pid.as_u32();
-                immune.insert(p_u32);
+                if !crate::killchain::TrackedAgentTreeRegistry::global().is_tracked_pid(p_u32) {
+                    immune.insert(p_u32);
+                }
                 depth += 1;
                 if depth >= 5 {
                     break;
@@ -66,6 +68,35 @@ impl NativeProcessFreezer {
         }
 
         immune
+    }
+
+    /// Freezes a target root PID and its entire descendant subtree using OS kernel sandboxing.
+    pub fn freeze_subtree(&self, root_pid: u32) -> crate::job_sandbox::SubtreeFreezeReport {
+        let mut exclude = self.get_immune_pids();
+        exclude.insert(std::process::id());
+        crate::job_sandbox::freeze_subtree_kernel(&[root_pid], &exclude, self)
+    }
+
+    /// Freezes a single PID while enforcing immutable OS kernel preservation.
+    #[inline]
+    pub fn freeze_single_pid_raw(
+        &self,
+        pid: u32,
+    ) -> Result<ProcessIsolationState, KillSwitchError> {
+        <Self as ProcessFreezer>::freeze_process(self, pid)
+    }
+
+    /// Fallible whole-subtree freeze wrapper returning a structured `SubtreeFreezeReport`.
+    pub fn freeze_process_subtree(
+        &self,
+        root_pid: u32,
+    ) -> Result<crate::job_sandbox::SubtreeFreezeReport, KillSwitchError> {
+        crate::job_sandbox::freeze_process_subtree(root_pid, self)
+    }
+
+    /// Resumes `root_pid` and its entire descendant subtree.
+    pub fn resume_process_subtree(&self, root_pid: u32) -> Result<Vec<u32>, KillSwitchError> {
+        crate::job_sandbox::resume_process_subtree(root_pid, self)
     }
 
     /// Freeze all untrusted user-space processes across the host.
