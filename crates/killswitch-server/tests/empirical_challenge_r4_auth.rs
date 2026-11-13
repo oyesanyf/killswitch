@@ -763,7 +763,7 @@ async fn test_http_quarantined_caller_pid_rejection() {
         .send()
         .await
         .unwrap();
-    #[cfg(any(windows, target_os = "linux"))]
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     {
         assert_eq!(
             resp.status(),
@@ -773,7 +773,7 @@ async fn test_http_quarantined_caller_pid_rejection() {
         let json: serde_json::Value = resp.json().await.unwrap();
         assert_eq!(json["error"]["code"], "CALLER_QUARANTINED");
     }
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     {
         assert!(
             resp.status() == reqwest::StatusCode::FORBIDDEN
@@ -871,9 +871,9 @@ async fn test_adversarial_in_memory_mode_unauthenticated_bypass_finding() {
         .send()
         .await
         .unwrap();
-    #[cfg(any(windows, target_os = "linux"))]
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     assert_eq!(resp_live.status(), reqwest::StatusCode::OK);
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     assert!(
         resp_live.status() == reqwest::StatusCode::OK
             || resp_live.status() == reqwest::StatusCode::UNAUTHORIZED
@@ -917,7 +917,7 @@ async fn test_live_tcp_loopback_caller_pid_spoofing_detection() {
 
     let resp = client.post(&url).json(&spoof_body).send().await.unwrap();
 
-    #[cfg(any(windows, target_os = "linux"))]
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     {
         assert_eq!(
             resp.status(),
@@ -947,9 +947,9 @@ async fn test_live_tcp_loopback_caller_pid_spoofing_detection() {
             "Matching caller PID over real loopback TCP socket MUST succeed with 200 OK"
         );
     }
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     {
-        // On unsupported platforms (macOS), loopback peer PID resolution is not supported
+        // On unsupported platforms, loopback peer PID resolution is not supported
         // in kernel TCP tables, so the engage request either succeeds with 200 OK under
         // valid token authentication or fails closed with 401 UNAUTHORIZED.
         assert!(
