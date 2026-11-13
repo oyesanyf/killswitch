@@ -325,8 +325,23 @@ impl ThreatVoter for DataLineageVoter {
         let lineage = context.and_then(|ctx| ctx.lineage_evidence.as_ref())?;
         let actor_pid = lineage.actor_pid;
         let actor_exe = &lineage.actor_exe;
+        fn is_clean_admin_shell_name(exe: &str) -> bool {
+            let trimmed = exe.trim().trim_matches('"').trim_matches('\'');
+            let base = trimmed
+                .rsplit(['\\', '/'])
+                .next()
+                .unwrap_or(trimmed)
+                .to_ascii_lowercase();
+            matches!(
+                base.as_str(),
+                "powershell.exe" | "powershell" | "pwsh.exe" | "pwsh"
+            )
+        }
+
         let is_immutable_kernel = is_immutable_os_kernel_pid(actor_pid, actor_exe);
         let is_critical_shell_or_system = is_critical_system_pid(actor_pid, actor_exe);
+        let is_clean_admin_shell = is_clean_admin_shell_name(actor_exe)
+            && !killswitch_core::TrackedAgentTreeRegistry::global().is_tracked_pid(actor_pid);
         let combined_low = combine_candidate_telemetry(candidate).to_ascii_lowercase();
         let active_threat_or_agent = has_active_agent_ancestry(context)
             || has_active_dlp_or_event(context)
@@ -405,7 +420,10 @@ impl ThreatVoter for DataLineageVoter {
         }
 
         // Case 3: Legitimate Admin Process without Taint, Block, Agent Lineage, or LOTL Indicators
-        if is_critical_shell_or_system
+        if (is_critical_shell_or_system
+            || (is_clean_admin_shell
+                && lineage.baggage.is_none()
+                && lineage.input_datasets.is_empty()))
             && lineage.egress_verdict == EgressVerdict::Allow
             && !active_threat_or_agent
         {

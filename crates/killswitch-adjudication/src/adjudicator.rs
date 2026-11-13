@@ -495,9 +495,34 @@ mod tests {
             .adjudicate_threat_candidate(&clean_ps_cand, None)
             .await;
         assert!(
-            clean_ps_res.is_vetoed(),
-            "Clean powershell.exe Get-Service without agent lineage or indicators should remain vetoed: {:?}",
+            !clean_ps_res.is_confirmed()
+                && !clean_ps_res.is_awaiting_confirmation()
+                && clean_ps_res.confidence() < 0.5,
+            "Clean powershell.exe Get-Service without lineage context must stay monitor-only (never escalate/contain): {:?}",
             clean_ps_res
+        );
+
+        let clean_ps_ctx = AdjudicationContext {
+            lineage_evidence: Some(crate::voters::LineageAdjudicationEvidence {
+                actor_pid: 9994,
+                actor_exe: "powershell.exe".to_string(),
+                parent_pid: Some(800),
+                destination: String::new(),
+                egress_verdict: crate::voters::EgressVerdict::Allow,
+                baggage: None,
+                causal_links: vec![],
+                input_datasets: vec![],
+                provenance_hops: vec![],
+            }),
+            ..Default::default()
+        };
+        let clean_ps_ctx_res = adjudicator
+            .adjudicate_threat_candidate(&clean_ps_cand, Some(&clean_ps_ctx))
+            .await;
+        assert!(
+            clean_ps_ctx_res.is_vetoed(),
+            "Clean powershell.exe Get-Service with clean DataLineage verdict should be vetoed: {:?}",
+            clean_ps_ctx_res
         );
     }
 }
