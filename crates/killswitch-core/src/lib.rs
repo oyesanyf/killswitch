@@ -53,10 +53,15 @@ pub use killchain::{
     SimulatedNetworkIsolator, TrackedAgentTreeRegistry,
 };
 pub use landlock::{
-    apply_landlock_sandbox, get_active_non_loopback_connections, get_landlock_abi_version,
-    parse_linux_ipv4_hex, parse_linux_ipv6_hex, parse_proc_net_content, parse_tcp_line,
-    read_and_parse_proc_net_tcp, read_and_parse_proc_net_tcp6, LandlockSandboxConfig,
-    LinuxNetlinkIsolator, LinuxSocketEntry, TcpState,
+    apply_agent_seccomp_bpf, apply_landlock_sandbox, build_agent_seccomp_bpf,
+    build_sock_destroy_msg, build_sock_destroy_msg_for_proto,
+    generate_linux_nftables_quarantine_script, get_active_non_loopback_connections,
+    get_active_non_loopback_udp_and_raw_sockets, get_landlock_abi_version,
+    install_linux_nftables_quarantine, parse_linux_ipv4_hex, parse_linux_ipv6_hex,
+    parse_proc_net_content, parse_tcp_line, read_and_parse_proc_net_raw,
+    read_and_parse_proc_net_raw6, read_and_parse_proc_net_tcp, read_and_parse_proc_net_tcp6,
+    read_and_parse_proc_net_udp, read_and_parse_proc_net_udp6, remove_linux_nftables_quarantine,
+    LandlockSandboxConfig, LinuxNetlinkIsolator, LinuxSocketEntry, TcpState,
 };
 pub use pf::{
     generate_quarantine_rules, get_active_darwin_sockets, DarwinSocketEntry, MacOsPfIsolator,

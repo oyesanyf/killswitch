@@ -5,6 +5,12 @@
 //! - Raw Netlink sockets: `libc::socket(AF_NETLINK, SOCK_RAW, NETLINK_NETFILTER)`.
 //! - Standalone socket inspection: Pure-Rust parser for `/proc/net/tcp` and `/proc/net/tcp6`.
 
+#[cfg(target_os = "linux")]
+use crate::wfp::is_authorized_self_diagnostic;
+use crate::wfp::{
+    sanitize_firewall_preserved_ports, QUARANTINE_BLOCKED_DISCOVERY_PORTS,
+    QUARANTINE_BLOCKED_LATERAL_PORTS, QUARANTINE_BLOCKED_LOOPBACK_PROXY_PORTS,
+};
 use killswitch_types::{
     IsolationReceipt, KillSwitchError, NetworkIsolationEngine, NetworkIsolator,
 };
@@ -194,17 +200,31 @@ pub fn apply_landlock_sandbox(config: &LandlockSandboxConfig) -> Result<(), Kill
 
         let ruleset_fd = ruleset_fd as i32;
 
-        // Add Read-Only path rules
+        // Add Read-Only path rules (strict: bail on add_rule error if strict mode)
         for path in &config.read_only_paths {
             if path.exists() {
-                let _ = add_path_rule(ruleset_fd, path, false);
+                if let Err(e) = add_path_rule(ruleset_fd, path, false, abi) {
+                    if config.strict {
+                        unsafe {
+                            libc::close(ruleset_fd);
+                        }
+                        return Err(e);
+                    }
+                }
             }
         }
 
         // Add Read-Write path rules
         for path in &config.read_write_paths {
             if path.exists() {
-                let _ = add_path_rule(ruleset_fd, path, true);
+                if let Err(e) = add_path_rule(ruleset_fd, path, true, abi) {
+                    if config.strict {
+                        unsafe {
+                            libc::close(ruleset_fd);
+                        }
+                        return Err(e);
+                    }
+                }
             }
         }
 
@@ -231,6 +251,12 @@ pub fn apply_landlock_sandbox(config: &LandlockSandboxConfig) -> Result<(), Kill
         let prctl_ret = unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) };
         if prctl_ret != 0 {
             let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+            if config.strict {
+                unsafe {
+                    libc::close(ruleset_fd);
+                }
+                return Err(KillSwitchError::LandlockRestrictSelfFailed { errno });
+            }
             warn!("prctl(PR_SET_NO_NEW_PRIVS) returned errno {}", errno);
         }
 
@@ -260,22 +286,178 @@ pub fn apply_landlock_sandbox(config: &LandlockSandboxConfig) -> Result<(), Kill
 }
 
 #[cfg(target_os = "linux")]
-fn add_path_rule(ruleset_fd: i32, path: &Path, writable: bool) -> Result<(), KillSwitchError> {
+fn build_landlock_ruleset_fd(
+    config: &LandlockSandboxConfig,
+    enforce_net: bool,
+) -> Result<Option<i32>, KillSwitchError> {
+    let abi = match get_landlock_abi_version() {
+        Ok(v) => v,
+        Err(e) => {
+            if config.strict {
+                return Err(e);
+            }
+            return Ok(None);
+        }
+    };
+
+    let mut fs_flags = LANDLOCK_ACCESS_FS_EXECUTE
+        | LANDLOCK_ACCESS_FS_WRITE_FILE
+        | LANDLOCK_ACCESS_FS_READ_FILE
+        | LANDLOCK_ACCESS_FS_READ_DIR
+        | LANDLOCK_ACCESS_FS_REMOVE_DIR
+        | LANDLOCK_ACCESS_FS_REMOVE_FILE
+        | LANDLOCK_ACCESS_FS_MAKE_CHAR
+        | LANDLOCK_ACCESS_FS_MAKE_DIR
+        | LANDLOCK_ACCESS_FS_MAKE_REG
+        | LANDLOCK_ACCESS_FS_MAKE_SOCK
+        | LANDLOCK_ACCESS_FS_MAKE_FIFO
+        | LANDLOCK_ACCESS_FS_MAKE_BLOCK
+        | LANDLOCK_ACCESS_FS_MAKE_SYM;
+
+    if abi >= 2 {
+        fs_flags |= LANDLOCK_ACCESS_FS_REFER;
+    }
+    if abi >= 3 {
+        fs_flags |= LANDLOCK_ACCESS_FS_TRUNCATE;
+    }
+
+    let net_flags = if abi >= 4 && enforce_net {
+        LANDLOCK_ACCESS_NET_BIND_TCP | LANDLOCK_ACCESS_NET_CONNECT_TCP
+    } else {
+        0
+    };
+
+    let attr = LandlockRulesetAttr {
+        handled_access_fs: fs_flags,
+        handled_access_net: net_flags,
+    };
+
+    let attr_size = if abi >= 4 && enforce_net {
+        std::mem::size_of::<LandlockRulesetAttr>()
+    } else {
+        std::mem::size_of::<u64>()
+    };
+
+    let ruleset_fd = unsafe {
+        libc::syscall(
+            SYS_LANDLOCK_CREATE_RULESET,
+            &attr as *const _ as *const libc::c_void,
+            attr_size,
+            0u32,
+        )
+    };
+    if ruleset_fd < 0 {
+        let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+        if config.strict {
+            return Err(KillSwitchError::LandlockRulesetCreateFailed { errno });
+        }
+        return Ok(None);
+    }
+
+    let fd = ruleset_fd as i32;
+    for path in &config.read_only_paths {
+        if path.exists() {
+            if let Err(e) = add_path_rule(fd, path, false, abi) {
+                if config.strict {
+                    unsafe {
+                        libc::close(fd);
+                    }
+                    return Err(e);
+                }
+            }
+        }
+    }
+    for path in &config.read_write_paths {
+        if path.exists() {
+            if let Err(e) = add_path_rule(fd, path, true, abi) {
+                if config.strict {
+                    unsafe {
+                        libc::close(fd);
+                    }
+                    return Err(e);
+                }
+            }
+        }
+    }
+    if enforce_net && abi >= 4 {
+        for &port in &config.allowed_tcp_ports {
+            let net_attr = LandlockNetPortAttr {
+                allowed_access: LANDLOCK_ACCESS_NET_BIND_TCP | LANDLOCK_ACCESS_NET_CONNECT_TCP,
+                port: port as u64,
+            };
+            let ret = unsafe {
+                libc::syscall(
+                    SYS_LANDLOCK_ADD_RULE,
+                    fd,
+                    LANDLOCK_RULE_NET_PORT,
+                    &net_attr as *const _ as *const libc::c_void,
+                    0u32,
+                )
+            };
+            if ret < 0 && config.strict {
+                let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+                unsafe {
+                    libc::close(fd);
+                }
+                return Err(KillSwitchError::LandlockAddRuleFailed {
+                    path: PathBuf::from(format!("tcp-port:{port}")),
+                    errno,
+                });
+            }
+        }
+    }
+    Ok(Some(fd))
+}
+
+#[cfg(target_os = "linux")]
+fn add_path_rule(
+    ruleset_fd: i32,
+    path: &Path,
+    writable: bool,
+    abi: u32,
+) -> Result<(), KillSwitchError> {
     use std::os::unix::io::AsRawFd;
     let file = std::fs::File::open(path).map_err(|e| KillSwitchError::LandlockAddRuleFailed {
         path: path.to_path_buf(),
         errno: e.raw_os_error().unwrap_or(0),
     })?;
+    let meta = file.metadata().ok();
+    let is_dir = meta.as_ref().is_some_and(|m| m.is_dir());
+    let is_regular_file = meta.as_ref().is_some_and(|m| m.is_file());
 
-    let read_access = LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR;
-    let write_access = read_access
-        | LANDLOCK_ACCESS_FS_WRITE_FILE
-        | LANDLOCK_ACCESS_FS_REMOVE_DIR
-        | LANDLOCK_ACCESS_FS_REMOVE_FILE
-        | LANDLOCK_ACCESS_FS_MAKE_REG
-        | LANDLOCK_ACCESS_FS_MAKE_DIR;
-
-    let allowed_access = if writable { write_access } else { read_access };
+    let allowed_access = if is_dir {
+        let mut dir_read =
+            LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR | LANDLOCK_ACCESS_FS_EXECUTE;
+        if writable {
+            dir_read |= LANDLOCK_ACCESS_FS_WRITE_FILE
+                | LANDLOCK_ACCESS_FS_REMOVE_DIR
+                | LANDLOCK_ACCESS_FS_REMOVE_FILE
+                | LANDLOCK_ACCESS_FS_MAKE_REG
+                | LANDLOCK_ACCESS_FS_MAKE_DIR
+                | LANDLOCK_ACCESS_FS_MAKE_SYM;
+            if abi >= 2 {
+                dir_read |= LANDLOCK_ACCESS_FS_REFER;
+            }
+            if abi >= 3 {
+                dir_read |= LANDLOCK_ACCESS_FS_TRUNCATE;
+            }
+        }
+        dir_read
+    } else {
+        // File/device-only flags (directory flags cause EINVAL on non-directory descriptors in Landlock;
+        // omit EXECUTE on character devices such as /dev/null and /dev/urandom).
+        let mut file_access = LANDLOCK_ACCESS_FS_READ_FILE;
+        if is_regular_file {
+            file_access |= LANDLOCK_ACCESS_FS_EXECUTE;
+        }
+        if writable {
+            file_access |= LANDLOCK_ACCESS_FS_WRITE_FILE;
+            if abi >= 3 {
+                file_access |= LANDLOCK_ACCESS_FS_TRUNCATE;
+            }
+        }
+        file_access
+    };
 
     let attr = LandlockPathBeneathAttr {
         allowed_access,
@@ -299,6 +481,283 @@ fn add_path_rule(ruleset_fd: i32, path: &Path, writable: bool) -> Result<(), Kil
             errno,
         })
     } else {
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 1b. Pre-Fork Async-Signal-Safe Landlock + Seccomp-BPF Agent Confinement
+// ---------------------------------------------------------------------------
+
+pub const AUDIT_ARCH_X86_64: u32 = 0xC000_003E;
+pub const AUDIT_ARCH_AARCH64: u32 = 0xC000_00B7;
+
+pub const BPF_LD_W_ABS: u16 = 0x20;
+pub const BPF_JMP_JEQ_K: u16 = 0x15;
+pub const BPF_RET_K: u16 = 0x06;
+
+pub const SECCOMP_RET_KILL_PROCESS: u32 = 0x8000_0000;
+pub const SECCOMP_RET_ERRNO_EPERM: u32 = 0x0005_0001;
+pub const SECCOMP_RET_ALLOW: u32 = 0x7FFF_0000;
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SockFilter {
+    pub code: u16,
+    pub jt: u8,
+    pub jf: u8,
+    pub k: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct SockFprog {
+    pub len: u16,
+    pub filter: *const SockFilter,
+}
+
+#[inline]
+const fn bpf_stmt(code: u16, k: u32) -> SockFilter {
+    SockFilter {
+        code,
+        jt: 0,
+        jf: 0,
+        k,
+    }
+}
+
+#[inline]
+const fn bpf_jump(code: u16, k: u32, jt: u8, jf: u8) -> SockFilter {
+    SockFilter { code, jt, jf, k }
+}
+
+/// Builds a classical cBPF seccomp filter blocking container/namespace escape syscalls
+/// (`ptrace`, `process_vm_readv/writev`, `mount`, `umount2`, `pivot_root`, `chroot`, `setns`,
+/// `unshare`, `bpf`, `init_module`, `finit_module`, `kexec_load`, `io_uring_setup`, `userfaultfd`,
+/// `perf_event_open`, `keyctl`) and, when `allow_network == false`, blocking non-`AF_UNIX` `socket()`
+/// and `socketpair()` calls across x86_64 and aarch64.
+pub fn build_agent_seccomp_bpf(allow_network: bool) -> Vec<SockFilter> {
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    let (expected_arch, blocked_syscalls, socket_nr, socketpair_nr) = (
+        AUDIT_ARCH_X86_64,
+        [
+            libc::SYS_ptrace as u32,
+            libc::SYS_process_vm_readv as u32,
+            libc::SYS_process_vm_writev as u32,
+            libc::SYS_kexec_load as u32,
+            libc::SYS_init_module as u32,
+            libc::SYS_finit_module as u32,
+            libc::SYS_delete_module as u32,
+            libc::SYS_mount as u32,
+            libc::SYS_umount2 as u32,
+            libc::SYS_pivot_root as u32,
+            libc::SYS_chroot as u32,
+            libc::SYS_setns as u32,
+            libc::SYS_unshare as u32,
+            libc::SYS_bpf as u32,
+            libc::SYS_perf_event_open as u32,
+            libc::SYS_io_uring_setup as u32,
+            libc::SYS_userfaultfd as u32,
+            libc::SYS_keyctl as u32,
+            libc::SYS_add_key as u32,
+            libc::SYS_request_key as u32,
+        ]
+        .as_slice(),
+        libc::SYS_socket as u32,
+        libc::SYS_socketpair as u32,
+    );
+
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    let (expected_arch, blocked_syscalls, socket_nr, socketpair_nr) = (
+        AUDIT_ARCH_AARCH64,
+        [
+            libc::SYS_ptrace as u32,
+            libc::SYS_process_vm_readv as u32,
+            libc::SYS_process_vm_writev as u32,
+            libc::SYS_kexec_load as u32,
+            libc::SYS_init_module as u32,
+            libc::SYS_finit_module as u32,
+            libc::SYS_delete_module as u32,
+            libc::SYS_mount as u32,
+            libc::SYS_umount2 as u32,
+            libc::SYS_pivot_root as u32,
+            libc::SYS_chroot as u32,
+            libc::SYS_setns as u32,
+            libc::SYS_unshare as u32,
+            libc::SYS_bpf as u32,
+            libc::SYS_perf_event_open as u32,
+            libc::SYS_io_uring_setup as u32,
+            libc::SYS_userfaultfd as u32,
+            libc::SYS_keyctl as u32,
+            libc::SYS_add_key as u32,
+            libc::SYS_request_key as u32,
+        ]
+        .as_slice(),
+        libc::SYS_socket as u32,
+        libc::SYS_socketpair as u32,
+    );
+
+    #[cfg(not(all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    )))]
+    let (expected_arch, blocked_syscalls, socket_nr, socketpair_nr) = (
+        AUDIT_ARCH_X86_64,
+        // Linux x86_64 canonical syscall numbers for deterministic cross-OS BPF verification
+        [
+            101u32, 310, 311, 246, 175, 313, 176, 165, 166, 155, 161, 308, 272, 321, 298, 425, 323,
+            250, 248, 249,
+        ]
+        .as_slice(),
+        41u32,
+        53u32,
+    );
+
+    let mut prog = Vec::with_capacity(blocked_syscalls.len() + 14);
+    // [0..2]: Enforce exact syscall audit arch to defeat 32-bit/compat int 0x80 ABI bypass
+    prog.push(bpf_stmt(BPF_LD_W_ABS, 4));
+    prog.push(bpf_jump(BPF_JMP_JEQ_K, expected_arch, 1, 0));
+    prog.push(bpf_stmt(BPF_RET_K, SECCOMP_RET_KILL_PROCESS));
+
+    // [3]: Load seccomp_data.nr (offset 0)
+    prog.push(bpf_stmt(BPF_LD_W_ABS, 0));
+
+    // Placeholder indices for deny jumps; patched cleanly after trailer emission.
+    let mut deny_jump_indices = Vec::with_capacity(blocked_syscalls.len());
+    for &sys_nr in blocked_syscalls {
+        deny_jump_indices.push(prog.len());
+        prog.push(bpf_jump(BPF_JMP_JEQ_K, sys_nr, 0, 0));
+    }
+
+    if !allow_network {
+        // Inspect socket(domain, ...) and socketpair(domain, ...): permit ONLY AF_UNIX (1).
+        prog.push(bpf_jump(BPF_JMP_JEQ_K, socket_nr, 1, 0));
+        prog.push(bpf_jump(BPF_JMP_JEQ_K, socketpair_nr, 0, 3));
+        prog.push(bpf_stmt(BPF_LD_W_ABS, 16)); // seccomp_data.args[0] low u32
+        prog.push(bpf_jump(BPF_JMP_JEQ_K, 1, 1, 0)); // AF_UNIX == 1 on Linux
+        prog.push(bpf_stmt(BPF_RET_K, SECCOMP_RET_ERRNO_EPERM));
+    }
+
+    prog.push(bpf_stmt(BPF_RET_K, SECCOMP_RET_ALLOW));
+    let deny_idx = prog.len();
+    prog.push(bpf_stmt(BPF_RET_K, SECCOMP_RET_ERRNO_EPERM));
+
+    for idx in deny_jump_indices {
+        let offset = (deny_idx - idx - 1) as u8;
+        prog[idx].jt = offset;
+    }
+
+    prog
+}
+
+/// Async-signal-safe prepared Landlock + seccomp-bpf confinement bundle created BEFORE `fork()`,
+/// applied strictly via raw syscalls in `CommandExt::pre_exec` with zero heap allocation.
+#[cfg(target_os = "linux")]
+pub struct PreparedLinuxSandbox {
+    ruleset_fd: Option<i32>,
+    seccomp_prog: Vec<SockFilter>,
+    strict: bool,
+}
+
+#[cfg(target_os = "linux")]
+impl PreparedLinuxSandbox {
+    pub fn prepare(
+        config: &LandlockSandboxConfig,
+        allow_network: bool,
+    ) -> Result<Self, KillSwitchError> {
+        let enforce_net = !allow_network || !config.allowed_tcp_ports.is_empty();
+        let ruleset_fd = build_landlock_ruleset_fd(config, enforce_net)?;
+        if let Some(fd) = ruleset_fd {
+            unsafe {
+                let _ = libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC);
+            }
+        }
+        let seccomp_prog = build_agent_seccomp_bpf(allow_network);
+        Ok(Self {
+            ruleset_fd,
+            seccomp_prog,
+            strict: config.strict,
+        })
+    }
+
+    pub fn prepare_seccomp_only(allow_network: bool, strict: bool) -> Self {
+        Self {
+            ruleset_fd: None,
+            seccomp_prog: build_agent_seccomp_bpf(allow_network),
+            strict,
+        }
+    }
+
+    /// Invoked in the child process between `fork()` and `exec()` via `CommandExt::pre_exec`.
+    /// Must remain strictly async-signal-safe (raw syscalls / prctl only).
+    ///
+    /// # Safety
+    /// Caller must run inside `pre_exec` (single-threaded child context before `exec`) while
+    /// `self` outlives `pre_exec`.
+    pub unsafe fn apply_in_pre_exec(&self) -> std::io::Result<()> {
+        if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        if let Some(fd) = self.ruleset_fd {
+            let ret = libc::syscall(SYS_LANDLOCK_RESTRICT_SELF, fd, 0u32);
+            let saved_err = std::io::Error::last_os_error();
+            let _ = libc::close(fd);
+            if ret < 0 && self.strict {
+                return Err(saved_err);
+            }
+        }
+        if !self.seccomp_prog.is_empty() {
+            let fprog = SockFprog {
+                len: self.seccomp_prog.len() as u16,
+                filter: self.seccomp_prog.as_ptr(),
+            };
+            // SECCOMP_MODE_FILTER == 2
+            if libc::prctl(libc::PR_SET_SECCOMP, 2, &fprog as *const SockFprog) != 0 {
+                let err = std::io::Error::last_os_error();
+                if self.strict {
+                    return Err(err);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for PreparedLinuxSandbox {
+    fn drop(&mut self) {
+        if let Some(fd) = self.ruleset_fd.take() {
+            unsafe {
+                let _ = libc::close(fd);
+            }
+        }
+    }
+}
+
+/// Applies `PR_SET_NO_NEW_PRIVS` + agent `seccomp-bpf` directly to the current process.
+pub fn apply_agent_seccomp_bpf(allow_network: bool) -> Result<(), KillSwitchError> {
+    #[cfg(target_os = "linux")]
+    {
+        let prog = build_agent_seccomp_bpf(allow_network);
+        let fprog = SockFprog {
+            len: prog.len() as u16,
+            filter: prog.as_ptr(),
+        };
+        unsafe {
+            if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
+                let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+                return Err(KillSwitchError::LandlockRestrictSelfFailed { errno });
+            }
+            if libc::prctl(libc::PR_SET_SECCOMP, 2, &fprog as *const SockFprog) != 0 {
+                let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+                return Err(KillSwitchError::LandlockRestrictSelfFailed { errno });
+            }
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = allow_network;
         Ok(())
     }
 }
@@ -491,8 +950,9 @@ pub fn build_blackhole_route_msg(is_v6: bool, is_delete: bool, priority: u32) ->
     buf
 }
 
-/// Builds a binary Netlink INET_DIAG SOCK_DESTROY message to abort a TCP connection.
-pub fn build_sock_destroy_msg(entry: &LinuxSocketEntry) -> Vec<u8> {
+/// Builds a binary Netlink INET_DIAG SOCK_DESTROY message for an arbitrary IP protocol
+/// (`6` = TCP, `17` = UDP, `255` = RAW).
+pub fn build_sock_destroy_msg_for_proto(entry: &LinuxSocketEntry, protocol: u8) -> Vec<u8> {
     let family = if entry.is_ipv6 {
         #[cfg(target_os = "linux")]
         {
@@ -560,7 +1020,7 @@ pub fn build_sock_destroy_msg(entry: &LinuxSocketEntry) -> Vec<u8> {
 
     let req = InetDiagReqV2 {
         sdiag_family: family,
-        sdiag_protocol: 6, // IPPROTO_TCP
+        sdiag_protocol: protocol,
         idiag_ext: 0,
         pad: 0,
         idiag_states: 0xFFFFFFFF,
@@ -582,6 +1042,11 @@ pub fn build_sock_destroy_msg(entry: &LinuxSocketEntry) -> Vec<u8> {
         buf.extend_from_slice(req_bytes);
     }
     buf
+}
+
+/// Builds a binary Netlink INET_DIAG SOCK_DESTROY message to abort a TCP connection.
+pub fn build_sock_destroy_msg(entry: &LinuxSocketEntry) -> Vec<u8> {
+    build_sock_destroy_msg_for_proto(entry, 6)
 }
 
 #[cfg(target_os = "linux")]
@@ -683,8 +1148,11 @@ fn send_netlink_route_message(msg: &[u8]) -> Result<(), KillSwitchError> {
 }
 
 #[cfg(target_os = "linux")]
-fn terminate_linux_socket_netlink(entry: &LinuxSocketEntry) -> Result<(), KillSwitchError> {
-    let msg = build_sock_destroy_msg(entry);
+fn terminate_linux_socket_netlink_proto(
+    entry: &LinuxSocketEntry,
+    protocol: u8,
+) -> Result<(), KillSwitchError> {
+    let msg = build_sock_destroy_msg_for_proto(entry, protocol);
     unsafe {
         let fd = libc::socket(libc::AF_NETLINK, libc::SOCK_RAW, NETLINK_INET_DIAG);
         if fd < 0 {
@@ -714,7 +1182,7 @@ fn terminate_linux_socket_netlink(entry: &LinuxSocketEntry) -> Result<(), KillSw
             let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
             return Err(KillSwitchError::NetlinkSockDestroyFailed {
                 four_tuple: format!(
-                    "{}:{} -> {}:{}",
+                    "proto={protocol} {}:{} -> {}:{}",
                     entry.local_addr, entry.local_port, entry.remote_addr, entry.remote_port
                 ),
                 errno,
@@ -722,6 +1190,192 @@ fn terminate_linux_socket_netlink(entry: &LinuxSocketEntry) -> Result<(), KillSw
         }
         Ok(())
     }
+}
+
+/// Generates an atomic `nftables` `inet killswitch_quarantine` script with strict default-drop
+/// policy, explicit loopback-alias (`127.0.0.2+`), IMDS (`169.254.0.0/16` / `fe80::/10`),
+/// DNS/DoT/DHCP/QUIC, loopback proxy (`1080/3128/8080/8888/9050`), and lateral SMB/RPC drops,
+/// permitting ONLY exact `127.0.0.1 <-> 127.0.0.1` / `::1 <-> ::1` TCP on sanitized control ports.
+pub fn generate_linux_nftables_quarantine_script(
+    preserved_ports: &[u16],
+    cgroup_paths: &[&str],
+    agent_uids: &[u32],
+) -> String {
+    let ports = sanitize_firewall_preserved_ports(preserved_ports);
+    let discovery_csv = QUARANTINE_BLOCKED_DISCOVERY_PORTS
+        .iter()
+        .map(|p| p.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let proxy_csv = QUARANTINE_BLOCKED_LOOPBACK_PROXY_PORTS
+        .iter()
+        .map(|p| p.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let lateral_csv = QUARANTINE_BLOCKED_LATERAL_PORTS
+        .iter()
+        .map(|p| p.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let mut s = String::from(
+        "table inet killswitch_quarantine\n\
+delete table inet killswitch_quarantine\n\
+table inet killswitch_quarantine {\n\
+    chain input {\n\
+        type filter hook input priority -150; policy drop;\n\
+        ip saddr != 127.0.0.1 ip daddr 127.0.0.0/8 drop\n\
+        ip daddr != 127.0.0.1 ip saddr 127.0.0.0/8 drop\n\
+        ip daddr 169.254.0.0/16 drop\n\
+        ip6 daddr fe80::/10 drop\n",
+    );
+    s.push_str(&format!(
+        "        tcp dport {{ {discovery_csv} }} drop\n\
+        udp dport {{ {discovery_csv}, 443 }} drop\n\
+        tcp dport {{ {proxy_csv} }} drop\n\
+        tcp dport {{ {lateral_csv} }} drop\n"
+    ));
+    for &port in &ports {
+        s.push_str(&format!(
+            "        iifname \"lo\" ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp dport {port} accept\n\
+        iifname \"lo\" ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp sport {port} accept\n\
+        iifname \"lo\" ip6 saddr ::1 ip6 daddr ::1 tcp dport {port} accept\n\
+        iifname \"lo\" ip6 saddr ::1 ip6 daddr ::1 tcp sport {port} accept\n"
+        ));
+    }
+    s.push_str(
+        "    }\n\
+    chain output {\n\
+        type filter hook output priority -150; policy drop;\n",
+    );
+    for cg in cgroup_paths {
+        let clean: String = cg
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_' | '.'))
+            .collect();
+        if !clean.is_empty() {
+            s.push_str(&format!(
+                "        socket cgroupv2 level 1 \"{clean}\" drop\n"
+            ));
+        }
+    }
+    for &uid in agent_uids {
+        s.push_str(&format!("        meta skuid {uid} drop\n"));
+    }
+    s.push_str(&format!(
+        "        ip saddr != 127.0.0.1 ip daddr 127.0.0.0/8 drop\n\
+        ip daddr != 127.0.0.1 ip saddr 127.0.0.0/8 drop\n\
+        ip daddr 169.254.0.0/16 drop\n\
+        ip6 daddr fe80::/10 drop\n\
+        tcp dport {{ {discovery_csv} }} drop\n\
+        udp dport {{ {discovery_csv}, 443 }} drop\n\
+        tcp dport {{ {proxy_csv} }} drop\n\
+        tcp dport {{ {lateral_csv} }} drop\n"
+    ));
+    for &port in &ports {
+        s.push_str(&format!(
+            "        oifname \"lo\" ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp dport {port} accept\n\
+        oifname \"lo\" ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp sport {port} accept\n\
+        oifname \"lo\" ip6 saddr ::1 ip6 daddr ::1 tcp dport {port} accept\n\
+        oifname \"lo\" ip6 saddr ::1 ip6 daddr ::1 tcp sport {port} accept\n"
+        ));
+    }
+    s.push_str("    }\n}\n");
+    s
+}
+
+#[cfg(target_os = "linux")]
+fn find_nft_binary() -> Option<&'static str> {
+    for candidate in ["/usr/sbin/nft", "/sbin/nft", "/usr/bin/nft", "nft"] {
+        if candidate == "nft" || Path::new(candidate).exists() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// Atomically installs `table inet killswitch_quarantine` via `nft -f -` and performs
+/// mandatory readback verification via `nft list table inet killswitch_quarantine`.
+pub fn install_linux_nftables_quarantine(
+    preserved_ports: &[u16],
+    cgroup_paths: &[&str],
+    agent_uids: &[u32],
+) -> Result<String, KillSwitchError> {
+    let script =
+        generate_linux_nftables_quarantine_script(preserved_ports, cgroup_paths, agent_uids);
+    #[cfg(target_os = "linux")]
+    {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+
+        let nft_bin = find_nft_binary().ok_or_else(|| {
+            KillSwitchError::NativeOsError(
+                "nftables binary (nft) not found on Linux host".to_string(),
+            )
+        })?;
+        let mut child = Command::new(nft_bin)
+            .args(["-f", "-"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| {
+                KillSwitchError::NativeOsError(format!("Failed to invoke {nft_bin}: {e}"))
+            })?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(script.as_bytes()).map_err(|e| {
+                KillSwitchError::NativeOsError(format!(
+                    "Failed writing nftables script to stdin: {e}"
+                ))
+            })?;
+        }
+        let out = child.wait_with_output().map_err(|e| {
+            KillSwitchError::NativeOsError(format!("Failed waiting on nft -f -: {e}"))
+        })?;
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            return Err(KillSwitchError::NativeOsError(format!(
+                "nft -f - failed with status {}: {}",
+                out.status,
+                stderr.trim()
+            )));
+        }
+
+        // Mandatory readback verification
+        let readback = Command::new(nft_bin)
+            .args(["list", "table", "inet", "killswitch_quarantine"])
+            .output()
+            .map_err(|e| {
+                KillSwitchError::NativeOsError(format!("nft readback check failed: {e}"))
+            })?;
+        let body = String::from_utf8_lossy(&readback.stdout);
+        if !readback.status.success()
+            || !body.contains("chain input")
+            || !body.contains("chain output")
+        {
+            return Err(KillSwitchError::NativeOsError(format!(
+                "nftables readback verification failed for inet killswitch_quarantine: {}",
+                String::from_utf8_lossy(&readback.stderr).trim()
+            )));
+        }
+        info!("🔒 [LinuxNetlinkIsolator] Installed and readback-verified inet killswitch_quarantine nftables policy.");
+    }
+    Ok(script)
+}
+
+/// Removes `table inet killswitch_quarantine` without touching unrelated host nftables tables.
+pub fn remove_linux_nftables_quarantine() -> Result<(), KillSwitchError> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::process::Command;
+        if let Some(nft_bin) = find_nft_binary() {
+            let _ = Command::new(nft_bin)
+                .args(["delete", "table", "inet", "killswitch_quarantine"])
+                .output();
+        }
+    }
+    Ok(())
 }
 
 /// Installs IPv4 (0.0.0.0/0) and IPv6 (::/0) RTN_BLACKHOLE routes via Netlink NETLINK_ROUTE.
@@ -810,28 +1464,23 @@ impl NetworkIsolator for LinuxNetlinkIsolator {
         operator: &str,
         reason: &str,
     ) -> Result<IsolationReceipt, KillSwitchError> {
-        // Enforce privilege check
+        let ports = sanitize_firewall_preserved_ports(preserved_ports);
+
+        // Enforce privilege check (only root/CAP_NET_ADMIN or explicit authorized CI self-diagnostic)
         #[cfg(target_os = "linux")]
         {
-            let in_test = std::env::var("CARGO").is_ok()
-                || std::env::var("RUST_TEST_THREADS").is_ok()
-                || cfg!(test);
             let is_root = unsafe { libc::geteuid() == 0 };
-            if !is_root && !in_test {
+            if !is_root && !is_authorized_self_diagnostic() {
                 return Err(KillSwitchError::InsufficientPrivileges {
-                    details: "Root privileges (or CAP_NET_ADMIN) required to install Linux network quarantine routes via Netlink".to_string(),
+                    details: "Root privileges (or CAP_NET_ADMIN) required to install Linux network quarantine routes and nftables policy".to_string(),
                     remediation: "Restart the application using 'sudo killswitch' or ensure container possesses CAP_NET_ADMIN.".to_string(),
                 });
             }
 
             if is_root {
                 install_netlink_blackhole_routes()?;
+                install_linux_nftables_quarantine(&ports, &[], &[])?;
             }
-        }
-
-        let mut ports = preserved_ports.to_vec();
-        if !ports.contains(&3030) {
-            ports.push(3030);
         }
 
         let loopback_ips = vec![
@@ -839,10 +1488,7 @@ impl NetworkIsolator for LinuxNetlinkIsolator {
             IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)),
         ];
 
-        let mut terminated_count = 0;
-        if let Ok(count) = self.reset_tcp_connections(None) {
-            terminated_count = count;
-        }
+        let terminated_count = self.reset_tcp_connections(None).unwrap_or(0);
 
         self.active.store(true, Ordering::SeqCst);
 
@@ -851,7 +1497,10 @@ impl NetworkIsolator for LinuxNetlinkIsolator {
             NetworkIsolationEngine::LinuxNetlink,
             Vec::new(),
             Vec::new(),
-            vec!["netlink_rtn_blackhole_active".to_string()],
+            vec![
+                "netlink_rtn_blackhole_active".to_string(),
+                "nftables_inet_killswitch_quarantine".to_string(),
+            ],
             ports,
             loopback_ips,
             terminated_count,
@@ -860,7 +1509,7 @@ impl NetworkIsolator for LinuxNetlinkIsolator {
         );
 
         tracing::info!(
-            "🚨 [LinuxNetlinkIsolator] Quarantined host via Netlink RTN_BLACKHOLE. Receipt: {}",
+            "🚨 [LinuxNetlinkIsolator] Quarantined host via Netlink RTN_BLACKHOLE + nftables. Receipt: {}",
             receipt.receipt_id
         );
         Ok(receipt)
@@ -870,40 +1519,95 @@ impl NetworkIsolator for LinuxNetlinkIsolator {
         #[cfg(target_os = "linux")]
         {
             let is_root = unsafe { libc::geteuid() == 0 };
+            if !is_root && !is_authorized_self_diagnostic() {
+                return Err(KillSwitchError::InsufficientPrivileges {
+                    details: "Root privileges (or CAP_NET_ADMIN) required to remove Linux network quarantine".to_string(),
+                    remediation: "Restart the application using 'sudo killswitch' or ensure container possesses CAP_NET_ADMIN.".to_string(),
+                });
+            }
             if is_root {
+                let _ = remove_linux_nftables_quarantine();
                 let _ = remove_netlink_blackhole_routes();
             }
         }
 
         self.active.store(false, Ordering::SeqCst);
         tracing::info!(
-            "🟢 [LinuxNetlinkIsolator] Restored host network isolation via Netlink RTM_DELROUTE."
+            "🟢 [LinuxNetlinkIsolator] Restored host network isolation via nftables + Netlink RTM_DELROUTE."
         );
         Ok(())
     }
 
     fn reset_tcp_connections(
         &self,
-        _target_ips: Option<&[IpAddr]>,
+        target_ips: Option<&[IpAddr]>,
     ) -> Result<usize, KillSwitchError> {
-        let non_loopback = get_active_non_loopback_connections().unwrap_or_default();
         #[cfg(target_os = "linux")]
-        let mut closed_count = 0;
-        #[cfg(target_os = "linux")]
-        {
-            for entry in &non_loopback {
-                if let Ok(()) = terminate_linux_socket_netlink(entry) {
-                    closed_count += 1;
+        let closed_count = {
+            let mut count = 0usize;
+            let is_root = unsafe { libc::geteuid() == 0 };
+            if !is_root && !is_authorized_self_diagnostic() {
+                return Err(KillSwitchError::InsufficientPrivileges {
+                    details: "Root privileges (or CAP_NET_ADMIN) required to destroy kernel sockets via Netlink SOCK_DESTROY".to_string(),
+                    remediation: "Restart the application using 'sudo killswitch' or grant CAP_NET_ADMIN.".to_string(),
+                });
+            }
+            if is_root {
+                let matches_target = |entry: &LinuxSocketEntry| -> bool {
+                    match target_ips {
+                        Some(ips) => {
+                            ips.contains(&entry.remote_addr) || ips.contains(&entry.local_addr)
+                        }
+                        None => true,
+                    }
+                };
+
+                // 1. Destroy non-loopback / alias TCP sockets + blocked loopback proxy sockets
+                let mut tcp_targets = get_active_non_loopback_connections().unwrap_or_default();
+                for sock in read_and_parse_proc_net_tcp()
+                    .into_iter()
+                    .flatten()
+                    .chain(read_and_parse_proc_net_tcp6().into_iter().flatten())
+                {
+                    if (QUARANTINE_BLOCKED_LOOPBACK_PROXY_PORTS.contains(&sock.remote_port)
+                        || QUARANTINE_BLOCKED_LOOPBACK_PROXY_PORTS.contains(&sock.local_port))
+                        && (sock.state == TcpState::Established
+                            || sock.state == TcpState::SynSent
+                            || sock.state == TcpState::SynRecv
+                            || sock.state == TcpState::CloseWait)
+                    {
+                        tcp_targets.push(sock);
+                    }
+                }
+                for entry in &tcp_targets {
+                    if matches_target(entry)
+                        && terminate_linux_socket_netlink_proto(entry, 6).is_ok()
+                    {
+                        count += 1;
+                    }
+                }
+
+                // 2. Destroy non-loopback UDP (17) & RAW (255) sockets
+                if let Ok(udp_raw) = get_active_non_loopback_udp_and_raw_sockets() {
+                    for (proto, entry) in &udp_raw {
+                        if matches_target(entry)
+                            && terminate_linux_socket_netlink_proto(entry, *proto).is_ok()
+                        {
+                            count += 1;
+                        }
+                    }
                 }
             }
-        }
+            count
+        };
         #[cfg(not(target_os = "linux"))]
-        let closed_count = non_loopback.len();
+        let closed_count = {
+            let _ = target_ips;
+            let _ = &get_active_non_loopback_connections;
+            0usize
+        };
 
-        debug!(
-            "Linux Netlink reset: severed {} non-loopback sockets.",
-            closed_count
-        );
+        debug!("Linux Netlink reset: severed {} sockets.", closed_count);
         Ok(closed_count)
     }
 }
@@ -1082,27 +1786,69 @@ pub fn parse_proc_net_content(content: &str, is_v6: bool) -> Vec<LinuxSocketEntr
         .collect()
 }
 
+fn read_and_parse_proc_net_file(
+    path: &str,
+    is_v6: bool,
+) -> Result<Vec<LinuxSocketEntry>, KillSwitchError> {
+    let content =
+        std::fs::read_to_string(path).map_err(|_| KillSwitchError::ProcNetTcpParseFailed {
+            line: format!("Could not open {path}"),
+        })?;
+    Ok(parse_proc_net_content(&content, is_v6))
+}
+
+#[inline]
+fn is_exact_localhost_ip(addr: IpAddr) -> bool {
+    match addr {
+        IpAddr::V4(v4) => v4 == Ipv4Addr::LOCALHOST,
+        IpAddr::V6(v6) => {
+            v6 == Ipv6Addr::LOCALHOST || v6.to_ipv4_mapped() == Some(Ipv4Addr::LOCALHOST)
+        }
+    }
+}
+
+#[inline]
+fn is_unspecified_ip(addr: IpAddr) -> bool {
+    match addr {
+        IpAddr::V4(v4) => v4.is_unspecified(),
+        IpAddr::V6(v6) => {
+            v6.is_unspecified() || v6.to_ipv4_mapped().is_some_and(|v4| v4.is_unspecified())
+        }
+    }
+}
+
 /// Reads and parses live `/proc/net/tcp` (IPv4).
 pub fn read_and_parse_proc_net_tcp() -> Result<Vec<LinuxSocketEntry>, KillSwitchError> {
-    let content = std::fs::read_to_string("/proc/net/tcp").map_err(|_| {
-        KillSwitchError::ProcNetTcpParseFailed {
-            line: "Could not open /proc/net/tcp".to_string(),
-        }
-    })?;
-    Ok(parse_proc_net_content(&content, false))
+    read_and_parse_proc_net_file("/proc/net/tcp", false)
 }
 
 /// Reads and parses live `/proc/net/tcp6` (IPv6).
 pub fn read_and_parse_proc_net_tcp6() -> Result<Vec<LinuxSocketEntry>, KillSwitchError> {
-    let content = std::fs::read_to_string("/proc/net/tcp6").map_err(|_| {
-        KillSwitchError::ProcNetTcpParseFailed {
-            line: "Could not open /proc/net/tcp6".to_string(),
-        }
-    })?;
-    Ok(parse_proc_net_content(&content, true))
+    read_and_parse_proc_net_file("/proc/net/tcp6", true)
 }
 
-/// Enumerates all active non-loopback TCP connections.
+/// Reads and parses live `/proc/net/udp` (IPv4).
+pub fn read_and_parse_proc_net_udp() -> Result<Vec<LinuxSocketEntry>, KillSwitchError> {
+    read_and_parse_proc_net_file("/proc/net/udp", false)
+}
+
+/// Reads and parses live `/proc/net/udp6` (IPv6).
+pub fn read_and_parse_proc_net_udp6() -> Result<Vec<LinuxSocketEntry>, KillSwitchError> {
+    read_and_parse_proc_net_file("/proc/net/udp6", true)
+}
+
+/// Reads and parses live `/proc/net/raw` (IPv4).
+pub fn read_and_parse_proc_net_raw() -> Result<Vec<LinuxSocketEntry>, KillSwitchError> {
+    read_and_parse_proc_net_file("/proc/net/raw", false)
+}
+
+/// Reads and parses live `/proc/net/raw6` (IPv6).
+pub fn read_and_parse_proc_net_raw6() -> Result<Vec<LinuxSocketEntry>, KillSwitchError> {
+    read_and_parse_proc_net_file("/proc/net/raw6", true)
+}
+
+/// Enumerates all active non-localhost TCP connections (including `127.0.0.2+` loopback aliases
+/// and external connections targeting port 3030).
 pub fn get_active_non_loopback_connections() -> Result<Vec<LinuxSocketEntry>, KillSwitchError> {
     let mut entries = Vec::new();
     if let Ok(v4) = read_and_parse_proc_net_tcp() {
@@ -1115,9 +1861,8 @@ pub fn get_active_non_loopback_connections() -> Result<Vec<LinuxSocketEntry>, Ki
     let non_loopback: Vec<LinuxSocketEntry> = entries
         .into_iter()
         .filter(|e| {
-            !e.remote_addr.is_loopback()
-                && !e.remote_addr.is_unspecified()
-                && e.remote_port != 3030
+            !is_exact_localhost_ip(e.remote_addr)
+                && !is_unspecified_ip(e.remote_addr)
                 && (e.state == TcpState::Established
                     || e.state == TcpState::SynSent
                     || e.state == TcpState::SynRecv
@@ -1126,6 +1871,35 @@ pub fn get_active_non_loopback_connections() -> Result<Vec<LinuxSocketEntry>, Ki
         .collect();
 
     Ok(non_loopback)
+}
+
+/// Enumerates active non-localhost UDP (`17`) and RAW (`255`) sockets for `SOCK_DESTROY` / audit.
+pub fn get_active_non_loopback_udp_and_raw_sockets(
+) -> Result<Vec<(u8, LinuxSocketEntry)>, KillSwitchError> {
+    let mut out = Vec::new();
+    for entry in read_and_parse_proc_net_udp()
+        .into_iter()
+        .flatten()
+        .chain(read_and_parse_proc_net_udp6().into_iter().flatten())
+    {
+        if !is_exact_localhost_ip(entry.local_addr)
+            || (!is_unspecified_ip(entry.remote_addr) && !is_exact_localhost_ip(entry.remote_addr))
+        {
+            out.push((17u8, entry));
+        }
+    }
+    for entry in read_and_parse_proc_net_raw()
+        .into_iter()
+        .flatten()
+        .chain(read_and_parse_proc_net_raw6().into_iter().flatten())
+    {
+        if !is_exact_localhost_ip(entry.local_addr)
+            || (!is_unspecified_ip(entry.remote_addr) && !is_exact_localhost_ip(entry.remote_addr))
+        {
+            out.push((255u8, entry));
+        }
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -1198,20 +1972,77 @@ mod tests {
     #[test]
     fn test_linux_netlink_isolator_engagement() {
         let isolator = LinuxNetlinkIsolator::new();
-        let res = isolator.engage_quarantine(&[3030, 53], "admin", "test isolation");
-        assert!(res.is_ok());
+        let res = isolator.engage_quarantine(&[3030, 53, 8080, 445], "admin", "test isolation");
+        #[cfg(target_os = "linux")]
+        {
+            let is_root = unsafe { libc::geteuid() == 0 };
+            if !is_root && !is_authorized_self_diagnostic() {
+                assert!(matches!(
+                    res,
+                    Err(KillSwitchError::InsufficientPrivileges { .. })
+                ));
+                return;
+            }
+        }
+        assert!(res.is_ok(), "engage_quarantine failed: {:?}", res);
         let receipt = res.unwrap();
         assert_eq!(receipt.engine, NetworkIsolationEngine::LinuxNetlink);
-        assert!(receipt.preserved_ports.contains(&3030));
+        assert_eq!(receipt.preserved_ports, vec![3030]);
         assert_eq!(
             receipt.netlink_rule_ids,
-            vec!["netlink_rtn_blackhole_active"]
+            vec![
+                "netlink_rtn_blackhole_active".to_string(),
+                "nftables_inet_killswitch_quarantine".to_string(),
+            ]
         );
         assert!(isolator.restore_quarantine(&receipt).is_ok());
 
         // Verify Landlock default sandbox config strictly excludes port 53
         let landlock_cfg = LandlockSandboxConfig::default();
         assert_eq!(landlock_cfg.allowed_tcp_ports, vec![3030]);
+    }
+
+    #[test]
+    fn test_linux_nftables_quarantine_script_hardening() {
+        let script = generate_linux_nftables_quarantine_script(
+            &[3030, 53, 8080, 445, 9050, 3456],
+            &["killswitch.slice/ks-agent-1.scope"],
+            &[1001],
+        );
+        assert!(script.contains("policy drop;"));
+        assert!(!script.contains("iif lo accept"));
+        assert!(!script.contains("oif lo accept"));
+        assert!(script.contains("ip saddr != 127.0.0.1 ip daddr 127.0.0.0/8 drop"));
+        assert!(script.contains("ip daddr 169.254.0.0/16 drop"));
+        assert!(script.contains("ip6 daddr fe80::/10 drop"));
+        assert!(script.contains("udp dport { 53, 67, 68, 546, 547, 853, 443 } drop"));
+        assert!(script.contains("tcp dport { 1080, 3128, 8080, 8888, 9050 } drop"));
+        assert!(script.contains("tcp dport { 135, 445, 5985, 5986 } drop"));
+        assert!(
+            script.contains("socket cgroupv2 level 1 \"killswitch.slice/ks-agent-1.scope\" drop")
+        );
+        assert!(script.contains("meta skuid 1001 drop"));
+        assert!(script.contains("ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp dport 3030 accept"));
+        assert!(script.contains("ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp dport 3456 accept"));
+        assert!(!script.contains("tcp dport 8080 accept"));
+        assert!(!script.contains("tcp dport 53 accept"));
+    }
+
+    #[test]
+    fn test_agent_seccomp_bpf_filter_layout() {
+        let no_net = build_agent_seccomp_bpf(false);
+        assert!(!no_net.is_empty());
+        assert_eq!(no_net[0].code, BPF_LD_W_ABS);
+        assert_eq!(no_net[0].k, 4, "Must validate seccomp_data.arch first");
+        assert_eq!(no_net[2].k, SECCOMP_RET_KILL_PROCESS);
+        assert!(no_net.iter().any(|ins| ins.k == SECCOMP_RET_ERRNO_EPERM));
+        assert!(no_net.iter().any(|ins| ins.k == SECCOMP_RET_ALLOW));
+
+        let with_net = build_agent_seccomp_bpf(true);
+        assert!(
+            no_net.len() > with_net.len(),
+            "network-off BPF adds AF_UNIX-only check"
+        );
     }
 
     #[test]
@@ -1248,7 +2079,7 @@ mod tests {
     }
 
     #[test]
-    fn test_netlink_sock_destroy_binary_layout() {
+    fn test_netlink_sock_destroy_binary_layout_and_udp_proto() {
         let entry = LinuxSocketEntry {
             slot: 1,
             local_addr: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 5)),
@@ -1271,5 +2102,22 @@ mod tests {
         assert_eq!(req.id.idiag_sport, 54321u16.to_be());
         assert_eq!(req.id.idiag_dport, 53u16.to_be());
         assert_eq!(req.id.idiag_cookie, [0xFFFFFFFF, 0xFFFFFFFF]);
+
+        let udp_msg = build_sock_destroy_msg_for_proto(&entry, 17);
+        let udp_req = unsafe { &*(udp_msg.as_ptr().add(16) as *const InetDiagReqV2) };
+        assert_eq!(udp_req.sdiag_protocol, 17, "Must target IPPROTO_UDP");
+    }
+
+    #[test]
+    fn test_exact_localhost_and_unspecified_ip_helpers() {
+        assert!(is_exact_localhost_ip(IpAddr::V4(Ipv4Addr::new(
+            127, 0, 0, 1
+        ))));
+        assert!(!is_exact_localhost_ip(IpAddr::V4(Ipv4Addr::new(
+            127, 0, 0, 2
+        ))));
+        assert!(is_exact_localhost_ip(IpAddr::V6(Ipv6Addr::LOCALHOST)));
+        assert!(is_unspecified_ip(IpAddr::V4(Ipv4Addr::UNSPECIFIED)));
+        assert!(is_unspecified_ip(IpAddr::V6(Ipv6Addr::UNSPECIFIED)));
     }
 }

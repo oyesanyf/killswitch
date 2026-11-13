@@ -172,6 +172,14 @@ pub fn spawn_confined_process(
 
     #[cfg(not(target_os = "windows"))]
     {
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::process::CommandExt;
+            let prepared = crate::landlock::PreparedLinuxSandbox::prepare_seccomp_only(true, false);
+            unsafe {
+                command.pre_exec(move || prepared.apply_in_pre_exec());
+            }
+        }
         let child = command.spawn()?;
         let pid = child.id();
         TrackedAgentTreeRegistry::global().register_agent_root_with_sandbox(
@@ -1103,6 +1111,44 @@ impl SandboxedAgentProcess {
             Ok(())
         }
     }
+
+    /// Waits for the sandboxed root process to exit and returns its OS exit code.
+    pub fn wait_exit_code(&mut self) -> KillSwitchResult<i32> {
+        #[cfg(target_os = "windows")]
+        {
+            use windows::Win32::Foundation::{CloseHandle, HANDLE};
+            use windows::Win32::System::Threading::{
+                GetExitCodeProcess, WaitForSingleObject, INFINITE,
+            };
+            if self.process_handle_raw == 0 {
+                return Err(KillSwitchError::NativeOsError(
+                    "Sandboxed Windows process handle already closed".to_string(),
+                ));
+            }
+            let h_proc = HANDLE(self.process_handle_raw as *mut core::ffi::c_void);
+            unsafe {
+                let _ = WaitForSingleObject(h_proc, INFINITE);
+                let mut code: u32 = 1;
+                let _ = GetExitCodeProcess(h_proc, &mut code);
+                let _ = CloseHandle(h_proc);
+                self.process_handle_raw = 0;
+                TrackedAgentTreeRegistry::global().unregister_pid(self.pid);
+                Ok(code as i32)
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let status = if let Some(ref mut child) = self.child {
+                child.wait()?
+            } else {
+                return Err(KillSwitchError::NativeOsError(
+                    "Sandboxed child handle already consumed".to_string(),
+                ));
+            };
+            TrackedAgentTreeRegistry::global().unregister_pid(self.pid);
+            Ok(status.code().unwrap_or(1))
+        }
+    }
 }
 
 impl Drop for SandboxedAgentProcess {
@@ -1588,6 +1634,49 @@ pub fn spawn_sandboxed_agent_process(
         if let Some(ref cwd) = config.current_dir {
             cmd.current_dir(cwd);
         }
+
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::process::CommandExt;
+            use std::path::{Path, PathBuf};
+
+            let mut read_only = vec![
+                PathBuf::from("/usr"),
+                PathBuf::from("/bin"),
+                PathBuf::from("/sbin"),
+                PathBuf::from("/lib"),
+                PathBuf::from("/lib64"),
+                PathBuf::from("/lib32"),
+                PathBuf::from("/etc"),
+                PathBuf::from("/dev/null"),
+                PathBuf::from("/dev/zero"),
+                PathBuf::from("/dev/urandom"),
+            ];
+            for r in &config.readable_paths {
+                read_only.push(r.clone());
+            }
+            let prog_path = Path::new(&config.program);
+            if prog_path.is_absolute() && prog_path.exists() {
+                read_only.push(prog_path.to_path_buf());
+            }
+            if let Some(ref cwd) = config.current_dir {
+                if !config.writable_paths.contains(cwd) {
+                    read_only.push(cwd.clone());
+                }
+            }
+            let ll_cfg = crate::landlock::LandlockSandboxConfig {
+                read_only_paths: read_only,
+                read_write_paths: config.writable_paths.clone(),
+                allowed_tcp_ports: Vec::new(),
+                strict: true,
+            };
+            let prepared =
+                crate::landlock::PreparedLinuxSandbox::prepare(&ll_cfg, config.allow_network)?;
+            unsafe {
+                cmd.pre_exec(move || prepared.apply_in_pre_exec());
+            }
+        }
+
         let child = cmd.spawn()?;
         let pid = child.id();
         TrackedAgentTreeRegistry::global().register_agent_root_with_sandbox(
@@ -1609,10 +1698,14 @@ pub fn spawn_sandboxed_agent_process(
                 Err(_) => None,
             }
         };
+        #[cfg(target_os = "linux")]
+        let isolation_mode = "linux_cgroup_landlock_seccomp";
+        #[cfg(not(target_os = "linux"))]
+        let isolation_mode = "unix_confined_subtree";
         Ok(SandboxedAgentProcess {
             pid,
             sandbox_id,
-            isolation_mode: "unix_confined_subtree",
+            isolation_mode,
             is_appcontainer: false,
             child: Some(child),
             #[cfg(target_os = "linux")]
@@ -1959,6 +2052,68 @@ mod tests {
         bad_cfg.args = vec!["--help".to_string()];
         let err = spawn_sandboxed_agent_process(bad_cfg);
         assert!(err.is_err(), "Nonexistent binary must fail closed");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_linux_sandboxed_agent_enforces_landlock_and_seccomp_bpf() {
+        let base = std::env::temp_dir().join(format!("ks-linux-ll-{}", std::process::id()));
+        let allowed_dir = base.join("allowed");
+        let forbidden_dir = base.join("forbidden");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&allowed_dir).unwrap();
+        std::fs::create_dir_all(&forbidden_dir).unwrap();
+
+        // 1. Write inside explicit writable_paths succeeds
+        let allowed_file = allowed_dir.join("ok.txt");
+        let mut ok_cfg = SandboxedAgentConfig::new("test-ll-ok", "sh");
+        ok_cfg.args = vec![
+            "-c".to_string(),
+            format!("printf confined > '{}'", allowed_file.display()),
+        ];
+        ok_cfg.writable_paths = vec![allowed_dir.clone()];
+        let mut ok_proc = spawn_sandboxed_agent_process(ok_cfg)
+            .expect("Linux Landlock + seccomp spawn must succeed");
+        assert_eq!(ok_proc.isolation_mode, "linux_cgroup_landlock_seccomp");
+        let code = ok_proc.wait_exit_code().unwrap();
+        assert_eq!(code, 0, "Write inside allowed Landlock path must succeed");
+        assert_eq!(std::fs::read_to_string(&allowed_file).unwrap(), "confined");
+
+        // 2. Write outside writable_paths (forbidden sibling dir) fails closed with EACCES
+        let escape_file = forbidden_dir.join("escape.txt");
+        let mut deny_cfg = SandboxedAgentConfig::new("test-ll-deny", "sh");
+        deny_cfg.args = vec![
+            "-c".to_string(),
+            format!("printf escaped > '{}' 2>/dev/null", escape_file.display()),
+        ];
+        deny_cfg.writable_paths = vec![allowed_dir.clone()];
+        let mut deny_proc = spawn_sandboxed_agent_process(deny_cfg).unwrap();
+        let deny_code = deny_proc.wait_exit_code().unwrap();
+        assert_ne!(
+            deny_code, 0,
+            "Write outside Landlock writable_paths must fail"
+        );
+        assert!(
+            !escape_file.exists(),
+            "Forbidden escape file must not exist"
+        );
+
+        // 3. Seccomp-BPF blocks unshare breakout + AF_INET sockets when allow_network == false
+        if std::path::Path::new("/usr/bin/python3").exists() {
+            let mut net_cfg = SandboxedAgentConfig::new("test-seccomp-net", "/usr/bin/python3");
+            net_cfg.args = vec![
+                "-c".to_string(),
+                "import errno, socket, sys\ntry:\n socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n sys.exit(2)\nexcept OSError as e:\n sys.exit(0 if e.errno == errno.EPERM else 3)".to_string(),
+            ];
+            let mut net_proc = spawn_sandboxed_agent_process(net_cfg).unwrap();
+            assert_eq!(
+                net_proc.wait_exit_code().unwrap(),
+                0,
+                "Seccomp-BPF must reject socket(AF_INET) with EPERM"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
