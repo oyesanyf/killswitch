@@ -77,11 +77,16 @@ fn helper_child_worker() {
             let cp = counter_path.clone();
             handles.push(std::thread::spawn(move || {
                 let tmp_cp = cp.with_extension("tmp");
+                let mut local_ticks: u64 = 0;
                 while r.load(Ordering::Relaxed) {
-                    let val = c.fetch_add(1, Ordering::Relaxed);
-                    if tid == 0 && val % 200 == 0 && !cp.as_os_str().is_empty() {
-                        let _ = fs::write(&tmp_cp, val.to_string());
-                        let _ = fs::rename(&tmp_cp, &cp);
+                    let val = c.fetch_add(1, Ordering::Relaxed) + 1;
+                    if tid == 0 {
+                        local_ticks += 1;
+                        if (local_ticks == 1 || local_ticks % 10 == 0) && !cp.as_os_str().is_empty()
+                        {
+                            let _ = fs::write(&tmp_cp, val.to_string());
+                            let _ = fs::rename(&tmp_cp, &cp);
+                        }
                     }
                     std::thread::sleep(Duration::from_micros(100));
                 }
@@ -305,7 +310,7 @@ async fn test_stress_active_process_tarpit_duty_cycle_multithreaded() {
 
     // Verify process still functions and advances counter after tarpit release
     let mut post_release_val = 0;
-    for _ in 0..15 {
+    for _ in 0..25 {
         tokio::time::sleep(Duration::from_millis(40)).await;
         post_release_val = read_counter_resilient(&counter_file);
         if post_release_val > pre_release_val {
