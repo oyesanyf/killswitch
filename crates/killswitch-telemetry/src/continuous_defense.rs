@@ -1838,14 +1838,10 @@ pub fn is_valid_technical_indicator(pat: &str) -> bool {
         return false;
     }
     let space_count = trimmed.chars().filter(|&c| c == ' ').count();
-    if space_count >= 2
-        && !trimmed
+    space_count < 2
+        || trimmed
             .chars()
             .any(|c| matches!(c, '/' | '-' | '=' | ':' | '.' | '+' | '_' | '<' | '>'))
-    {
-        return false;
-    }
-    true
 }
 
 /// Deterministically synthesizes a tighten-only, defanged read-only Rust enforcement guard.
