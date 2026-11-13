@@ -594,9 +594,15 @@ impl KillSwitchServer {
                         }
                         candidate.command_line = Some(row.command_line.clone());
 
+                        let adj_ctx = killswitch_adjudication::voters::AdjudicationContext {
+                            process_ancestry: killswitch_adjudication::get_process_ancestry_chain(
+                                row.pid,
+                            ),
+                            ..Default::default()
+                        };
                         let verdict = sentinel_state
                             .adjudicator
-                            .adjudicate_threat_candidate(&candidate, None)
+                            .adjudicate_threat_candidate(&candidate, Some(&adj_ctx))
                             .await;
                         if !verdict.is_confirmed() {
                             continue;
@@ -606,16 +612,27 @@ impl KillSwitchServer {
                             .arm_registry
                             .sever_and_regenerate_arm(2, &eval.summary)
                             .await;
+                        killswitch_core::TrackedAgentTreeRegistry::global()
+                            .register_agent_root(row.pid, &row.process_name);
+                        for (anc_pid, anc_name) in &adj_ctx.process_ancestry {
+                            if killswitch_core::is_developer_or_agent_runtime(anc_name)
+                                && !killswitch_core::is_immutable_os_kernel_pid(*anc_pid, anc_name)
+                            {
+                                killswitch_core::TrackedAgentTreeRegistry::global()
+                                    .register_agent_root(*anc_pid, anc_name);
+                            }
+                        }
                         if *sentinel_state.active_mode.read().await == OrchestratorMode::Autonomous
                             && !sentinel_state.containment_manager.get_status().isolated
                         {
                             let _ = sentinel_state
                                 .containment_manager
-                                .engage_isolation(
+                                .engage_isolation_for_target(
                                     "live_os_ai_breakout_sentinel",
                                     &eval.summary,
                                     killswitch_types::ContainmentLevel::HermeticIsolation,
-                                    None,
+                                    Some(std::process::id()),
+                                    Some(row.pid),
                                 )
                                 .await;
                             *sentinel_state.last_trigger_cause.write().await = Some((

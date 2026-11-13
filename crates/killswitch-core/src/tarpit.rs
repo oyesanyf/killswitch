@@ -142,12 +142,13 @@ impl ActiveProcessTarpit {
         unsafe impl Send for SendHandle {}
         unsafe impl Sync for SendHandle {}
 
-        let handles: Vec<SendHandle> = unsafe {
+        unsafe fn snapshot_thread_handles_for_pids(
+            target_pids: &std::collections::HashSet<u32>,
+        ) -> Result<Vec<SendHandle>, u32> {
             let mut list = Vec::new();
             let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
             if snapshot.is_null() {
-                let win32_code = windows_sys::Win32::Foundation::GetLastError();
-                return Err(KillSwitchError::ThreadSnapshotFailed { pid, win32_code });
+                return Err(windows_sys::Win32::Foundation::GetLastError());
             }
 
             let mut entry: THREADENTRY32 = std::mem::zeroed();
@@ -155,7 +156,7 @@ impl ActiveProcessTarpit {
 
             if Thread32First(snapshot, &mut entry) != 0 {
                 loop {
-                    if entry.th32OwnerProcessID == pid {
+                    if target_pids.contains(&entry.th32OwnerProcessID) {
                         let h = OpenThread(
                             THREAD_SUSPEND_RESUME | THREAD_QUERY_INFORMATION,
                             0,
@@ -165,20 +166,35 @@ impl ActiveProcessTarpit {
                             list.push(SendHandle(h));
                         }
                     }
+                    entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
                     if Thread32Next(snapshot, &mut entry) == 0 {
                         break;
                     }
                 }
             }
             CloseHandle(snapshot);
-            list
+            Ok(list)
+        }
+
+        let mut initial_pids = std::collections::HashSet::new();
+        initial_pids.insert(pid);
+        let initial_handles = unsafe {
+            snapshot_thread_handles_for_pids(&initial_pids)
+                .map_err(|win32_code| KillSwitchError::ThreadSnapshotFailed { pid, win32_code })?
         };
 
-        if handles.is_empty() {
+        if initial_handles.is_empty() {
             return Err(KillSwitchError::ThreadSnapshotFailed {
                 pid,
                 win32_code: 0x00000002, // ERROR_FILE_NOT_FOUND (no threads found)
             });
+        }
+        // Close initial verification handles cleanly; duty cycles re-snapshot live threads each iteration
+        // so freshly spawned threads and descendant processes inside the trapped subtree are caught too.
+        for h in initial_handles {
+            unsafe {
+                CloseHandle(h.0);
+            }
         }
 
         let run_flag = Arc::new(AtomicBool::new(true));
@@ -187,16 +203,40 @@ impl ActiveProcessTarpit {
 
         tokio::spawn(async move {
             info!(
-                "🚨 [ActiveProcessTarpit] Starting asymmetric containment loop on PID {} ({} threads).",
-                pid,
-                handles.len()
+                "🚨 [ActiveProcessTarpit] Starting dynamic subtree thread-resnapshot loop on PID {}.",
+                pid
             );
             let start = tokio::time::Instant::now();
+            let mut last_handles: Vec<SendHandle> = Vec::new();
             let mut is_suspended = false;
+            let mut cycle_idx = 0usize;
+            let mut target_pids = std::collections::HashSet::new();
+            target_pids.insert(pid);
 
-            while run_flag.load(Ordering::Relaxed) && start.elapsed() < max_duration {
-                // Suspend all threads
-                for &h in &handles {
+            while run_flag.load(Ordering::Acquire) && start.elapsed() < max_duration {
+                if cycle_idx % 5 == 0 {
+                    let descendants = crate::job_sandbox::enumerate_live_descendants(pid);
+                    target_pids.clear();
+                    target_pids.insert(pid);
+                    for dpid in descendants {
+                        target_pids.insert(dpid);
+                    }
+                }
+                cycle_idx = cycle_idx.wrapping_add(1);
+
+                for h in last_handles.drain(..) {
+                    unsafe {
+                        CloseHandle(h.0);
+                    }
+                }
+
+                last_handles = match unsafe { snapshot_thread_handles_for_pids(&target_pids) } {
+                    Ok(list) if !list.is_empty() => list,
+                    _ => break, // Process exited cleanly
+                };
+
+                // Suspend all currently enumerated threads for this PID and its descendants
+                for &h in &last_handles {
                     unsafe {
                         SuspendThread(h.0);
                     }
@@ -207,7 +247,7 @@ impl ActiveProcessTarpit {
                 let chunk = Duration::from_millis(10);
                 let mut slept = Duration::ZERO;
                 while slept < suspend_interval
-                    && run_flag.load(Ordering::Relaxed)
+                    && run_flag.load(Ordering::Acquire)
                     && start.elapsed() < max_duration
                 {
                     let step = chunk.min(suspend_interval - slept);
@@ -215,12 +255,12 @@ impl ActiveProcessTarpit {
                     slept += step;
                 }
 
-                if !run_flag.load(Ordering::Relaxed) || start.elapsed() >= max_duration {
+                if !run_flag.load(Ordering::Acquire) || start.elapsed() >= max_duration {
                     break;
                 }
 
                 // Briefly resume for observation burst
-                for &h in &handles {
+                for &h in &last_handles {
                     unsafe {
                         ResumeThread(h.0);
                     }
@@ -230,20 +270,25 @@ impl ActiveProcessTarpit {
                 tokio::time::sleep(burst_interval).await;
             }
 
-            // Cleanup: ensure threads are resumed
+            // Cleanup: ensure threads are resumed (re-snapshotting if needed)
             if is_suspended {
-                for &h in &handles {
+                let cleanup_handles = if last_handles.is_empty() {
+                    unsafe { snapshot_thread_handles_for_pids(&target_pids).unwrap_or_default() }
+                } else {
+                    std::mem::take(&mut last_handles)
+                };
+                for h in cleanup_handles {
                     unsafe {
                         let mut count = ResumeThread(h.0);
                         while count > 1 && count != u32::MAX {
                             count = ResumeThread(h.0);
                         }
+                        CloseHandle(h.0);
                     }
                 }
             }
 
-            // Close handles
-            for h in handles {
+            for h in last_handles {
                 unsafe {
                     CloseHandle(h.0);
                 }
@@ -283,22 +328,35 @@ impl ActiveProcessTarpit {
 
         tokio::spawn(async move {
             info!(
-                "🚨 [ActiveProcessTarpit] Starting Unix signal duty cycle on PID {}.",
+                "🚨 [ActiveProcessTarpit] Starting Unix signal subtree duty cycle on PID {}.",
                 pid
             );
             let start = tokio::time::Instant::now();
             let mut is_suspended = false;
+            let mut cycle_idx = 0usize;
+            let mut target_pids = vec![pid];
 
-            while run_flag.load(Ordering::Relaxed) && start.elapsed() < max_duration {
-                unsafe {
-                    libc::kill(pid as i32, libc::SIGSTOP);
+            while run_flag.load(Ordering::Acquire) && start.elapsed() < max_duration {
+                if cycle_idx % 5 == 0 {
+                    let mut live = crate::job_sandbox::enumerate_live_descendants(pid);
+                    if !live.contains(&pid) {
+                        live.insert(0, pid);
+                    }
+                    target_pids = live;
+                }
+                cycle_idx = cycle_idx.wrapping_add(1);
+
+                for &tpid in &target_pids {
+                    unsafe {
+                        libc::kill(tpid as i32, libc::SIGSTOP);
+                    }
                 }
                 is_suspended = true;
 
                 let chunk = Duration::from_millis(10);
                 let mut slept = Duration::ZERO;
                 while slept < suspend_interval
-                    && run_flag.load(Ordering::Relaxed)
+                    && run_flag.load(Ordering::Acquire)
                     && start.elapsed() < max_duration
                 {
                     let step = chunk.min(suspend_interval - slept);
@@ -306,12 +364,14 @@ impl ActiveProcessTarpit {
                     slept += step;
                 }
 
-                if !run_flag.load(Ordering::Relaxed) || start.elapsed() >= max_duration {
+                if !run_flag.load(Ordering::Acquire) || start.elapsed() >= max_duration {
                     break;
                 }
 
-                unsafe {
-                    libc::kill(pid as i32, libc::SIGCONT);
+                for &tpid in target_pids.iter().rev() {
+                    unsafe {
+                        libc::kill(tpid as i32, libc::SIGCONT);
+                    }
                 }
                 is_suspended = false;
 
@@ -319,8 +379,10 @@ impl ActiveProcessTarpit {
             }
 
             if is_suspended {
-                unsafe {
-                    libc::kill(pid as i32, libc::SIGCONT);
+                for &tpid in target_pids.iter().rev() {
+                    unsafe {
+                        libc::kill(tpid as i32, libc::SIGCONT);
+                    }
                 }
             }
 

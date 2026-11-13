@@ -8,7 +8,9 @@
 //!   `StaticArtifactVoter`, and `ThreatIntelVoter` (with capping <= 0.49).
 
 use async_trait::async_trait;
-use killswitch_core::killchain::is_critical_system_pid;
+use killswitch_core::killchain::{
+    is_critical_system_pid, is_developer_or_agent_runtime, is_immutable_os_kernel_pid,
+};
 use killswitch_types::adjudication::{EvidenceClass, ThreatCandidate, VoteAction, VoteResult};
 use killswitch_types::telemetry::SecurityEvent;
 use serde::{Deserialize, Serialize};
@@ -152,6 +154,67 @@ pub struct AdjudicationContext {
     pub is_dev_environment: bool,
 }
 
+/// Combines candidate detection reason and command line into a single analysis string.
+pub fn combine_candidate_telemetry(candidate: &ThreatCandidate) -> String {
+    match candidate.command_line.as_deref() {
+        Some(cmd) if !cmd.trim().is_empty() => {
+            format!("{} | cmd: {}", candidate.detection_reason, cmd)
+        }
+        _ => candidate.detection_reason.clone(),
+    }
+}
+
+/// Returns `true` if `AdjudicationContext` carries AI agent / developer-runtime ancestry
+/// in `process_ancestry` or `lineage_evidence.provenance_hops`.
+pub fn has_active_agent_ancestry(context: Option<&AdjudicationContext>) -> bool {
+    let Some(ctx) = context else {
+        return false;
+    };
+    if ctx
+        .process_ancestry
+        .iter()
+        .any(|(_, name)| is_developer_or_agent_runtime(name))
+    {
+        return true;
+    }
+    if let Some(ref lineage) = ctx.lineage_evidence {
+        return lineage.provenance_hops.iter().any(|hop| {
+            let proc_name = hop.rsplit_once(':').map(|(n, _)| n).unwrap_or(hop);
+            is_developer_or_agent_runtime(proc_name)
+        });
+    }
+    false
+}
+
+/// Returns `true` if `AdjudicationContext` carries an active security event, DLP block,
+/// quarantine baggage, or CrownJewel classification.
+pub fn has_active_dlp_or_event(context: Option<&AdjudicationContext>) -> bool {
+    let Some(ctx) = context else {
+        return false;
+    };
+    if ctx.security_event.is_some() {
+        return true;
+    }
+    if let Some(ref lineage) = ctx.lineage_evidence {
+        if lineage.egress_verdict.is_block() {
+            return true;
+        }
+        if let Some(ref baggage) = lineage.baggage {
+            if baggage.is_quarantine() || baggage.classification == DlpClassification::CrownJewel {
+                return true;
+            }
+        }
+        if lineage
+            .input_datasets
+            .iter()
+            .any(|d| d.facets.dlp_classification == DlpClassification::CrownJewel)
+        {
+            return true;
+        }
+    }
+    false
+}
+
 /// Abstract voter contributing evidence to the multi-voter consensus engine.
 #[async_trait]
 pub trait ThreatVoter: Send + Sync {
@@ -262,7 +325,27 @@ impl ThreatVoter for DataLineageVoter {
         let lineage = context.and_then(|ctx| ctx.lineage_evidence.as_ref())?;
         let actor_pid = lineage.actor_pid;
         let actor_exe = &lineage.actor_exe;
-        let is_critical = is_critical_system_pid(actor_pid, actor_exe);
+        fn is_clean_admin_shell_name(exe: &str) -> bool {
+            let trimmed = exe.trim().trim_matches('"').trim_matches('\'');
+            let base = trimmed
+                .rsplit(['\\', '/'])
+                .next()
+                .unwrap_or(trimmed)
+                .to_ascii_lowercase();
+            matches!(
+                base.as_str(),
+                "powershell.exe" | "powershell" | "pwsh.exe" | "pwsh"
+            )
+        }
+
+        let is_immutable_kernel = is_immutable_os_kernel_pid(actor_pid, actor_exe);
+        let is_critical_shell_or_system = is_critical_system_pid(actor_pid, actor_exe);
+        let is_clean_admin_shell = is_clean_admin_shell_name(actor_exe)
+            && !killswitch_core::TrackedAgentTreeRegistry::global().is_tracked_pid(actor_pid);
+        let combined_low = combine_candidate_telemetry(candidate).to_ascii_lowercase();
+        let active_threat_or_agent = has_active_agent_ancestry(context)
+            || has_active_dlp_or_event(context)
+            || crate::rea::has_active_lotl_or_exploit_indicators(&combined_low);
 
         // Case 1: Active Egress Block on Quarantined / CrownJewel Data
         if let EgressVerdict::Block {
@@ -275,12 +358,11 @@ impl ThreatVoter for DataLineageVoter {
                 .map(|b| b.source_sha256.as_str())
                 .unwrap_or("unknown");
 
-            if is_critical {
-                // Critical system process (e.g. powershell.exe) attempting egress of CrownJewel data:
-                // Recommend network isolation / destination blocking, but annotate that the shell itself
-                // must NOT be frozen/bricked, preserving OS stability.
+            if is_immutable_kernel {
+                // Immutable OS kernel anchor (e.g., PID <= 4, csrss.exe, systemd):
+                // Recommend network isolation / destination blocking while preserving kernel PID.
                 info!(
-                    "🚨 [LINEAGE-CRITICAL-PID] Critical system process '{}' (PID {}) attempted CrownJewel egress to '{}'",
+                    "🚨 [LINEAGE-CRITICAL-PID] Immutable OS kernel anchor '{}' (PID {}) attempted CrownJewel egress to '{}'",
                     actor_exe, actor_pid, lineage.destination
                 );
                 return Some(VoteResult {
@@ -289,7 +371,7 @@ impl ThreatVoter for DataLineageVoter {
                     confidence: 0.96,
                     evidence_class: EvidenceClass::LiveNetwork,
                     explanation: format!(
-                        "DLP Egress Violation in Critical System Process '{}' (PID {}): trace_id={} destination={} source_hashes=[{}] datasets={} hops={:?}. Preserving PID from freeze termination; network isolation recommended.",
+                        "DLP Egress Violation in Immutable Kernel Anchor '{}' (PID {}): trace_id={} destination={} source_hashes=[{}] datasets={} hops={:?}. Preserving PID from freeze termination; network isolation recommended.",
                         actor_exe, actor_pid, trace_id, lineage.destination, source_hashes, lineage.input_datasets.len(), lineage.provenance_hops
                     ),
                     voter_name: self.name().to_string(),
@@ -297,7 +379,7 @@ impl ThreatVoter for DataLineageVoter {
                     timestamp: chrono::Utc::now().to_rfc3339(),
                 });
             } else {
-                // Non-critical process (e.g. curl.exe, 7z.exe) exfiltrating sensitive data:
+                // Shell, interpreter, agent child, or non-kernel process exfiltrating sensitive data:
                 info!(
                     "🚨 [LINEAGE-EXFILTRATION] Exfiltration detected in '{}' (PID {}) to '{}': trace_id={}",
                     actor_exe, actor_pid, lineage.destination, trace_id
@@ -337,25 +419,24 @@ impl ThreatVoter for DataLineageVoter {
             }
         }
 
-        // Case 3: Legitimate Admin Process without Taint or Block
-        if is_critical && lineage.egress_verdict == EgressVerdict::Allow {
-            let has_quarantine_taint = lineage
-                .baggage
-                .as_ref()
-                .map(|b| b.is_quarantine())
-                .unwrap_or(false);
-            if !has_quarantine_taint {
-                debug!(
-                    "🛡️ [LINEAGE-BENIGN-VETO] Critical system process '{}' (PID {}) attested clean with zero quarantined taint",
-                    actor_exe, actor_pid
-                );
-                return Some(VoteResult::new_veto(
-                    Some(actor_pid),
-                    format!("Critical system process '{}' (PID {}) attested clean by DataLineageVoter (no quarantine taint)", actor_exe, actor_pid),
-                    self.name(),
-                    EvidenceClass::Behavior,
-                ));
-            }
+        // Case 3: Legitimate Admin Process without Taint, Block, Agent Lineage, or LOTL Indicators
+        if (is_critical_shell_or_system
+            || (is_clean_admin_shell
+                && lineage.baggage.is_none()
+                && lineage.input_datasets.is_empty()))
+            && lineage.egress_verdict == EgressVerdict::Allow
+            && !active_threat_or_agent
+        {
+            debug!(
+                "🛡️ [LINEAGE-BENIGN-VETO] Critical system process '{}' (PID {}) attested clean with zero quarantined taint",
+                actor_exe, actor_pid
+            );
+            return Some(VoteResult::new_veto(
+                Some(actor_pid),
+                format!("Critical system process '{}' (PID {}) attested clean by DataLineageVoter (no quarantine taint)", actor_exe, actor_pid),
+                self.name(),
+                EvidenceClass::Behavior,
+            ));
         }
 
         // Candidate fallback check: if candidate matches actor
@@ -415,26 +496,45 @@ impl ThreatVoter for ReaVoter {
     async fn vote(
         &self,
         candidate: &ThreatCandidate,
-        _context: Option<&AdjudicationContext>,
+        context: Option<&AdjudicationContext>,
     ) -> Option<VoteResult> {
         let target = candidate
             .binary_path
             .as_deref()
             .unwrap_or(&candidate.proc_name);
+        let combined_reason = combine_candidate_telemetry(candidate);
         let rea_vote = self.engine.cast_consensus_vote(
             target,
             &candidate.source_detector,
-            &candidate.detection_reason,
+            &combined_reason,
             candidate.initial_confidence as f64,
         );
 
-        if rea_vote.benign_veto {
+        let block_benign_veto = has_active_agent_ancestry(context)
+            || has_active_dlp_or_event(context)
+            || crate::rea::has_active_lotl_or_exploit_indicators(&combined_reason);
+
+        if rea_vote.benign_veto && !block_benign_veto {
             Some(VoteResult::new_veto(
                 candidate.pid,
                 rea_vote.reason,
                 self.name(),
                 self.evidence_class(),
             ))
+        } else if rea_vote.benign_veto && block_benign_veto {
+            Some(VoteResult {
+                candidate_pid: candidate.pid,
+                action: VoteAction::Alert,
+                confidence: candidate.initial_confidence.max(0.80),
+                evidence_class: self.evidence_class(),
+                explanation: format!(
+                    "[REA-Voter] Benign veto overridden due to active threat/agent/DLP context: {}",
+                    combined_reason
+                ),
+                voter_name: self.name().to_string(),
+                weight: 1.0,
+                timestamp: rea_vote.timestamp,
+            })
         } else if rea_vote.decision == "ESCALATE_MALICIOUS" {
             Some(VoteResult {
                 candidate_pid: candidate.pid,
@@ -494,28 +594,45 @@ impl ThreatVoter for LiveNetworkVoter {
         candidate: &ThreatCandidate,
         _context: Option<&AdjudicationContext>,
     ) -> Option<VoteResult> {
-        if candidate.evidence_class == EvidenceClass::LiveNetwork
-            || candidate
-                .detection_reason
-                .to_ascii_lowercase()
-                .contains("c2")
-            || candidate
-                .detection_reason
-                .to_ascii_lowercase()
-                .contains("beacon")
-            || candidate
-                .detection_reason
-                .to_ascii_lowercase()
-                .contains("network")
-        {
+        let combined_low = combine_candidate_telemetry(candidate).to_ascii_lowercase();
+        const NET_MARKERS: &[&str] = &[
+            "c2",
+            "beacon",
+            "network",
+            "downloadstring",
+            "invoke-webrequest",
+            "invoke-restmethod",
+            "net.webclient",
+            "http://",
+            "https://",
+            "reverse_tcp",
+            "reverse shell",
+            "/dev/tcp/",
+            "/dev/udp/",
+            "nc -e",
+            "ncat -e",
+            "curl ",
+            "wget ",
+            "certutil -urlcache",
+            "bitsadmin /transfer",
+        ];
+        let has_net_marker = NET_MARKERS.iter().any(|m| combined_low.contains(m));
+        if candidate.evidence_class == EvidenceClass::LiveNetwork || has_net_marker {
+            let conf = if has_net_marker
+                && crate::rea::has_active_lotl_or_exploit_indicators(&combined_low)
+            {
+                candidate.initial_confidence.max(0.92)
+            } else {
+                candidate.initial_confidence
+            };
             Some(VoteResult {
                 candidate_pid: candidate.pid,
-                action: if candidate.initial_confidence >= 0.80 {
+                action: if conf >= 0.80 {
                     VoteAction::Isolate
                 } else {
                     VoteAction::Alert
                 },
-                confidence: candidate.initial_confidence,
+                confidence: conf,
                 evidence_class: EvidenceClass::LiveNetwork,
                 explanation: format!("[LiveNetwork] {}", candidate.detection_reason),
                 voter_name: self.name().to_string(),
@@ -636,13 +753,26 @@ impl ThreatVoter for MemoryVoter {
         candidate: &ThreatCandidate,
         _context: Option<&AdjudicationContext>,
     ) -> Option<VoteResult> {
-        let reason_low = candidate.detection_reason.to_ascii_lowercase();
+        let combined_low = combine_candidate_telemetry(candidate).to_ascii_lowercase();
+        const MEM_MARKERS: &[&str] = &[
+            "lsass",
+            "minidump",
+            "injection",
+            "virtualallocex",
+            "writeprocessmemory",
+            "createremotethread",
+            "ntmapviewofsection",
+            "queueuserapc",
+            "comsvcs",
+            "sekurlsa",
+            "mimikatz",
+            "frombase64string",
+            "-encodedcommand",
+            "-enc ",
+            "[token escalation detected]",
+        ];
         if candidate.evidence_class == EvidenceClass::Memory
-            || reason_low.contains("lsass")
-            || reason_low.contains("minidump")
-            || reason_low.contains("injection")
-            || reason_low.contains("virtualallocex")
-            || reason_low.contains("writeprocessmemory")
+            || MEM_MARKERS.iter().any(|m| combined_low.contains(m))
         {
             Some(VoteResult {
                 candidate_pid: candidate.pid,
@@ -650,7 +780,7 @@ impl ThreatVoter for MemoryVoter {
                 confidence: candidate.initial_confidence.max(0.92),
                 evidence_class: EvidenceClass::Memory,
                 explanation: format!(
-                    "[Memory] Code injection or memory anomaly: {}",
+                    "[Memory] Code injection, credential access, or in-memory execution anomaly: {}",
                     candidate.detection_reason
                 ),
                 voter_name: self.name().to_string(),

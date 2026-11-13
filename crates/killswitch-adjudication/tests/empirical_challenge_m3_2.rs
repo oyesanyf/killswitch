@@ -317,7 +317,8 @@ async fn test_empirical_admin_shell_veto_vs_lotl_exfiltration() {
         EvidenceClass::LiveNetwork,
     );
 
-    // DataLineageVoter recommends network containment while preserving the critical shell PID from process freeze
+    // DataLineageVoter must treat compromised powershell.exe attempting CrownJewel egress
+    // as an actionable exfiltration target (NOT preserve it under critical shell immunity).
     let comp_vote = voter
         .vote(&compromised_candidate, Some(&compromised_context))
         .await;
@@ -328,23 +329,19 @@ async fn test_empirical_admin_shell_veto_vs_lotl_exfiltration() {
     assert!(
         v_comp
             .explanation
-            .contains("Preserving PID from freeze termination; network isolation recommended"),
-        "Vote must explicitly preserve shell PID from process freeze"
+            .contains("Verified Multi-Hop DLP Exfiltration"),
+        "Compromised shell exfiltrating CrownJewel must not receive freeze preservation immunity"
     );
 
-    // Full adjudicator evaluation: Layer 1 process immunity ensures critical shell PID is NEVER frozen or killed
+    // Full adjudicator evaluation: active CrownJewel / EgressVerdict::Block bypasses
+    // Layer 1 shell immunity so compromised powershell.exe is NOT vetoed.
     let comp_adjudication = adjudicator
         .adjudicate_threat_candidate(&compromised_candidate, Some(&compromised_context))
         .await;
     assert!(
-        comp_adjudication.is_vetoed(),
-        "Adjudicator must preserve powershell.exe from process kill/freeze containment"
+        !comp_adjudication.is_vetoed(),
+        "Adjudicator must NOT veto compromised powershell.exe performing CrownJewel egress"
     );
-    if let AdjudicationResult::Vetoed { reason, .. } = comp_adjudication {
-        assert_eq!(reason, VetoReason::CriticalSystemPid);
-    } else {
-        panic!("Expected Vetoed result");
-    }
 }
 
 // ============================================================================
