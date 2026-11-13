@@ -18,10 +18,9 @@
 //!     (`/Library/LaunchDaemons/com.oshoosi.{name}.plist` or configurable root directory for testing).
 //!   - POSIX `SIGTERM` / `SIGINT` lifecycle handling.
 //!   - Zero `launchctl` subprocess invocations.
-//! - Unconditional Automatic Host Disarm:
-//!   - Upon receiving `SERVICE_CONTROL_STOP`, `SERVICE_CONTROL_SHUTDOWN`, `SIGTERM`, or `SIGINT`,
-//!     the daemon unconditionally executes `execute_host_disarm_unauthenticated()`, guaranteeing
-//!     that the host endpoint is never left isolated upon service termination or reboot.
+//! - Fail-Closed Shutdown Preservation:
+//!   - Service stop/shutdown signals preserve active ledger and kernel containment invariants until
+//!     authenticated operator recovery via `KillChainHostManager::disarm_isolation`.
 
 use killswitch_types::service::{ServiceConfig, ServiceError, ServiceState, ServiceStatus};
 use std::fs;
@@ -30,8 +29,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::info;
-
-pub use crate::killchain::execute_host_disarm_unauthenticated;
 
 // -----------------------------------------------------------------------------
 // Daemon Lifecycle & Signal Management
@@ -115,8 +112,8 @@ pub trait NativeServiceManager: Send + Sync {
         self.start_service(service_name)
     }
 
-    /// Runs the daemon execution loop. Blocks until shutdown signal is received.
-    /// Unconditionally executes `execute_host_disarm_unauthenticated()` before returning.
+    /// Runs the daemon execution loop. Blocks until shutdown signal is received
+    /// while preserving sealed containment state (fail-closed persistence).
     fn run_service_daemon(&self) -> Result<(), ServiceError>;
 
     /// Requests that the service daemon loop gracefully terminate.
@@ -370,9 +367,7 @@ impl NativeServiceManager for LinuxServiceManager {
             || is_daemon_stop_requested()
             || std::env::var("KILLSWITCH_SERVICE_TEST_ONCE").is_ok()
         {
-            info!("ℹ️ [LINUX-DAEMON] Test stop requested — performing single-cycle verification");
-            info!("🚨 [LINUX-DAEMON] Service stopping: executing unconditional host disarm");
-            let _ = execute_host_disarm_unauthenticated();
+            info!("ℹ️ [LINUX-DAEMON] Test stop requested — single-cycle exit with containment held fail-closed");
             notify_systemd("STOPPING=1");
             return Ok(());
         }
@@ -411,9 +406,8 @@ impl NativeServiceManager for LinuxServiceManager {
             std::thread::sleep(Duration::from_millis(50));
         }
 
-        // 5. Unconditional host disarm on service shutdown
-        info!("🚨 [LINUX-DAEMON] Service stopping: executing unconditional host disarm");
-        let _ = execute_host_disarm_unauthenticated();
+        // 5. Fail-closed shutdown: NEVER disarm active kernel/ledger containment on signal/stop
+        info!("🛡️ [LINUX-DAEMON] Service stopping cleanly; active containment remains fail-closed until authenticated disarm");
 
         // 6. Notify systemd stopping
         notify_systemd("STOPPING=1");
@@ -708,9 +702,7 @@ impl NativeServiceManager for MacOsServiceManager {
             || is_daemon_stop_requested()
             || std::env::var("KILLSWITCH_SERVICE_TEST_ONCE").is_ok()
         {
-            info!("ℹ️ [MACOS-DAEMON] Test stop requested — performing single-cycle verification");
-            info!("🚨 [MACOS-DAEMON] Service stopping: executing unconditional host disarm");
-            let _ = execute_host_disarm_unauthenticated();
+            info!("ℹ️ [MACOS-DAEMON] Test stop requested — single-cycle exit with containment held fail-closed");
             return Ok(());
         }
 
@@ -748,10 +740,8 @@ impl NativeServiceManager for MacOsServiceManager {
             std::thread::sleep(Duration::from_millis(50));
         }
 
-        // 4. Unconditional host disarm on service shutdown
-        info!("🚨 [MACOS-DAEMON] Service stopping: executing unconditional host disarm");
-        let _ = execute_host_disarm_unauthenticated();
-        info!("🟢 [MACOS-DAEMON] Clean macOS daemon shutdown complete");
+        // 4. Fail-closed shutdown: preserve active kernel/ledger containment
+        info!("🛡️ [MACOS-DAEMON] Clean macOS daemon shutdown complete (active containment remains fail-closed)");
         Ok(())
     }
 
@@ -826,12 +816,9 @@ unsafe extern "system" fn win32_service_main(_argc: u32, _argv: *mut windows_sys
     status.dwCheckPoint = 1;
     status.dwWaitHint = 15000;
     SetServiceStatus(status_handle, &status);
-    info!("🚨 [WIN32-SCM] Stopping: executing unconditional host disarm");
+    info!("🛡️ [WIN32-SCM] Stopping cleanly (active ledger/kernel isolation remains fail-closed)");
 
-    // 5. Unconditional host disarm
-    let _ = execute_host_disarm_unauthenticated();
-
-    // 6. Report SERVICE_STOPPED
+    // 5. Report SERVICE_STOPPED
     status.dwCurrentState = SERVICE_STOPPED;
     status.dwControlsAccepted = 0;
     status.dwCheckPoint = 0;
@@ -872,11 +859,8 @@ unsafe extern "system" fn win32_service_ctrl_handler(
                 SetServiceStatus(handle, &stop_pending);
             }
 
-            // Signal main loop
+            // Signal main loop (fail-closed: never disarm on SERVICE_CONTROL_STOP)
             WIN32_SCM_STOP_FLAG.store(true, Ordering::SeqCst);
-
-            // Unconditional disarm in handler for defense-in-depth
-            let _ = execute_host_disarm_unauthenticated();
 
             NO_ERROR
         }
@@ -956,10 +940,8 @@ impl WindowsServiceManager {
         }
 
         info!(
-            "🚨 [WINDOWS-DAEMON] Standalone daemon stopping: executing unconditional host disarm"
+            "🛡️ [WINDOWS-DAEMON] Standalone daemon stopping cleanly (active containment remains fail-closed)"
         );
-        let _ = execute_host_disarm_unauthenticated();
-        info!("🟢 [WINDOWS-DAEMON] Clean standalone daemon shutdown complete");
         Ok(())
     }
 }
@@ -967,6 +949,57 @@ impl WindowsServiceManager {
 #[cfg(target_os = "windows")]
 fn to_wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn harden_win32_service_dacl(
+    service: windows_sys::Win32::System::Services::SC_HANDLE,
+) -> Result<(), String> {
+    use std::ffi::c_void;
+    type FnConvertSddl =
+        unsafe extern "system" fn(*const u16, u32, *mut *mut c_void, *mut u32) -> i32;
+    type FnSetServiceSec = unsafe extern "system" fn(
+        windows_sys::Win32::System::Services::SC_HANDLE,
+        u32,
+        *mut c_void,
+    ) -> i32;
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn LoadLibraryA(lp_lib_file_name: *const u8) -> *mut c_void;
+        fn GetProcAddress(h_module: *mut c_void, lp_proc_name: *const u8) -> *mut c_void;
+        fn LocalFree(h_mem: *mut c_void) -> *mut c_void;
+    }
+    const SDDL_REVISION_1: u32 = 1;
+    const DACL_SECURITY_INFORMATION: u32 = 0x0000_0004;
+    let sddl = to_wide("D:(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)");
+    let advapi = LoadLibraryA(c"advapi32.dll".as_ptr().cast());
+    if advapi.is_null() {
+        return Err("Failed to load advapi32.dll for service DACL hardening".to_string());
+    }
+    let convert_ptr = GetProcAddress(
+        advapi,
+        c"ConvertStringSecurityDescriptorToSecurityDescriptorW"
+            .as_ptr()
+            .cast(),
+    );
+    let set_sec_ptr = GetProcAddress(advapi, c"SetServiceObjectSecurity".as_ptr().cast());
+    if convert_ptr.is_null() || set_sec_ptr.is_null() {
+        return Err("Failed to resolve Win32 service security symbols".to_string());
+    }
+    let convert_sddl: FnConvertSddl = std::mem::transmute(convert_ptr);
+    let set_service_sec: FnSetServiceSec = std::mem::transmute(set_sec_ptr);
+    let mut sd: *mut c_void = std::ptr::null_mut();
+    let ok_sddl = convert_sddl(sddl.as_ptr(), SDDL_REVISION_1, &mut sd, std::ptr::null_mut());
+    if ok_sddl == 0 || sd.is_null() {
+        return Err("ConvertStringSecurityDescriptorToSecurityDescriptorW failed".to_string());
+    }
+    let ok_set = set_service_sec(service, DACL_SECURITY_INFORMATION, sd);
+    let _ = LocalFree(sd);
+    if ok_set == 0 {
+        let err = windows_sys::Win32::Foundation::GetLastError();
+        return Err(format!("SetServiceObjectSecurity failed: Win32 0x{:08X}", err));
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]
@@ -1042,12 +1075,22 @@ impl NativeServiceManager for WindowsServiceManager {
                 &mut desc_struct as *mut _ as *mut _,
             );
 
+            // Harden Service DACL: restrict SERVICE_STOP / DELETE / CHANGE_CONFIG to SYSTEM & Administrators
+            if let Err(e) = harden_win32_service_dacl(service) {
+                CloseServiceHandle(service);
+                CloseServiceHandle(scm);
+                return Err(ServiceError::InstallFailed(
+                    config.name.clone(),
+                    format!("Win32 service DACL hardening failed (fail-closed): {}", e),
+                ));
+            }
+
             CloseServiceHandle(service);
             CloseServiceHandle(scm);
         }
 
         info!(
-            "🟢 [WINDOWS-SCM] Successfully registered Win32 service '{}'",
+            "🟢 [WINDOWS-SCM] Successfully registered Win32 service '{}' with hardened SYSTEM/Admin DACL",
             config.name
         );
         Ok(())
@@ -1306,8 +1349,7 @@ impl NativeServiceManager for WindowsServiceManager {
             || is_daemon_stop_requested()
             || std::env::var("KILLSWITCH_SERVICE_TEST_ONCE").is_ok()
         {
-            info!("ℹ️ [WINDOWS-DAEMON] Test stop requested — performing single-cycle verification");
-            let _ = execute_host_disarm_unauthenticated();
+            info!("ℹ️ [WINDOWS-DAEMON] Test stop requested — single-cycle exit with containment held fail-closed");
             return Ok(());
         }
 
@@ -1387,7 +1429,6 @@ impl NativeServiceManager for SimulatedServiceManager {
         Ok(ServiceStatus::stopped(service_name, service_name, None))
     }
     fn run_service_daemon(&self) -> Result<(), ServiceError> {
-        let _ = execute_host_disarm_unauthenticated();
         Ok(())
     }
 }
@@ -1550,12 +1591,32 @@ mod tests {
     }
 
     #[test]
-    fn test_unconditional_shutdown_disarm_hook_execution() {
-        let disarm_res = execute_host_disarm_unauthenticated();
-        assert!(disarm_res.is_ok());
-        let status = disarm_res.unwrap();
-        assert!(!status.isolated);
-        assert!(!status.network_isolated);
+    fn test_service_stop_preserves_fail_closed_ledger() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ledger = crate::state_ledger::StateLedger::open_or_init(Some(dir.path())).unwrap();
+        let mut isolated_status = killswitch_types::status::KillChainStatus {
+            isolated: true,
+            network_isolated: true,
+            ..Default::default()
+        };
+        isolated_status.update_hash();
+        ledger
+            .record_state_transition(
+                isolated_status,
+                None,
+                None,
+                "ENGAGED",
+                "test_operator",
+                "fail-closed stop test",
+            )
+            .unwrap();
+
+        let sim_mgr = SimulatedServiceManager::new();
+        assert!(sim_mgr.run_service_daemon().is_ok());
+
+        let reloaded = crate::state_ledger::StateLedger::open_or_init(Some(dir.path())).unwrap();
+        assert!(reloaded.status().isolated);
+        assert!(reloaded.status().network_isolated);
     }
 
     #[test]

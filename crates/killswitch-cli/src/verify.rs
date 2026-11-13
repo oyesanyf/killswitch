@@ -280,7 +280,12 @@ impl SubsystemVerifier {
 
     async fn verify_phase_1_core() -> Result<()> {
         let temp_dir = tempfile::tempdir()?;
-        let mgr = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path()))?);
+        let verify_token = killswitch_core::auth::generate_csprng_token_hex()
+            .map_err(|e| anyhow::anyhow!("CSPRNG token gen failed: {}", e))?;
+        let mgr = Arc::new(HostContainmentManager::new_default_with_master_token(
+            Some(temp_dir.path()),
+            verify_token.clone(),
+        )?);
 
         // 1. Check initial status
         let initial = mgr.get_status();
@@ -304,9 +309,16 @@ impl SubsystemVerifier {
                     bail!("Host containment failed to engage");
                 }
 
-                // 3. Disarm isolation
+                // 3. Disarm isolation with valid authenticated operator credentials
+                let creds = killswitch_types::status::OperatorCredentials {
+                    operator_id: "verifier".to_string(),
+                    auth_token: Some(verify_token),
+                    password: None,
+                    caller_pid: Some(std::process::id()),
+                    confirmation_phrase: None,
+                };
                 let restored = mgr
-                    .execute_unauthenticated_emergency_disarm("Phase 1 self-check restore")
+                    .disarm_isolation("verifier", "Phase 1 self-check restore", Some(&creds))
                     .await?;
                 if restored.isolated {
                     bail!("Host containment failed to disarm");
@@ -605,16 +617,22 @@ impl SubsystemVerifier {
             bail!("Expected peers_enabled == true by default");
         }
         // Verify GET /tpm/status & POST /tpm/seal (TPM 2.0 Hardware Security & PCR Attestation)
+        let tpm_state = Arc::new(ServerState::with_defaults(Arc::new(
+            HostContainmentManager::new_default(Some(temp_dir.path()))?,
+        )));
+        tpm_state
+            .active_bound_port
+            .store(0, std::sync::atomic::Ordering::SeqCst);
         let tpm_seal_req = Request::builder()
             .uri("/tpm/seal")
             .method("POST")
+            .header("x-killswitch-token", tpm_state.control_token.as_str())
+            .header("x-killswitch-caller-pid", std::process::id().to_string())
             .body(Body::empty())?;
-        let tpm_seal_resp = build_router(Arc::new(ServerState::with_defaults(Arc::new(
-            HostContainmentManager::new_default(Some(temp_dir.path()))?,
-        ))))
-        .oneshot(tpm_seal_req)
-        .await
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
+        let tpm_seal_resp = build_router(tpm_state)
+            .oneshot(tpm_seal_req)
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
         if tpm_seal_resp.status() != StatusCode::OK {
             bail!(
                 "POST /tpm/seal failed with status {}",

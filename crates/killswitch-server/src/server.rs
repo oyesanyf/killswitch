@@ -245,17 +245,45 @@ impl ServerState {
             ed25519_kid.clone(),
         ));
 
-        // 8. Control Plane Token (R4)
-        let control_token = if let Ok(tok) = std::env::var("KILLSWITCH_CONTROL_TOKEN") {
-            Arc::new(tok.trim().to_string())
-        } else if let Ok(tok) = std::env::var("KILLSWITCH_MASTER_TOKEN") {
-            Arc::new(tok.trim().to_string())
-        } else {
-            let mut bytes = [0u8; 32];
-            use rand::RngCore;
-            rand::rngs::OsRng.fill_bytes(&mut bytes);
-            Arc::new(hex::encode(bytes))
-        };
+        // 8. Control Plane Token (R4 — CSPRNG / DPAPI-ACL host secret only, never static phrases)
+        let control_token = std::env::var("KILLSWITCH_CONTROL_TOKEN")
+            .or_else(|_| std::env::var("KILLSWITCH_MASTER_TOKEN"))
+            .ok()
+            .and_then(|tok| {
+                let trimmed = tok.trim().to_string();
+                if trimmed.len() >= 32
+                    && !killswitch_core::auth::is_forbidden_static_token(&trimmed)
+                {
+                    Some(trimmed)
+                } else {
+                    tracing::warn!(
+                        "Ignoring weak or forbidden static control token override; provisioning CSPRNG secret"
+                    );
+                    None
+                }
+            })
+            .unwrap_or_else(|| {
+                if std::env::var_os("CARGO").is_some()
+                    || std::env::var_os("RUST_TEST_THREADS").is_some()
+                {
+                    killswitch_core::auth::generate_csprng_token_hex().unwrap_or_else(|_| {
+                        let mut bytes = [0u8; 32];
+                        use rand::RngCore;
+                        rand::rngs::OsRng.fill_bytes(&mut bytes);
+                        format!("ks-op-{}", hex::encode(bytes))
+                    })
+                } else {
+                    killswitch_core::auth::load_or_provision_host_control_secret().unwrap_or_else(
+                        |_| {
+                            let mut bytes = [0u8; 32];
+                            use rand::RngCore;
+                            rand::rngs::OsRng.fill_bytes(&mut bytes);
+                            format!("ks-op-{}", hex::encode(bytes))
+                        },
+                    )
+                }
+            });
+        let control_token = Arc::new(control_token);
 
         Self {
             containment_manager,
@@ -308,9 +336,8 @@ impl ServerState {
             return true;
         }
 
-        if crate::auth::constant_time_token_match(trimmed, crate::auth::TEST_MASTER_TOKEN) {
-            return true;
-        }
+        // No hardcoded fallback master token permitted. Only accept validated cryptographic tokens
+        // from ServerState (CSPRNG runtime secret or operator env/stored token).
 
         if let Ok(env_tok) = std::env::var("KILLSWITCH_CONTROL_TOKEN") {
             if crate::auth::constant_time_token_match(trimmed, env_tok.trim()) {

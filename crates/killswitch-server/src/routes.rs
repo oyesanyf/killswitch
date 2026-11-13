@@ -12,6 +12,15 @@ use crate::middleware;
 use crate::server::ServerState;
 
 pub fn build_router(state: Arc<ServerState>) -> Router {
+    let active_port = state
+        .active_bound_port
+        .load(std::sync::atomic::Ordering::SeqCst);
+    let effective_port = if active_port != 0 {
+        active_port
+    } else {
+        state.config.port
+    };
+
     Router::new()
         // 0. Interactive WebUI Dashboard
         .route("/", get(crate::webui::get_webui_dashboard))
@@ -473,8 +482,12 @@ pub fn build_router(state: Arc<ServerState>) -> Router {
             post(handlers::post_agentsonar_sample),
         )
         // Middleware Layers (applied bottom-up)
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            middleware::control_plane_post_auth_middleware,
+        ))
         .layer(axum::middleware::from_fn(middleware::rate_limit_middleware))
-        .layer(middleware::cors_layer())
+        .layer(middleware::cors_layer_for_port(effective_port))
         .layer(middleware::body_limit_layer(state.config.max_body_bytes))
         .layer(middleware::trace_layer())
         .with_state(state)

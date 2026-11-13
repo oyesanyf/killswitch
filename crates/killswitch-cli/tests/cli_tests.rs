@@ -52,18 +52,39 @@ async fn test_unified_runtime_boot_and_shutdown() {
 }
 
 #[tokio::test]
-async fn test_client_emergency_disarm_fallback_when_server_offline() {
+async fn test_client_offline_disarm_fails_closed_without_credentials() {
     // Point client to a port where no server is running
     let client = KillSwitchClient::new("127.0.0.1", 59981);
-    let disarm_res = client
-        .disarm("test_operator", "Emergency unauthenticated disarm", None)
-        .await
-        .unwrap();
 
-    assert!(disarm_res.success);
-    assert!(disarm_res
-        .message
-        .contains("Direct in-process emergency restore"));
+    // Clear ambient env token for deterministic fail-closed verification
+    let prev_tok = std::env::var("KILLSWITCH_CONTROL_TOKEN").ok();
+    std::env::remove_var("KILLSWITCH_CONTROL_TOKEN");
+
+    assert!(
+        client
+            .disarm("test_operator", "Emergency unauthenticated disarm", None)
+            .await
+            .is_err(),
+        "Offline disarm without credentials must fail closed"
+    );
+    assert!(
+        client
+            .disarm("test_operator", "Static phrase bypass attempt", Some("CONFIRM RESTORE"))
+            .await
+            .is_err(),
+        "Offline disarm with legacy static phrase must fail closed"
+    );
+    assert!(
+        client
+            .disarm("test_operator", "Short token attempt", Some("short_tok"))
+            .await
+            .is_err(),
+        "Offline disarm with short token (<32 chars) must fail closed"
+    );
+
+    if let Some(val) = prev_tok {
+        std::env::set_var("KILLSWITCH_CONTROL_TOKEN", val);
+    }
 }
 
 fn scan_dir_recursive(dir: &Path, files: &mut Vec<PathBuf>) {

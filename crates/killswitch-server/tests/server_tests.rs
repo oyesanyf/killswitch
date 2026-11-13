@@ -2,6 +2,8 @@
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use std::net::SocketAddr;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tower::ServiceExt;
 
@@ -16,17 +18,40 @@ use killswitch_server::types::*;
 
 const TEST_MASTER_TOKEN: &str = "test_master_token_0123456789abcdef0123456789abcdef";
 
-fn setup_test_server_state() -> Arc<ServerState> {
-    std::env::set_var("KILLSWITCH_MASTER_TOKEN", TEST_MASTER_TOKEN);
+fn setup_test_server_state() -> (Arc<ServerState>, tempfile::TempDir) {
     let temp_dir = tempfile::tempdir().unwrap();
-    let containment =
-        Arc::new(HostContainmentManager::new_simulated(Some(temp_dir.path())).unwrap());
-    Arc::new(ServerState::with_defaults(containment))
+    let containment = Arc::new(
+        HostContainmentManager::new_simulated_with_master_token(
+            Some(temp_dir.path()),
+            TEST_MASTER_TOKEN.to_string(),
+        )
+        .unwrap(),
+    );
+    let mut state = ServerState::with_defaults(containment);
+    state.control_token = Arc::new(TEST_MASTER_TOKEN.to_string());
+    state.active_bound_port.store(0, Ordering::SeqCst);
+    (Arc::new(state), temp_dir)
+}
+
+async fn spawn_live_server(state: Arc<ServerState>) -> (u16, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    state.active_bound_port.store(port, Ordering::SeqCst);
+    let app = build_router(state);
+    let handle = tokio::spawn(async move {
+        let _ = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await;
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    (port, handle)
 }
 
 #[tokio::test]
 async fn test_server_status_and_history_endpoints() {
-    let state = setup_test_server_state();
+    let (state, _temp_dir) = setup_test_server_state();
     let app = build_router(state);
 
     // 1. GET /status
@@ -61,37 +86,50 @@ async fn test_server_status_and_history_endpoints() {
 
 #[tokio::test]
 async fn test_server_engage_and_disarm_lifecycle() {
-    let state = setup_test_server_state();
-    let app = build_router(state);
+    let (state, _temp_dir) = setup_test_server_state();
+    let (port, handle) = spawn_live_server(state).await;
+    let client = reqwest::Client::new();
+    let base = format!("http://127.0.0.1:{}", port);
 
-    // 1. POST /engage
-    let engage_body = serde_json::json!({
+    // 0. Phrase-only "CONFIRM ISOLATE" must fail closed with 401
+    let bad_engage_body = serde_json::json!({
         "operator": "test_admin",
         "reason": "Test isolation verification",
         "token": "CONFIRM ISOLATE",
         "level": "network_quarantine"
     });
-
-    let req = Request::builder()
-        .uri("/engage")
-        .method("POST")
-        .header("Content-Type", "application/json")
-        .body(Body::from(serde_json::to_vec(&engage_body).unwrap()))
+    let resp_bad = client
+        .post(format!("{}/engage", base))
+        .json(&bad_engage_body)
+        .send()
+        .await
         .unwrap();
+    assert_eq!(resp_bad.status(), reqwest::StatusCode::UNAUTHORIZED);
 
-    let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
+    // 1. POST /engage with cryptographic master token over live loopback TCP
+    let engage_body = serde_json::json!({
+        "operator": "test_admin",
+        "reason": "Test isolation verification",
+        "token": TEST_MASTER_TOKEN,
+        "level": "network_quarantine"
+    });
+    let resp = client
+        .post(format!("{}/engage", base))
+        .json(&engage_body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
 
     // Verify status is isolated
-    let req = Request::builder()
-        .uri("/status")
-        .method("GET")
-        .body(Body::empty())
+    let status_res: StatusResponse = client
+        .get(format!("{}/status", base))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
         .unwrap();
-
-    let resp = app.clone().oneshot(req).await.unwrap();
-    let body_bytes = body_to_bytes(resp.into_body()).await;
-    let status_res: StatusResponse = serde_json::from_slice(&body_bytes).unwrap();
     assert!(status_res.isolated);
 
     // 2. POST /disarm
@@ -100,34 +138,31 @@ async fn test_server_engage_and_disarm_lifecycle() {
         "reason": "Threat neutralized",
         "token": TEST_MASTER_TOKEN
     });
-
-    let req = Request::builder()
-        .uri("/disarm")
-        .method("POST")
-        .header("Content-Type", "application/json")
-        .body(Body::from(serde_json::to_vec(&disarm_body).unwrap()))
+    let resp = client
+        .post(format!("{}/disarm", base))
+        .json(&disarm_body)
+        .send()
+        .await
         .unwrap();
-
-    let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
 
     // Verify status is disarmed
-    let req = Request::builder()
-        .uri("/status")
-        .method("GET")
-        .body(Body::empty())
+    let status_res: StatusResponse = client
+        .get(format!("{}/status", base))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
         .unwrap();
-
-    let resp = app.oneshot(req).await.unwrap();
-    let body_bytes = body_to_bytes(resp.into_body()).await;
-    let status_res: StatusResponse = serde_json::from_slice(&body_bytes).unwrap();
     assert!(!status_res.isolated);
+    handle.abort();
 }
 
 #[tokio::test]
 async fn test_server_orchestrator_step_and_state() {
-    let state = setup_test_server_state();
-    let app = build_router(state);
+    let (state, _temp_dir) = setup_test_server_state();
+    let app = build_router(state.clone());
 
     // 1. GET /graph/state
     let req = Request::builder()
@@ -153,6 +188,7 @@ async fn test_server_orchestrator_step_and_state() {
         .uri("/graph/step")
         .method("POST")
         .header("Content-Type", "application/json")
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
         .body(Body::from(serde_json::to_vec(&step_body).unwrap()))
         .unwrap();
 
@@ -163,32 +199,31 @@ async fn test_server_orchestrator_step_and_state() {
     let step_res: GraphStepResponse = serde_json::from_slice(&body_bytes).unwrap();
     assert_eq!(step_res.executed_node, "IngestingSignals");
 
-    // 3. POST /mode
+    // 3. POST /mode over live loopback TCP (critical endpoint requires OS peer PID)
+    let (port, handle) = spawn_live_server(state).await;
+    let client = reqwest::Client::new();
     let mode_body = serde_json::json!({
         "mode": "manual",
         "operator": "test_lead",
         "token": TEST_MASTER_TOKEN
     });
-
-    let req = Request::builder()
-        .uri("/mode")
-        .method("POST")
-        .header("Content-Type", "application/json")
+    let resp = client
+        .post(format!("http://127.0.0.1:{}/mode", port))
         .header("Authorization", format!("Bearer {}", TEST_MASTER_TOKEN))
-        .body(Body::from(serde_json::to_vec(&mode_body).unwrap()))
+        .json(&mode_body)
+        .send()
+        .await
         .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
 
-    let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-
-    let body_bytes = body_to_bytes(resp.into_body()).await;
-    let mode_res: ModeResponse = serde_json::from_slice(&body_bytes).unwrap();
+    let mode_res: ModeResponse = resp.json().await.unwrap();
     assert_eq!(mode_res.current_mode, "manual");
+    handle.abort();
 }
 
 #[tokio::test]
 async fn test_server_dlp_lineage_seed_and_evaluate() {
-    let state = setup_test_server_state();
+    let (state, _temp_dir) = setup_test_server_state();
     let app = build_router(state.clone());
 
     // 1. POST /lineage/seed
@@ -204,6 +239,7 @@ async fn test_server_dlp_lineage_seed_and_evaluate() {
         .uri("/lineage/seed")
         .method("POST")
         .header("Content-Type", "application/json")
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
         .body(Body::from(serde_json::to_vec(&seed_body).unwrap()))
         .unwrap();
 
@@ -230,6 +266,7 @@ async fn test_server_dlp_lineage_seed_and_evaluate() {
         .uri("/lineage/evaluate")
         .method("POST")
         .header("Content-Type", "application/json")
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
         .body(Body::from(serde_json::to_vec(&eval_body).unwrap()))
         .unwrap();
 
@@ -328,7 +365,7 @@ fn test_zero_os_subprocess_spawning_in_server() {
 
 #[tokio::test]
 async fn test_research_ingest_live_regression_probes() {
-    let state = setup_test_server_state();
+    let (state, _temp_dir) = setup_test_server_state();
     let app = build_router(state);
 
     let ingest_body = serde_json::json!({
@@ -358,6 +395,7 @@ async fn test_research_ingest_live_regression_probes() {
         .uri("/api/research/ingest")
         .method("POST")
         .header("Content-Type", "application/json")
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
         .body(Body::from(serde_json::to_vec(&ingest_body).unwrap()))
         .unwrap();
 
@@ -386,7 +424,7 @@ async fn test_research_ingest_live_regression_probes() {
 
 #[tokio::test]
 async fn test_research_menu_user_approval_gate_and_code_enforcement() {
-    let state = setup_test_server_state();
+    let (state, _temp_dir) = setup_test_server_state();
     let app = build_router(state);
 
     // 1. Verify WebUI renders the Research Menu with User Approval controls
@@ -415,6 +453,7 @@ async fn test_research_menu_user_approval_gate_and_code_enforcement() {
         .uri("/api/research/discover")
         .method("POST")
         .header("Content-Type", "application/json")
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
         .body(Body::from(serde_json::to_vec(&discover_body).unwrap()))
         .unwrap();
     let disc_resp = app.clone().oneshot(disc_req).await.unwrap();
@@ -438,6 +477,7 @@ async fn test_research_menu_user_approval_gate_and_code_enforcement() {
         .uri("/api/research/approve")
         .method("POST")
         .header("Content-Type", "application/json")
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
         .body(Body::from(serde_json::to_vec(&approve_body).unwrap()))
         .unwrap();
     let app_resp = app.oneshot(app_req).await.unwrap();
@@ -469,7 +509,7 @@ async fn test_research_menu_user_approval_gate_and_code_enforcement() {
 
 #[tokio::test]
 async fn test_edr_behavioral_lineage_ioa_and_baseline_narrative_endpoints() {
-    let state = setup_test_server_state();
+    let (state, _temp_dir) = setup_test_server_state();
     let app = build_router(state);
 
     // 1. Trigger LotL Word -> cmd -> encoded PowerShell -> external IP chain
@@ -477,6 +517,7 @@ async fn test_edr_behavioral_lineage_ioa_and_baseline_narrative_endpoints() {
         .method("POST")
         .uri("/api/edr/behavioral/ingest")
         .header("content-type", "application/json")
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
         .body(Body::from(
             serde_json::json!({
                 "scenario": "lotl_word_powershell"
@@ -501,6 +542,7 @@ async fn test_edr_behavioral_lineage_ioa_and_baseline_narrative_endpoints() {
         .method("POST")
         .uri("/api/edr/behavioral/ingest")
         .header("content-type", "application/json")
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
         .body(Body::from(
             serde_json::json!({
                 "scenario": "baseline_correlation"
@@ -521,7 +563,7 @@ async fn test_edr_behavioral_lineage_ioa_and_baseline_narrative_endpoints() {
 
 #[tokio::test]
 async fn test_oshoosiclaw_research_accuracy_suite_and_4_gate_endpoints() {
-    let state = setup_test_server_state();
+    let (state, _temp_dir) = setup_test_server_state();
     let app = build_router(state);
 
     // 1. POST /api/research/verify-accuracy
@@ -529,6 +571,7 @@ async fn test_oshoosiclaw_research_accuracy_suite_and_4_gate_endpoints() {
         .method("POST")
         .uri("/api/research/verify-accuracy")
         .header("content-type", "application/json")
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
         .body(Body::from("{}"))
         .unwrap();
     let resp_acc = app.clone().oneshot(req_acc).await.unwrap();
@@ -552,6 +595,7 @@ async fn test_oshoosiclaw_research_accuracy_suite_and_4_gate_endpoints() {
         .method("POST")
         .uri("/api/research/novelty-check")
         .header("content-type", "application/json")
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
         .body(Body::from(
             serde_json::json!({
                 "arxiv_ids": ["arXiv:2402.12345v1", "2610.09167", "2611.99999v1"]
@@ -573,6 +617,7 @@ async fn test_oshoosiclaw_research_accuracy_suite_and_4_gate_endpoints() {
         .method("POST")
         .uri("/api/research/validate")
         .header("content-type", "application/json")
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
         .body(Body::from(
             serde_json::json!({
                 "rule": {
@@ -606,7 +651,7 @@ async fn test_oshoosiclaw_research_accuracy_suite_and_4_gate_endpoints() {
 
 #[tokio::test]
 async fn test_oshoosiclaw_oso_aws_apc_tamper_and_hitl_endpoints() {
-    let state = setup_test_server_state();
+    let (state, _temp_dir) = setup_test_server_state();
     let app = build_router(state);
 
     // 1. GET /api/oso-aws-containment/status
@@ -623,6 +668,7 @@ async fn test_oshoosiclaw_oso_aws_apc_tamper_and_hitl_endpoints() {
         .method("POST")
         .uri("/api/oso-aws-containment/watchdog-verify")
         .header("content-type", "application/json")
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
         .body(Body::from(
             serde_json::json!({
                 "simulate_policy_swap": true
@@ -644,6 +690,7 @@ async fn test_oshoosiclaw_oso_aws_apc_tamper_and_hitl_endpoints() {
         .method("POST")
         .uri("/api/apc/evaluate")
         .header("content-type", "application/json")
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
         .body(Body::from(
             serde_json::json!({
                 "principal_id": "principal-alice",
@@ -669,6 +716,7 @@ async fn test_oshoosiclaw_oso_aws_apc_tamper_and_hitl_endpoints() {
         .method("POST")
         .uri("/api/apc/evaluate")
         .header("content-type", "application/json")
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
         .body(Body::from(
             serde_json::json!({
                 "principal_id": "principal-alice",
@@ -715,6 +763,7 @@ async fn test_oshoosiclaw_oso_aws_apc_tamper_and_hitl_endpoints() {
         .method("POST")
         .uri("/api/hitl/evaluate")
         .header("content-type", "application/json")
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
         .body(Body::from(
             serde_json::json!({
                 "session_id": "sess-hitl-1",
@@ -745,7 +794,7 @@ async fn test_oshoosiclaw_oso_aws_apc_tamper_and_hitl_endpoints() {
 async fn test_cage_pep_endpoints_e2e() {
     use killswitch_telemetry::cage_governance::*;
 
-    let state = setup_test_server_state();
+    let (state, _temp_dir) = setup_test_server_state();
     let app = build_router(state);
 
     // 1. GET /api/cage/status and GET /cage/status
@@ -788,6 +837,7 @@ async fn test_cage_pep_endpoints_e2e() {
         .method("POST")
         .uri("/api/cage/evaluate")
         .header("Content-Type", "application/json")
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
         .body(Body::from(serde_json::to_vec(&clean_eval_req).unwrap()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
@@ -807,6 +857,7 @@ async fn test_cage_pep_endpoints_e2e() {
         .method("POST")
         .uri("/api/cage/evaluate")
         .header("Content-Type", "application/json")
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
         .body(Body::from(serde_json::to_vec(&over_cap_req).unwrap()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
@@ -837,6 +888,7 @@ async fn test_cage_pep_endpoints_e2e() {
         .method("POST")
         .uri("/api/cage/evaluate")
         .header("Content-Type", "application/json")
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
         .body(Body::from(serde_json::to_vec(&ftra_req).unwrap()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
@@ -864,6 +916,7 @@ async fn test_cage_pep_endpoints_e2e() {
         .method("POST")
         .uri("/api/cage/compile-substrate")
         .header("Content-Type", "application/json")
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
         .body(Body::from(serde_json::to_vec(&ms_spec).unwrap()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
@@ -879,6 +932,7 @@ async fn test_cage_pep_endpoints_e2e() {
         .method("POST")
         .uri("/api/cage/compile-substrate")
         .header("Content-Type", "application/json")
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
         .body(Body::from(serde_json::to_vec(&invalid_spec).unwrap()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
@@ -921,6 +975,7 @@ async fn test_cage_pep_endpoints_e2e() {
         .method("POST")
         .uri("/api/cage/verify-trace")
         .header("Content-Type", "application/json")
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
         .body(Body::from(serde_json::to_vec(&valid_trace).unwrap()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
@@ -967,6 +1022,7 @@ async fn test_cage_pep_endpoints_e2e() {
         .method("POST")
         .uri("/api/cage/verify-trace")
         .header("Content-Type", "application/json")
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
         .body(Body::from(serde_json::to_vec(&illegal_trace).unwrap()))
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
@@ -979,8 +1035,8 @@ async fn test_cage_pep_endpoints_e2e() {
 
 #[tokio::test]
 async fn test_manual_trigger_attribution_webui_reconnect_and_standalone_ui() {
-    let state = setup_test_server_state();
-    let app = build_router(state);
+    let (state, _temp_dir) = setup_test_server_state();
+    let app = build_router(state.clone());
 
     // 1. Verify standalone WebUI removes mesh/peer clutter and uses compact professional buttons
     let ui_req = Request::builder()
@@ -988,7 +1044,7 @@ async fn test_manual_trigger_attribution_webui_reconnect_and_standalone_ui() {
         .method("GET")
         .body(Body::empty())
         .unwrap();
-    let ui_resp = app.clone().oneshot(ui_req).await.unwrap();
+    let ui_resp = app.oneshot(ui_req).await.unwrap();
     assert_eq!(ui_resp.status(), StatusCode::OK);
     let ui_html = String::from_utf8(body_to_bytes(ui_resp.into_body()).await.to_vec()).unwrap();
     assert!(!ui_html.contains("Octopus 18-Arm Containment Mesh"));
@@ -1011,30 +1067,33 @@ async fn test_manual_trigger_attribution_webui_reconnect_and_standalone_ui() {
         );
     }
 
-    // 3. Verify manual engage sets plain-English manual operator trigger attribution
+    // 3. Verify manual engage over live loopback TCP sets plain-English manual operator trigger attribution
+    let (port, handle) = spawn_live_server(state).await;
+    let client = reqwest::Client::new();
+    let base = format!("http://127.0.0.1:{}", port);
+
     let engage_body = serde_json::json!({
         "operator": "user_console",
         "reason": "Manual emergency disconnect from WebUI",
         "level": "hermetic_isolation",
-        "token": "CONFIRM ISOLATE"
+        "token": TEST_MASTER_TOKEN
     });
-    let req_eng = Request::builder()
-        .uri("/engage")
-        .method("POST")
-        .header("Content-Type", "application/json")
-        .body(Body::from(serde_json::to_vec(&engage_body).unwrap()))
+    let resp_eng = client
+        .post(format!("{}/engage", base))
+        .json(&engage_body)
+        .send()
+        .await
         .unwrap();
-    let resp_eng = app.clone().oneshot(req_eng).await.unwrap();
-    assert_eq!(resp_eng.status(), StatusCode::OK);
+    assert_eq!(resp_eng.status(), reqwest::StatusCode::OK);
 
-    let req_st = Request::builder()
-        .uri("/status")
-        .method("GET")
-        .body(Body::empty())
+    let st: StatusResponse = client
+        .get(format!("{}/status", base))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
         .unwrap();
-    let resp_st = app.clone().oneshot(req_st).await.unwrap();
-    let st: StatusResponse =
-        serde_json::from_slice(&body_to_bytes(resp_st.into_body()).await).unwrap();
     assert!(st.isolated);
     assert_eq!(
         st.trigger_cause,
@@ -1050,25 +1109,25 @@ async fn test_manual_trigger_attribution_webui_reconnect_and_standalone_ui() {
         "reason": "User clicked Reconnect Internet in WebUI",
         "token": TEST_MASTER_TOKEN
     });
-    let req_dis = Request::builder()
-        .uri("/disarm")
-        .method("POST")
-        .header("Content-Type", "application/json")
-        .body(Body::from(serde_json::to_vec(&disarm_body).unwrap()))
+    let resp_dis = client
+        .post(format!("{}/disarm", base))
+        .json(&disarm_body)
+        .send()
+        .await
         .unwrap();
-    let resp_dis = app.clone().oneshot(req_dis).await.unwrap();
-    assert_eq!(resp_dis.status(), StatusCode::OK);
+    assert_eq!(resp_dis.status(), reqwest::StatusCode::OK);
 
-    let req_st2 = Request::builder()
-        .uri("/status")
-        .method("GET")
-        .body(Body::empty())
+    let st2: StatusResponse = client
+        .get(format!("{}/status", base))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
         .unwrap();
-    let resp_st2 = app.oneshot(req_st2).await.unwrap();
-    let st2: StatusResponse =
-        serde_json::from_slice(&body_to_bytes(resp_st2.into_body()).await).unwrap();
     assert!(!st2.isolated);
     assert_eq!(st2.trigger_cause, "None (Host Operational)");
+    handle.abort();
 }
 
 #[tokio::test]
@@ -1106,7 +1165,7 @@ async fn test_insufficient_privileges_server_error_and_webui_script() {
 
 #[tokio::test]
 async fn test_protocol_catalog_endpoint_and_webui_matrix() {
-    let state = setup_test_server_state();
+    let (state, _temp_dir) = setup_test_server_state();
     let app = build_router(state);
 
     // 1. GET /api/protocol-catalog

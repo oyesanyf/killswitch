@@ -12,12 +12,10 @@
 //! 6. 15-second execution timeout on indefinite recursive CTE queries.
 //! 7. GET /api/siquery/tables, GET /api/siquery/edr-status, and POST /api/siquery/protect-sweep.
 
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 
 use axum::body::Body;
-use axum::extract::ConnectInfo;
 use axum::http::{Request, StatusCode};
 use tower::ServiceExt;
 
@@ -28,13 +26,20 @@ use killswitch_server::server::ServerState;
 const CHALLENGE_MASTER_TOKEN: &str = "KS-TOKEN-SEC5-CHALLENGE-2026-CRYPTOGRAPHIC-SECRET";
 
 fn setup_challenge_server_state() -> (Arc<ServerState>, Arc<HostContainmentManager>) {
-    std::env::set_var("KILLSWITCH_MASTER_TOKEN", CHALLENGE_MASTER_TOKEN);
-    std::env::set_var("KILLSWITCH_CONTROL_TOKEN", CHALLENGE_MASTER_TOKEN);
     let temp_dir = tempfile::tempdir().unwrap();
-    let containment =
-        Arc::new(HostContainmentManager::new_simulated(Some(temp_dir.path())).unwrap());
-    let state = Arc::new(ServerState::with_defaults(containment.clone()));
-    (state, containment)
+    let containment = Arc::new(
+        HostContainmentManager::new_simulated_with_master_token(
+            Some(temp_dir.path()),
+            CHALLENGE_MASTER_TOKEN.to_string(),
+        )
+        .unwrap(),
+    );
+    let mut raw_state = ServerState::with_defaults(containment.clone());
+    raw_state.control_token = Arc::new(CHALLENGE_MASTER_TOKEN.to_string());
+    raw_state
+        .active_bound_port
+        .store(0, std::sync::atomic::Ordering::SeqCst);
+    (Arc::new(raw_state), containment)
 }
 
 async fn body_to_bytes(body: axum::body::Body) -> axum::body::Bytes {
@@ -49,19 +54,17 @@ async fn body_to_bytes(body: axum::body::Body) -> axum::body::Bytes {
 async fn test_siquery_query_auth_missing_token_401() {
     let (state, _) = setup_challenge_server_state();
     let app = build_router(state);
-    let loopback = SocketAddr::from(([127, 0, 0, 1], 48123));
 
     let body = serde_json::json!({
         "query": "SELECT pid, name FROM processes LIMIT 5;"
     });
 
-    let mut req = Request::builder()
+    let req = Request::builder()
         .uri("/api/siquery/query")
         .method("POST")
         .header("Content-Type", "application/json")
         .body(Body::from(serde_json::to_vec(&body).unwrap()))
         .unwrap();
-    req.extensions_mut().insert(ConnectInfo(loopback));
 
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(
@@ -84,20 +87,18 @@ async fn test_siquery_query_auth_missing_token_401() {
 async fn test_siquery_query_auth_invalid_token_401() {
     let (state, _) = setup_challenge_server_state();
     let app = build_router(state);
-    let loopback = SocketAddr::from(([127, 0, 0, 1], 48124));
 
     let body = serde_json::json!({
         "query": "SELECT pid, name FROM processes LIMIT 5;"
     });
 
-    let mut req = Request::builder()
+    let req = Request::builder()
         .uri("/api/siquery/query")
         .method("POST")
         .header("Content-Type", "application/json")
         .header("X-KillSwitch-Token", "FORGED-WRONG-TOKEN-99999")
         .body(Body::from(serde_json::to_vec(&body).unwrap()))
         .unwrap();
-    req.extensions_mut().insert(ConnectInfo(loopback));
 
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(
@@ -151,13 +152,12 @@ async fn test_siquery_query_quarantined_caller_and_spoofing_verdicts() {
 async fn test_siquery_query_valid_json_csv_pretty_formats() {
     let (state, _) = setup_challenge_server_state();
     let app = build_router(state);
-    let loopback = SocketAddr::from(([127, 0, 0, 1], 48126));
 
     // 1. JSON (default)
     let body_json = serde_json::json!({
         "query": "SELECT 42 AS answer, 'killswitch' AS agent;"
     });
-    let mut req = Request::builder()
+    let req = Request::builder()
         .uri("/api/siquery/query")
         .method("POST")
         .header("Content-Type", "application/json")
@@ -167,7 +167,6 @@ async fn test_siquery_query_valid_json_csv_pretty_formats() {
         )
         .body(Body::from(serde_json::to_vec(&body_json).unwrap()))
         .unwrap();
-    req.extensions_mut().insert(ConnectInfo(loopback));
 
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -182,14 +181,13 @@ async fn test_siquery_query_valid_json_csv_pretty_formats() {
         "query": "SELECT 42 AS answer, 'killswitch' AS agent;",
         "format": "csv"
     });
-    let mut req = Request::builder()
+    let req = Request::builder()
         .uri("/api/siquery/query")
         .method("POST")
         .header("Content-Type", "application/json")
         .header("X-KillSwitch-Token", CHALLENGE_MASTER_TOKEN)
         .body(Body::from(serde_json::to_vec(&body_csv).unwrap()))
         .unwrap();
-    req.extensions_mut().insert(ConnectInfo(loopback));
 
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -206,14 +204,13 @@ async fn test_siquery_query_valid_json_csv_pretty_formats() {
         "query": "SELECT 42 AS answer, 'killswitch' AS agent;",
         "format": "pretty"
     });
-    let mut req = Request::builder()
+    let req = Request::builder()
         .uri("/api/siquery/query")
         .method("POST")
         .header("Content-Type", "application/json")
         .header("X-KillSwitch-Token", CHALLENGE_MASTER_TOKEN)
         .body(Body::from(serde_json::to_vec(&body_pretty).unwrap()))
         .unwrap();
-    req.extensions_mut().insert(ConnectInfo(loopback));
 
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -234,7 +231,6 @@ async fn test_siquery_query_valid_json_csv_pretty_formats() {
 async fn test_siquery_query_mutating_statement_rejection_400() {
     let (state, _) = setup_challenge_server_state();
     let app = build_router(state);
-    let loopback = SocketAddr::from(([127, 0, 0, 1], 48127));
 
     let mutating_payloads = [
         "DROP TABLE processes;",
@@ -250,14 +246,13 @@ async fn test_siquery_query_mutating_statement_rejection_400() {
             "query": q
         });
 
-        let mut req = Request::builder()
+        let req = Request::builder()
             .uri("/api/siquery/query")
             .method("POST")
             .header("Content-Type", "application/json")
             .header("X-KillSwitch-Token", CHALLENGE_MASTER_TOKEN)
             .body(Body::from(serde_json::to_vec(&body).unwrap()))
             .unwrap();
-        req.extensions_mut().insert(ConnectInfo(loopback));
 
         let resp = app.clone().oneshot(req).await.unwrap();
         assert_eq!(
@@ -286,7 +281,6 @@ async fn test_siquery_query_mutating_statement_rejection_400() {
 async fn test_siquery_query_massive_payload_stress() {
     let (state, _) = setup_challenge_server_state();
     let app = build_router(state);
-    let loopback = SocketAddr::from(([127, 0, 0, 1], 48128));
 
     // Construct a massive 1.2 MB SQL query padded with benign comment
     let padding = "A".repeat(1_200_000);
@@ -297,14 +291,13 @@ async fn test_siquery_query_massive_payload_stress() {
         "query": massive_sql
     });
 
-    let mut req = Request::builder()
+    let req = Request::builder()
         .uri("/api/siquery/query")
         .method("POST")
         .header("Content-Type", "application/json")
         .header("X-KillSwitch-Token", CHALLENGE_MASTER_TOKEN)
         .body(Body::from(serde_json::to_vec(&body).unwrap()))
         .unwrap();
-    req.extensions_mut().insert(ConnectInfo(loopback));
 
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(
@@ -332,7 +325,6 @@ fn test_siquery_query_15s_timeout_mechanism() {
     rt.block_on(async {
         let (state, _) = setup_challenge_server_state();
         let app = build_router(state);
-        let loopback = SocketAddr::from(([127, 0, 0, 1], 48129));
 
         // Deterministic infinite recursive counter guaranteed to exceed 15s across all runners
         let long_running_sql = "WITH RECURSIVE r(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM r WHERE x < 1000000000000) SELECT count(*) FROM r;";
@@ -341,14 +333,13 @@ fn test_siquery_query_15s_timeout_mechanism() {
             "query": long_running_sql
         });
 
-        let mut req = Request::builder()
+        let req = Request::builder()
             .uri("/api/siquery/query")
             .method("POST")
             .header("Content-Type", "application/json")
             .header("X-KillSwitch-Token", CHALLENGE_MASTER_TOKEN)
             .body(Body::from(serde_json::to_vec(&body).unwrap()))
             .unwrap();
-        req.extensions_mut().insert(ConnectInfo(loopback));
 
         let start = Instant::now();
         let resp = app.oneshot(req).await.unwrap();
@@ -442,27 +433,24 @@ async fn test_siquery_edr_status_endpoint() {
 async fn test_siquery_protect_sweep_endpoint_auth_and_execution() {
     let (state, _) = setup_challenge_server_state();
     let app = build_router(state);
-    let loopback = SocketAddr::from(([127, 0, 0, 1], 48130));
 
     // Case 1: Missing auth header -> 401
-    let mut req_no_auth = Request::builder()
+    let req_no_auth = Request::builder()
         .uri("/api/siquery/protect-sweep")
         .method("POST")
         .body(Body::empty())
         .unwrap();
-    req_no_auth.extensions_mut().insert(ConnectInfo(loopback));
 
     let resp1 = app.clone().oneshot(req_no_auth).await.unwrap();
     assert_eq!(resp1.status(), StatusCode::UNAUTHORIZED);
 
     // Case 2: Valid auth header -> 200 OK
-    let mut req_auth = Request::builder()
+    let req_auth = Request::builder()
         .uri("/api/siquery/protect-sweep")
         .method("POST")
         .header("X-KillSwitch-Token", CHALLENGE_MASTER_TOKEN)
         .body(Body::empty())
         .unwrap();
-    req_auth.extensions_mut().insert(ConnectInfo(loopback));
 
     let resp2 = app.oneshot(req_auth).await.unwrap();
     assert_eq!(resp2.status(), StatusCode::OK);

@@ -268,7 +268,201 @@ pub fn resolve_loopback_peer_pid(
     )))
 }
 
-#[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(target_os = "macos")]
+pub fn resolve_loopback_peer_pid(
+    peer_addr: SocketAddr,
+    bound_port: u16,
+) -> Result<u32, KillSwitchError> {
+    if !peer_addr.ip().is_loopback() {
+        return Err(KillSwitchError::NativeOsError(format!(
+            "Non-loopback peer IP {} rejected during peer PID resolution",
+            peer_addr.ip()
+        )));
+    }
+
+    let peer_port = peer_addr.port();
+    const PROC_ALL_PIDS: u32 = 1;
+    const PROC_PIDFDSOCKETINFO: libc::c_int = 3;
+    const SOCKINFO_IN: i32 = 1;
+    const SOCKINFO_TCP: i32 = 2;
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct DarwinProcFileInfo {
+        fi_openflags: u32,
+        fi_status: u32,
+        fi_offset: i64,
+        fi_type: i32,
+        fi_guardflags: u32,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct DarwinVinfoStat {
+        vst_dev: u32,
+        vst_mode: u16,
+        vst_nlink: u16,
+        vst_ino: u64,
+        vst_uid: u32,
+        vst_gid: u32,
+        vst_atime: i64,
+        vst_atimensec: i64,
+        vst_mtime: i64,
+        vst_mtimensec: i64,
+        vst_ctime: i64,
+        vst_ctimensec: i64,
+        vst_birthtime: i64,
+        vst_birthtimensec: i64,
+        vst_size: i64,
+        vst_blocks: i64,
+        vst_blksize: i32,
+        vst_flags: u32,
+        vst_gen: u32,
+        vst_rdev: u32,
+        vst_qspare: [i64; 2],
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct DarwinSockbufInfo {
+        sbi_cc: u32,
+        sbi_hiwat: u32,
+        sbi_mbcnt: u32,
+        sbi_mbmax: u32,
+        sbi_lowat: u32,
+        sbi_flags: i16,
+        sbi_timeo: i16,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct DarwinSocketInfoHeader {
+        soi_stat: DarwinVinfoStat,
+        soi_so: u64,
+        soi_pcb: u64,
+        soi_type: i32,
+        soi_protocol: i32,
+        soi_family: i32,
+        soi_options: i16,
+        soi_linger: i16,
+        soi_state: i16,
+        soi_qlen: i16,
+        soi_incqlen: i16,
+        soi_qlimit: i16,
+        soi_timeo: i16,
+        soi_error: u16,
+        soi_oobmark: u32,
+        soi_rcv: DarwinSockbufInfo,
+        soi_snd: DarwinSockbufInfo,
+        soi_kind: i32,
+        rfu_1: u32,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct DarwinInSockInfoPrefix {
+        insi_fport: i32,
+        insi_lport: i32,
+    }
+
+    #[repr(C, align(8))]
+    struct DarwinSocketFdInfoBuf {
+        pfi: DarwinProcFileInfo,
+        psi_header: DarwinSocketInfoHeader,
+        insi: DarwinInSockInfoPrefix,
+        _tail: [u8; 752],
+    }
+
+    unsafe {
+        let estimated_bytes = libc::proc_listpids(PROC_ALL_PIDS, 0, std::ptr::null_mut(), 0);
+        if estimated_bytes <= 0 {
+            return Err(KillSwitchError::NativeOsError(
+                "macOS proc_listpids returned empty/error PID count".to_string(),
+            ));
+        }
+
+        let pid_cap = ((estimated_bytes as usize) / std::mem::size_of::<libc::pid_t>()) + 128;
+        let mut pids: Vec<libc::pid_t> = vec![0; pid_cap];
+        let filled_bytes = libc::proc_listpids(
+            PROC_ALL_PIDS,
+            0,
+            pids.as_mut_ptr() as *mut libc::c_void,
+            (pids.len() * std::mem::size_of::<libc::pid_t>()) as libc::c_int,
+        );
+        if filled_bytes <= 0 {
+            return Err(KillSwitchError::NativeOsError(
+                "macOS proc_listpids failed reading active PIDs".to_string(),
+            ));
+        }
+        let pid_count = (filled_bytes as usize) / std::mem::size_of::<libc::pid_t>();
+
+        for &pid in &pids[..pid_count] {
+            if pid <= 0 {
+                continue;
+            }
+            let fd_bytes = libc::proc_pidinfo(
+                pid,
+                libc::PROC_PIDLISTFDS,
+                0,
+                std::ptr::null_mut(),
+                0,
+            );
+            if fd_bytes <= 0 {
+                continue;
+            }
+            let fd_cap = ((fd_bytes as usize) / std::mem::size_of::<libc::proc_fdinfo>()) + 16;
+            let mut fds: Vec<libc::proc_fdinfo> = vec![std::mem::zeroed(); fd_cap];
+            let actual_fd_bytes = libc::proc_pidinfo(
+                pid,
+                libc::PROC_PIDLISTFDS,
+                0,
+                fds.as_mut_ptr() as *mut libc::c_void,
+                (fds.len() * std::mem::size_of::<libc::proc_fdinfo>()) as libc::c_int,
+            );
+            if actual_fd_bytes <= 0 {
+                continue;
+            }
+            let fd_count = (actual_fd_bytes as usize) / std::mem::size_of::<libc::proc_fdinfo>();
+
+            for fd_entry in &fds[..fd_count] {
+                if fd_entry.proc_fdtype as libc::c_int != libc::PROX_FDTYPE_SOCKET {
+                    continue;
+                }
+                let mut sock_buf: DarwinSocketFdInfoBuf = std::mem::zeroed();
+                let res = libc::proc_pidfdinfo(
+                    pid,
+                    fd_entry.proc_fd,
+                    PROC_PIDFDSOCKETINFO,
+                    (&mut sock_buf as *mut DarwinSocketFdInfoBuf) as *mut libc::c_void,
+                    std::mem::size_of::<DarwinSocketFdInfoBuf>() as libc::c_int,
+                );
+                if res <= 0 {
+                    continue;
+                }
+                let fam = sock_buf.psi_header.soi_family;
+                let proto = sock_buf.psi_header.soi_protocol;
+                let kind = sock_buf.psi_header.soi_kind;
+                if (fam == libc::AF_INET || fam == libc::AF_INET6)
+                    && (proto == libc::IPPROTO_TCP || kind == SOCKINFO_TCP)
+                    && (kind == SOCKINFO_IN || kind == SOCKINFO_TCP)
+                {
+                    let lport = u16::from_be((sock_buf.insi.insi_lport & 0xFFFF) as u16);
+                    let rport = u16::from_be((sock_buf.insi.insi_fport & 0xFFFF) as u16);
+                    if lport == peer_port && (rport == bound_port || bound_port == 0) {
+                        return Ok(pid as u32);
+                    }
+                }
+            }
+        }
+    }
+
+    Err(KillSwitchError::NativeOsError(format!(
+        "No matching macOS socket found via proc_pidinfo for peer port {} -> server port {}",
+        peer_port, bound_port
+    )))
+}
+
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 pub fn resolve_loopback_peer_pid(
     _peer_addr: SocketAddr,
     _bound_port: u16,
@@ -300,7 +494,7 @@ mod tests {
 
         // Now resolve peer PID from the client's local address
         let resolved_pid = resolve_loopback_peer_pid(client_local_addr, server_port);
-        #[cfg(any(windows, target_os = "linux"))]
+        #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
         {
             assert!(
                 resolved_pid.is_ok(),
@@ -314,7 +508,7 @@ mod tests {
                 "Resolved PID should match current test runner process"
             );
         }
-        #[cfg(not(any(windows, target_os = "linux")))]
+        #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
         {
             assert!(
                 matches!(

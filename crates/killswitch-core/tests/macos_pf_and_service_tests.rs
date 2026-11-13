@@ -4,10 +4,10 @@
 //! - Feature 31: Native OS Service Lifecycle (Win32 SCM, Linux systemd, macOS launchd, zero CLI tools, shutdown auto-disarm)
 
 use killswitch_core::{
-    default_service_manager, execute_host_disarm_unauthenticated, generate_launchd_plist,
-    generate_quarantine_rules, generate_systemd_unit, get_active_darwin_sockets,
-    is_critical_system_pid, LinuxServiceManager, MacOsPfIsolator, MacOsServiceManager,
-    NativeProcessFreezer, NativeServiceManager, PF_DEVICE_PATH,
+    default_service_manager, generate_launchd_plist, generate_quarantine_rules,
+    generate_systemd_unit, get_active_darwin_sockets, is_critical_system_pid,
+    LinuxServiceManager, MacOsPfIsolator, MacOsServiceManager, NativeProcessFreezer,
+    NativeServiceManager, StateLedger, PF_DEVICE_PATH,
 };
 use killswitch_types::{
     service::{ServiceConfig, ServiceError, ServiceState},
@@ -304,16 +304,36 @@ fn test_f31_macos_launchd_plist_generation_and_filesystem_installer() {
 }
 
 #[test]
-fn test_f31_unconditional_shutdown_disarm_guarantee() {
-    // Calling execute_host_disarm_unauthenticated() must never panic,
-    // must restore network rules, release all tarpitted processes, and update status
-    let disarm_status = execute_host_disarm_unauthenticated()
-        .expect("execute_host_disarm_unauthenticated must always succeed");
+fn test_f31_fail_closed_shutdown_preserves_isolation() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut ledger = StateLedger::open_or_init(Some(dir.path())).expect("open ledger");
+    let mut status = killswitch_types::status::KillChainStatus {
+        isolated: true,
+        network_isolated: true,
+        ..Default::default()
+    };
+    status.update_hash();
+    ledger
+        .record_state_transition(
+            status,
+            None,
+            None,
+            "ENGAGED",
+            "test_operator",
+            "Service shutdown fail-closed check",
+        )
+        .expect("record isolation");
 
-    assert!(!disarm_status.isolated);
-    assert!(!disarm_status.network_isolated);
-    assert!(disarm_status.frozen_pids.is_empty());
-    assert!(disarm_status.tarpitted_pids.is_empty());
+    let mgr = killswitch_core::LinuxServiceManager::with_root_dir(dir.path());
+    mgr.request_stop();
+    mgr.run_service_daemon().expect("daemon exits cleanly");
+
+    let reloaded = StateLedger::open_or_init(Some(dir.path())).expect("reload ledger");
+    assert!(
+        reloaded.status().isolated,
+        "Daemon stop must preserve active ledger isolation fail-closed"
+    );
+    assert!(reloaded.status().network_isolated);
 }
 
 #[test]

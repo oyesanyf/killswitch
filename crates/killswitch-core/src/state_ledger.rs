@@ -103,8 +103,19 @@ impl StateLedger {
     }
 
     /// Opens or initializes the state ledger from disk.
+    ///
+    /// Strictly fail-closed on corruption or hash-chain mismatch: backs up the tampered ledger for
+    /// forensic inspection and enters active `LEDGER_TAMPER_RECOVERY` quarantine (`isolated = true`)
+    /// rather than resetting to an unisolated state.
     pub fn open_or_init(custom_dir: Option<&Path>) -> Result<Self> {
         let file_path = Self::resolve_storage_path(custom_dir);
+
+        if file_path.is_symlink() {
+            return Err(KillSwitchError::LedgerSerializationError(format!(
+                "Refusing symlink state ledger path '{}' (fail-closed)",
+                file_path.display()
+            )));
+        }
 
         if file_path.exists() {
             match Self::load_from_path(&file_path) {
@@ -117,7 +128,7 @@ impl StateLedger {
                 }
                 Err(err) => {
                     warn!(
-                        "⚠️ [LEDGER] Failed to load ledger from '{}': {}. Re-initializing clean state.",
+                        "🚨 [LEDGER] Corrupt/tampered ledger detected at '{}': {}. Entering FAIL-CLOSED lockdown state.",
                         file_path.display(),
                         err
                     );
@@ -143,6 +154,30 @@ impl StateLedger {
                             corrupt_path.display()
                         );
                     }
+
+                    let mut lockdown = StateLedgerSnapshot::new_initial();
+                    let now = Utc::now();
+                    lockdown.status.isolated = true;
+                    lockdown.status.network_isolated = true;
+                    lockdown.status.kernel_lockdown_active = true;
+                    lockdown.status.containment_level =
+                        killswitch_types::status::ContainmentLevel::HermeticIsolation;
+                    lockdown.status.isolated_at = Some(now);
+                    lockdown.status.isolated_by = Some("LEDGER_TAMPER_RECOVERY".to_string());
+                    lockdown.status.reason = Some(format!(
+                        "Fail-closed lockdown recovery from corrupt/tampered ledger: {}",
+                        err
+                    ));
+                    lockdown.status.last_action_timestamp = Some(now);
+                    lockdown.status.update_hash();
+                    lockdown.current_hash = lockdown.calculate_hash();
+
+                    let ledger = Self {
+                        file_path,
+                        snapshot: lockdown,
+                    };
+                    ledger.commit_to_disk()?;
+                    return Ok(ledger);
                 }
             }
         }
@@ -478,9 +513,18 @@ mod tests {
         )
         .unwrap();
 
-        // open_or_init must detect corruption and re-initialize clean state
+        // open_or_init must detect corruption and enter FAIL-CLOSED tamper lockdown
         let ledger = StateLedger::open_or_init(Some(dir.path())).unwrap();
         assert_eq!(ledger.snapshot().sequence_number, 0);
+        assert!(
+            ledger.snapshot().status.isolated,
+            "Corrupt/tampered ledger recovery MUST fail closed into active isolation"
+        );
+        assert!(ledger.snapshot().status.network_isolated);
+        assert_eq!(
+            ledger.snapshot().status.isolated_by.as_deref(),
+            Some("LEDGER_TAMPER_RECOVERY")
+        );
 
         // Verify that a .corrupt.<timestamp> backup was created
         let backup_files: Vec<_> = std::fs::read_dir(dir.path())

@@ -29,7 +29,7 @@ use dashmap::DashMap;
 use hmac::{Hmac, Mac};
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -50,18 +50,16 @@ static MAINTENANCE_WINDOW_ACTIVE: AtomicBool = AtomicBool::new(false);
 static MAINTENANCE_LEASE_EXPIRY_UNIX: AtomicU64 = AtomicU64::new(0);
 static LAST_TAMPER_REASON: Mutex<Option<String>> = Mutex::new(None);
 
-/// Derives a machine-bound 32-byte HMAC secret for database maintenance leases.
+static MAINTENANCE_HMAC_SECRET: OnceLock<[u8; 32]> = OnceLock::new();
+
+/// Returns a process-unique CSPRNG 32-byte HMAC secret for database maintenance leases.
 fn derive_maintenance_hmac_secret() -> [u8; 32] {
-    let host = std::env::var("COMPUTERNAME")
-        .or_else(|_| std::env::var("HOSTNAME"))
-        .unwrap_or_else(|_| "killswitch-local-host".to_string());
-    let mut hasher = Sha256::new();
-    hasher.update(b"killswitch-db-maintenance-v1|");
-    hasher.update(host.as_bytes());
-    let digest = hasher.finalize();
-    let mut key = [0u8; 32];
-    key.copy_from_slice(&digest);
-    key
+    *MAINTENANCE_HMAC_SECRET.get_or_init(|| {
+        let mut key = [0u8; 32];
+        use rand::RngCore;
+        rand::rngs::OsRng.fill_bytes(&mut key);
+        key
+    })
 }
 
 /// Computes a 64-character hex HMAC-SHA256 maintenance authentication token bound to `(scope, expiry_unix)`.
@@ -260,7 +258,7 @@ impl LocalMySqlTamperGuard {
         }
     }
 
-    /// Engages the in-process atomic `KILLSWITCH_ACTIVE` flag and records the forensic reason.
+    /// Engages active host containment upon tamper detection (in addition to updating `KILLSWITCH_ACTIVE`).
     pub fn initiate_local_killswitch(reason: &str) {
         KILLSWITCH_ACTIVE.store(true, Ordering::SeqCst);
         if let Ok(mut guard) = LAST_TAMPER_REASON.lock() {
@@ -268,8 +266,42 @@ impl LocalMySqlTamperGuard {
         }
         tracing::error!(
             reason = reason,
-            "CRITICAL TAMPER DETECTED — KILLSWITCH_ACTIVE ENGAGED"
+            "CRITICAL TAMPER DETECTED — ENGAGING ACTIVE FAIL-CLOSED KILLSWITCH CONTAINMENT"
         );
+        if let Some(cb) = TAMPER_CONTAINMENT_CALLBACK.read().unwrap_or_else(|e| e.into_inner()).as_ref() {
+            cb(reason);
+        } else if std::env::var_os("CARGO").is_none()
+            && std::env::var_os("RUST_TEST_THREADS").is_none()
+        {
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                let reason_owned = reason.to_string();
+                handle.spawn(async move {
+                    if let Ok(mgr) = killswitch_core::killchain::HostContainmentManager::new_default(None) {
+                        let _ = Arc::new(mgr)
+                            .engage_isolation(
+                                "tamper_guard",
+                                &reason_owned,
+                                killswitch_types::status::ContainmentLevel::HermeticIsolation,
+                                None,
+                            )
+                            .await;
+                    }
+                });
+            }
+        }
+    }
+}
+
+type TamperContainmentCallback = Arc<dyn Fn(&str) + Send + Sync>;
+
+static TAMPER_CONTAINMENT_CALLBACK: std::sync::RwLock<Option<TamperContainmentCallback>> =
+    std::sync::RwLock::new(None);
+
+/// Registers a runtime containment escalation callback triggered immediately when any tamper
+/// check confirms host modification.
+pub fn register_tamper_containment_handler(handler: TamperContainmentCallback) {
+    if let Ok(mut guard) = TAMPER_CONTAINMENT_CALLBACK.write() {
+        *guard = Some(handler);
     }
 }
 

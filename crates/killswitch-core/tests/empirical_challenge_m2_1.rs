@@ -25,7 +25,6 @@ use chrono::Utc;
 use killswitch_core::{
     auth::OperatorAuthManager,
     freeze::NativeProcessFreezer,
-    killchain::execute_host_disarm_unauthenticated,
     service::{
         default_service_manager, LinuxServiceManager, MacOsServiceManager, NativeServiceManager,
         SimulatedServiceManager,
@@ -825,53 +824,41 @@ fn test_stress_state_ledger_corruption_detection_bit_flips() {
 // =============================================================================
 
 #[test]
-fn test_stress_unconditional_shutdown_disarm_leaves_host_clean() {
+fn test_stress_fail_closed_shutdown_preserves_isolation_state() {
     let temp = tempdir().expect("tempdir");
     std::env::set_var("KILLSWITCH_DATABASE_DIR", temp.path());
 
-    // 1. Tarpit a simulated PID (non-immune) in the global tarpit
-    let tarpit = ActiveProcessTarpit::global();
-    let test_pid = 65432;
-    // On Windows, tarpitting non-existent PID errors out on thread snapshot,
-    // but we can test release_all on active traps or directly verify disarm contract.
-    tarpit.release_pid(test_pid);
+    // 1. Persist active containment into the ledger
+    let mut ledger = StateLedger::open_or_init(Some(temp.path())).expect("open ledger");
+    let mut engaged_status = killswitch_types::status::KillChainStatus {
+        isolated: true,
+        network_isolated: true,
+        ..Default::default()
+    };
+    engaged_status.update_hash();
+    ledger
+        .record_state_transition(
+            engaged_status,
+            None,
+            None,
+            "ENGAGED",
+            "test_operator",
+            "Active containment prior to service shutdown",
+        )
+        .expect("record engaged");
 
-    // 2. Invoke unconditional unauthenticated disarm
-    let disarm_res = execute_host_disarm_unauthenticated();
-    assert!(
-        disarm_res.is_ok(),
-        "execute_host_disarm_unauthenticated failed: {:?}",
-        disarm_res
-    );
+    // 2. Simulate daemon shutdown/stop across Simulated and Linux service managers
+    let sim_mgr = SimulatedServiceManager::new();
+    assert!(sim_mgr.run_service_daemon().is_ok());
 
-    let status = disarm_res.unwrap();
-    assert!(!status.isolated, "Host must be marked NOT isolated");
-    assert!(
-        !status.network_isolated,
-        "Network must be marked NOT isolated"
-    );
-    assert_eq!(
-        status.processes_frozen_count, 0,
-        "Processes frozen count must be 0"
-    );
-    assert!(status.frozen_pids.is_empty(), "Frozen PIDs must be empty");
+    let linux_mgr = LinuxServiceManager::with_root_dir(temp.path());
+    linux_mgr.request_stop();
+    assert!(linux_mgr.run_service_daemon().is_ok());
 
-    // 3. Verify that global tarpit has zero active traps
-    assert!(
-        !tarpit.is_trapped(test_pid),
-        "Global tarpit must be completely cleared"
-    );
-
-    // 4. Verify state ledger records DISARMED_UNCONDITIONAL event
-    let ledger = StateLedger::open_or_init(Some(temp.path())).expect("open ledger");
-    let history = &ledger.snapshot().history;
-    assert!(
-        !history.is_empty(),
-        "History must contain shutdown disarm event"
-    );
-    let latest_event = &history[0];
-    assert_eq!(latest_event.action, "DISARMED_UNCONDITIONAL");
-    assert_eq!(latest_event.operator, "SYSTEM_SHUTDOWN");
+    // 3. Verify state ledger remains isolated fail-closed across service stops
+    let reloaded = StateLedger::open_or_init(Some(temp.path())).expect("reload ledger");
+    assert!(reloaded.status().isolated, "Host MUST remain isolated across shutdown/stop");
+    assert!(reloaded.status().network_isolated);
 
     std::env::remove_var("KILLSWITCH_DATABASE_DIR");
 }

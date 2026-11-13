@@ -117,7 +117,6 @@ pub async fn handle_native_service_cli(action: &str) -> Result<()> {
                 "🔧 Uninstalling native OS background service '{}'...",
                 service_name
             );
-            let _ = killswitch_core::killchain::execute_host_disarm_unauthenticated();
             sm.uninstall_service(service_name)?;
             println!("✅ Service '{}' uninstalled successfully.", service_name);
         }
@@ -134,9 +133,8 @@ pub async fn handle_native_service_cli(action: &str) -> Result<()> {
                 "🔧 Stopping native OS background service '{}'...",
                 service_name
             );
-            let _ = killswitch_core::killchain::execute_host_disarm_unauthenticated();
             sm.stop_service(service_name)?;
-            println!("✅ Service '{}' stopped.", service_name);
+            println!("✅ Service '{}' stopped (active ledger/kernel isolation remains fail-closed).", service_name);
         }
         "restart" => {
             println!(

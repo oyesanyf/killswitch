@@ -132,6 +132,34 @@ impl KillChainHostManager {
         Ok(Self::new(isolator, freezer, auth, ledger))
     }
 
+    /// Constructs a `KillChainHostManager` with platform defaults and an explicit CSPRNG master token.
+    pub fn new_default_with_master_token(
+        custom_dir: Option<&Path>,
+        master_token: String,
+    ) -> Result<Self> {
+        let isolator = default_network_isolator();
+        let freezer = Arc::new(crate::freeze::NativeProcessFreezer::new());
+        let mut auth =
+            crate::auth::OperatorAuthManager::new(None, custom_dir.map(PathBuf::from));
+        auth.set_custom_master_token(master_token);
+        let ledger = Arc::new(RwLock::new(StateLedger::open_or_init(custom_dir)?));
+        Ok(Self::new(isolator, freezer, Arc::new(auth), ledger))
+    }
+
+    /// Constructs a simulated `KillChainHostManager` with an explicit CSPRNG master token.
+    pub fn new_simulated_with_master_token(
+        custom_dir: Option<&Path>,
+        master_token: String,
+    ) -> Result<Self> {
+        let isolator = Arc::new(SimulatedNetworkIsolator);
+        let freezer = Arc::new(crate::freeze::NativeProcessFreezer::new());
+        let mut auth =
+            crate::auth::OperatorAuthManager::new(None, custom_dir.map(PathBuf::from));
+        auth.set_custom_master_token(master_token);
+        let ledger = Arc::new(RwLock::new(StateLedger::open_or_init(custom_dir)?));
+        Ok(Self::new(isolator, freezer, Arc::new(auth), ledger))
+    }
+
     /// Queries current Kill Chain status.
     pub fn get_status(&self) -> KillChainStatus {
         let ledger = self.ledger.read();
@@ -401,221 +429,66 @@ impl KillChainHostManager {
     }
 
     /// Disarms host containment and reverts all installed kernel filters and process suspensions.
+    ///
+    /// Strictly fail-closed: valid `OperatorCredentials` verified by `OperatorAuthenticator` are mandatory.
     pub async fn disarm_isolation(
         &self,
         operator: &str,
         reason: &str,
         credentials: Option<&OperatorCredentials>,
     ) -> Result<KillChainStatus> {
-        // Stage 1: Authenticate operator credentials if provided
-        if let Some(creds) = credentials {
-            self.authenticate_credentials(creds)?;
-        }
+        let creds = credentials.ok_or_else(|| {
+            KillSwitchError::AuthenticationFailed(
+                "Operator credentials are required to disarm host containment (fail-closed)"
+                    .to_string(),
+            )
+        })?;
+        self.authenticate_credentials(creds)?;
 
         self.disarm_internal(operator, reason, "DISARMED").await
     }
 
-    /// Emergency disarm without authentication (for daemon shutdown or panic handler).
-    pub async fn execute_unauthenticated_emergency_disarm(
+    /// Scoped CAGE quorum-governed quarantine release (requires verified quorum >= 2,
+    /// 64-hex SHA-256 approval digest, and active isolation originally engaged by `cage_governance`).
+    /// Never disarms operator-engaged, tamper-engaged, or non-CAGE threat quarantines.
+    pub async fn disarm_cage_quorum_quarantine(
         &self,
-        reason: &str,
+        workload_id: &str,
+        quorum_approval_digest: &str,
+        quorum_count: u32,
     ) -> Result<KillChainStatus> {
-        info!(
-            "🚨 [KILLCHAIN] Executing emergency unauthenticated host disarm: {}",
-            reason
-        );
-        self.disarm_internal("SYSTEM_SHUTDOWN", reason, "DISARMED_SHUTDOWN")
-            .await
-    }
-}
-
-/// Global unconditional unauthenticated host disarm.
-/// Called upon service stop/shutdown signal (`SERVICE_CONTROL_STOP`, `SIGTERM`, `SIGINT`),
-/// daemon termination, panic, or test teardown to guarantee that the endpoint is never left quarantined.
-pub fn execute_host_disarm_unauthenticated() -> Result<KillChainStatus> {
-    info!("🚨 [DISARM-UNCONDITIONAL] Executing unconditional unauthenticated host disarm");
-
-    // 1. Open State Ledger and inspect snapshot for active isolation artifacts
-    let ledger_result = StateLedger::open_or_init(None);
-    let (pids_to_resume, _network_receipts, quarantined_arms, ledger_opt) = match ledger_result {
-        Ok(ledger) => {
-            let mut pids = std::collections::HashSet::new();
-            for &pid in &ledger.snapshot().status.frozen_pids {
-                pids.insert(pid);
-            }
-            for proc in &ledger.snapshot().process_records {
-                if proc.status == killswitch_types::ProcessFreezeStatus::Frozen {
-                    pids.insert(proc.pid);
-                }
-            }
-            let receipts = ledger.snapshot().network_receipts.clone();
-            let arms = ledger.snapshot().status.quarantined_arms.clone();
-            (pids, receipts, arms, Some(ledger))
+        if quorum_count < 2 {
+            return Err(KillSwitchError::AuthenticationFailed(format!(
+                "CAGE quorum release rejected: quorum_count {} < 2",
+                quorum_count
+            )));
         }
-        Err(err) => {
-            warn!(
-                "⚠️ [DISARM-UNCONDITIONAL] Could not open state ledger: {}. Proceeding with global cleanup.",
-                err
-            );
-            (
-                std::collections::HashSet::new(),
-                Vec::new(),
-                std::collections::HashMap::new(),
-                None,
-            )
+        let digest = quorum_approval_digest.trim();
+        if digest.len() != 64 || !digest.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(KillSwitchError::AuthenticationFailed(
+                "CAGE quorum release rejected: invalid quorum_approval_digest".to_string(),
+            ));
         }
-    };
-
-    // 2. Revert platform-native network quarantine
-    #[cfg(target_os = "windows")]
-    {
-        let _ = crate::wfp::disarm_windows_network_quarantine(
-            "UNCONDITIONAL_SHUTDOWN",
-            "Automatic host disarm on service stop/shutdown",
-        );
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        let isolator = crate::landlock::LinuxNetlinkIsolator::new();
-        if _network_receipts.is_empty() {
-            let dummy_receipt = IsolationReceipt::new(
-                "shutdown-disarm".to_string(),
-                killswitch_types::status::NetworkIsolationEngine::LinuxNetlink,
-                vec![],
-                vec![],
-                vec![],
-                vec![],
-                vec![],
-                0,
-                "UNCONDITIONAL_SHUTDOWN".to_string(),
-                "Automatic host disarm on service stop/shutdown".to_string(),
-            );
-            let _ = isolator.restore_quarantine(&dummy_receipt);
-        } else {
-            for receipt in &_network_receipts {
-                let _ = isolator.restore_quarantine(receipt);
-            }
+        let status = self.get_status();
+        if !status.isolated {
+            return Ok(status);
         }
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        let isolator = crate::pf::MacOsPfIsolator::new();
-        if _network_receipts.is_empty() {
-            let dummy_receipt = IsolationReceipt::new(
-                "shutdown-disarm".to_string(),
-                killswitch_types::status::NetworkIsolationEngine::DarwinPf,
-                vec![],
-                vec![],
-                vec![],
-                vec![],
-                vec![],
-                0,
-                "UNCONDITIONAL_SHUTDOWN".to_string(),
-                "Automatic host disarm on service stop/shutdown".to_string(),
-            );
-            let _ = isolator.restore_quarantine(&dummy_receipt);
-        } else {
-            for receipt in &_network_receipts {
-                let _ = isolator.restore_quarantine(receipt);
-            }
+        if status.isolated_by.as_deref() != Some("cage_governance") {
+            return Err(KillSwitchError::AuthenticationFailed(format!(
+                "Fail-closed: active host isolation initiated by '{:?}' cannot be released by CAGE lease expiry",
+                status.isolated_by
+            )));
         }
+        self.disarm_internal(
+            "cage_governance_quorum",
+            &format!(
+                "Quorum-governed CAGE release for workload '{}' (quorum={})",
+                workload_id, quorum_count
+            ),
+            "DISARMED_CAGE_QUORUM",
+        )
+        .await
     }
-
-    // 3. Resume all frozen processes and release all tarpits
-    // 3a. Release in-memory tarpits
-    crate::tarpit::ActiveProcessTarpit::global().release_all();
-
-    // 3b. Resume frozen OS processes discovered in state ledger
-    let freezer = crate::freeze::NativeProcessFreezer::new();
-    let mut pids_vec: Vec<u32> = pids_to_resume.into_iter().collect();
-    pids_vec.sort_unstable();
-
-    let mut resumed_count = 0;
-    for &pid in &pids_vec {
-        match freezer.resume_process(pid) {
-            Ok(state) => {
-                info!(
-                    "🟢 [DISARM-UNCONDITIONAL] Resumed frozen process PID {} ({})",
-                    pid, state.process_name
-                );
-                resumed_count += 1;
-            }
-            Err(err) => {
-                warn!(
-                    "⚠️ [DISARM-UNCONDITIONAL] Could not resume PID {}: {}",
-                    pid, err
-                );
-            }
-        }
-    }
-    if !pids_vec.is_empty() {
-        info!(
-            "🟢 [DISARM-UNCONDITIONAL] Process restoration completed: {}/{} frozen processes resumed.",
-            resumed_count,
-            pids_vec.len()
-        );
-    }
-
-    // 4. Update and Commit Clean Disarmed State to State Ledger
-    let now = Utc::now();
-    let mut status = KillChainStatus {
-        isolated: false,
-        containment_level: ContainmentLevel::Disarmed,
-        isolated_at: None,
-        isolated_by: None,
-        reason: Some("Automatic host disarm on service stop/shutdown signal".to_string()),
-        network_isolated: false,
-        processes_frozen_count: 0,
-        processes_tarpitted_count: 0,
-        kernel_lockdown_active: false,
-        allowlisted_ports: vec![DEFAULT_CONTROL_PORT],
-        quarantined_interfaces: Vec::new(),
-        frozen_pids: Vec::new(),
-        tarpitted_pids: Vec::new(),
-        active_network_rules: Vec::new(),
-        quarantined_arms,
-        last_action_timestamp: Some(now),
-        lockout_remaining_secs: 0,
-        rollback_watchdog_max_secs: DEFAULT_ROLLBACK_WATCHDOG_MAX_SECS,
-        health_probe_interval_secs: DEFAULT_INTERMEDIATE_HEALTH_PROBE_INTERVAL_SECS,
-        consecutive_healthy_probes_required: DEFAULT_REQUIRED_CONSECUTIVE_HEALTHY_PROBES,
-        consecutive_healthy_probes: 0,
-        last_health_probe_timestamp: Some(now),
-        last_health_probe_passed: Some(true),
-        last_health_probe_summary: Some(
-            "Host disarmed unconditionally on service stop/shutdown signal".to_string(),
-        ),
-        state_hash_blake3: String::new(),
-    };
-    status.update_hash();
-
-    // Ensure we commit using existing or newly opened ledger
-    let ledger = match ledger_opt {
-        Some(l) => Some(l),
-        None => StateLedger::open_or_init(None).ok(),
-    };
-
-    if let Some(mut l) = ledger {
-        let _ = l.record_state_transition(
-            status.clone(),
-            Some(Vec::new()),
-            Some(Vec::new()),
-            "DISARMED_UNCONDITIONAL",
-            "SYSTEM_SHUTDOWN",
-            "Automatic host disarm on service stop/shutdown signal",
-        );
-    }
-
-    // Also reconcile any legacy root-level ./killchain_state.json if present on disk
-    let legacy_cwd_ledger = std::path::Path::new("killchain_state.json");
-    if legacy_cwd_ledger.exists() && !legacy_cwd_ledger.is_symlink() {
-        let _ = std::fs::remove_file(legacy_cwd_ledger);
-    }
-
-    info!("🟢 [DISARM-UNCONDITIONAL] Host disarm completed successfully.");
-    Ok(status)
 }
 
 impl KillChainHostManager {
@@ -728,7 +601,11 @@ impl KillChainHostManager {
         Ok(disarmed_status)
     }
 
-    /// Spawns the background 60s health-probe and 30-minute failsafe watchdog task.
+    /// Spawns the background 60s health-probe watchdog task.
+    ///
+    /// Strictly fail-closed: watchdog probes emit diagnostics and operator alerts when active
+    /// isolation exceeds `DEFAULT_ROLLBACK_WATCHDOG_MAX_SECS`, NEVER automatically disarming
+    /// host containment without authenticated operator credentials.
     fn spawn_watchdog_task(self: &Arc<Self>) {
         let (abort_tx, mut abort_rx) = tokio::sync::oneshot::channel::<()>();
         {
@@ -741,12 +618,14 @@ impl KillChainHostManager {
             let start_time = Instant::now();
             let probe_interval =
                 std::time::Duration::from_secs(DEFAULT_INTERMEDIATE_HEALTH_PROBE_INTERVAL_SECS);
-            let max_failsafe = std::time::Duration::from_secs(DEFAULT_ROLLBACK_WATCHDOG_MAX_SECS);
+            let max_alert_interval =
+                std::time::Duration::from_secs(DEFAULT_ROLLBACK_WATCHDOG_MAX_SECS);
+            let mut last_ceiling_alert = false;
 
             loop {
                 tokio::select! {
                     _ = &mut abort_rx => {
-                        info!("Watchdog aborted cleanly upon manual disarm.");
+                        info!("Watchdog aborted cleanly upon authenticated operator disarm.");
                         break;
                     }
                     _ = tokio::time::sleep(probe_interval) => {
@@ -755,20 +634,19 @@ impl KillChainHostManager {
                             break;
                         }
 
-                        // 1. Run intermediate health probe
+                        // 1. Run intermediate health probe (telemetry & integrity monitoring only)
                         match manager.run_probe() {
                             Ok(report) => {
-                                if report.eligible_for_early_rollback {
-                                    info!(
-                                        "🟢 [KILLCHAIN-WATCHDOG] Process tree healthy across {}/{} probes. Executing automatic early rollback!",
-                                        report.consecutive_healthy_probes, report.required_healthy_probes
+                                if !report.process_tree_integrity_ok {
+                                    warn!(
+                                        "⚠️ [KILLCHAIN-WATCHDOG] Integrity anomaly detected while isolated: {}",
+                                        report.summary
                                     );
-                                    let _ = manager.disarm_internal(
-                                        "autonomous_health_probe_watchdog",
-                                        "Early automatic rollback: process tree integrity verified across consecutive probes",
-                                        "DISARMED_HEALTH_PROBE",
-                                    ).await;
-                                    break;
+                                } else {
+                                    info!(
+                                        "ℹ️ [KILLCHAIN-WATCHDOG] Containment healthy ({} clean probes; manual operator auth required to disarm)",
+                                        report.consecutive_healthy_probes
+                                    );
                                 }
                             }
                             Err(err) => {
@@ -776,15 +654,13 @@ impl KillChainHostManager {
                             }
                         }
 
-                        // 2. Check 30-minute dead-man failsafe ceiling
-                        if start_time.elapsed() >= max_failsafe {
-                            warn!("⏰ [KILLCHAIN-WATCHDOG] 30-minute hard ceiling reached. Enforcing automatic failsafe rollback!");
-                            let _ = manager.disarm_internal(
-                                "failsafe_watchdog",
-                                "Automatic dead-man failsafe rollback (anti-hostage defense)",
-                                "DISARMED_WATCHDOG_FAILSAFE",
-                            ).await;
-                            break;
+                        // 2. Alert operator if ceiling duration exceeded — NEVER disarm fail-open
+                        if !last_ceiling_alert && start_time.elapsed() >= max_alert_interval {
+                            last_ceiling_alert = true;
+                            warn!(
+                                "⏰ [KILLCHAIN-WATCHDOG] Isolation duration exceeded {}s threshold. Holding containment FAIL-CLOSED until authenticated operator disarm.",
+                                DEFAULT_ROLLBACK_WATCHDOG_MAX_SECS
+                            );
                         }
                     }
                 }
@@ -949,11 +825,12 @@ impl HealthProbeRunner for KillChainHostManager {
 
         let consecutive = updated_status.consecutive_healthy_probes;
         let required = updated_status.consecutive_healthy_probes_required;
-        let eligible = consecutive >= required;
+        // Fail-closed invariant: health probes report telemetry only; never authorize automatic rollback.
+        let eligible = false;
 
         let summary = if process_tree_integrity_ok {
             format!(
-                "Process tree healthy ({} procs scanned, {} critical OS anchors verified, {}/{} consecutive healthy probes)",
+                "Process tree healthy ({} procs scanned, {} critical OS anchors verified, {}/{} consecutive healthy probes; authenticated operator disarm required)",
                 total_processes_scanned, critical_os_anchors_verified, consecutive, required
             )
         } else {
@@ -1323,10 +1200,13 @@ mod tests {
         let ledger = Arc::new(RwLock::new(
             StateLedger::open_or_init(Some(dir.path())).unwrap(),
         ));
-        let auth = Arc::new(crate::auth::OperatorAuthManager::new(
+        let mut auth = crate::auth::OperatorAuthManager::new(
             Some(dir.path().to_path_buf()),
             None,
-        ));
+        );
+        let test_token = "ks-test-operator-token-0123456789abcdef0123456789abcdef";
+        auth.set_custom_master_token(test_token.to_string());
+        let auth = Arc::new(auth);
         let manager = Arc::new(KillChainHostManager::new(
             Arc::new(SimulatedNetworkIsolator),
             Arc::new(TestMockFreezer),
@@ -1347,13 +1227,30 @@ mod tests {
         assert!(status.isolated);
         assert!(status.network_isolated);
 
-        // Run health probe
+        // Run health probe (must NEVER authorize unauthenticated early rollback)
         let probe = manager.run_probe().unwrap();
         assert!(probe.total_processes_scanned > 0);
+        assert!(!probe.eligible_for_early_rollback);
 
-        // Disarm isolation
+        // Unauthenticated disarm (None credentials) MUST fail closed
+        assert!(
+            manager
+                .disarm_isolation("test_operator", "Missing creds bypass attempt", None)
+                .await
+                .is_err()
+        );
+        assert!(manager.get_status().isolated);
+
+        // Disarm isolation with valid operator credentials
+        let creds = OperatorCredentials {
+            operator_id: "test_operator".to_string(),
+            auth_token: Some(test_token.to_string()),
+            password: None,
+            caller_pid: Some(std::process::id()),
+            confirmation_phrase: None,
+        };
         let disarmed = manager
-            .disarm_isolation("test_operator", "Threat Resolved", None)
+            .disarm_isolation("test_operator", "Threat Resolved", Some(&creds))
             .await
             .unwrap();
         assert!(!disarmed.isolated);

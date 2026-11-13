@@ -46,9 +46,11 @@ use std::thread;
 // 1. Auth imports
 use killswitch_server::auth::{
     constant_time_token_match, extract_token_from_headers, verify_control_plane_request_with_token,
-    AuthVerdict, DEFAULT_CONTROL_PLANE_HEADER, TEST_MASTER_TOKEN,
+    AuthVerdict, DEFAULT_CONTROL_PLANE_HEADER,
 };
 use killswitch_types::status::KILLCHAIN_ISOLATE_CONFIRMATION_PHRASE;
+
+const TEST_MASTER_TOKEN: &str = "ks-sec6-2-test-token-0123456789abcdef0123456789abcdef";
 
 // 2. Semantic DLP imports
 use killswitch_telemetry::otel_lineage::{DlpClassification, DlpPolicy};

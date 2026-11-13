@@ -530,10 +530,13 @@ impl LifecycleNode for MonitorNode {
         let probe_report = self.host_manager.run_probe()?;
         state.probe_results.push(probe_report.clone());
 
-        let eligible = probe_report.eligible_for_early_rollback;
+        let operator_approved_rollback = state.operator_approval.as_ref().is_some_and(|app| {
+            app.decision == killswitch_types::graph::ApprovalDecision::Approved
+                && app.confirmation_token.trim().len() >= 32
+        });
 
         Ok(GraphNodeOutput {
-            next_node: if eligible {
+            next_node: if operator_approved_rollback {
                 Some(GraphNodeId::DisarmingAndRestoring)
             } else {
                 Some(GraphNodeId::IsolatedHealthProbing)
@@ -543,8 +546,8 @@ impl LifecycleNode for MonitorNode {
             containment_action_taken: None,
             fraud_proofs_emitted: vec![],
             summary: format!(
-                "Health probe executed: {} consecutive clean probes (eligible for rollback: {})",
-                probe_report.consecutive_healthy_probes, eligible
+                "Health probe executed: {} consecutive clean probes (operator rollback authorized: {})",
+                probe_report.consecutive_healthy_probes, operator_approved_rollback
             ),
         })
     }
@@ -570,21 +573,47 @@ impl LifecycleNode for RollbackNode {
     }
 
     async fn execute(&self, state: &mut KillSwitchGraphState) -> Result<GraphNodeOutput> {
+        let approval = state.operator_approval.clone().ok_or_else(|| {
+            KillSwitchError::AuthenticationFailed(
+                "Fail-closed: RollbackNode requires authenticated operator approval".to_string(),
+            )
+        })?;
+        if approval.decision != killswitch_types::graph::ApprovalDecision::Approved {
+            return Err(KillSwitchError::AuthenticationFailed(format!(
+                "Fail-closed: RollbackNode approval decision {:?} is not Approved",
+                approval.decision
+            )));
+        }
+
         let receipt = evaluate_cage_guard(
             state,
             "disarm_and_restore",
             serde_json::json!({
-                "action": "emergency_disarm",
+                "action": "authenticated_disarm",
+                "operator_id": approval.operator_id,
                 "clean_probes": state.probe_results.len(),
                 "mode": format!("{:?}", state.mode),
             }),
         )?;
 
-        info!("🟢 [ROLLBACK-NODE] Disarming host containment via emergency rollback");
+        let creds = killswitch_types::status::OperatorCredentials {
+            operator_id: approval.operator_id.clone(),
+            auth_token: Some(approval.confirmation_token.clone()),
+            password: None,
+            caller_pid: Some(std::process::id()),
+            confirmation_phrase: None,
+        };
+
+        info!(
+            "🟢 [ROLLBACK-NODE] Disarming host containment via authenticated operator approval '{}'",
+            approval.operator_id
+        );
         let restored_status = self
             .host_manager
-            .execute_unauthenticated_emergency_disarm(
-                "Health probe confirmed clean endpoint across 3 consecutive cycles",
+            .disarm_isolation(
+                &approval.operator_id,
+                "Authenticated operator rollback via orchestrator approval",
+                Some(&creds),
             )
             .await?;
 
@@ -597,7 +626,8 @@ impl LifecycleNode for RollbackNode {
             containment_action_taken: Some(VoteAction::Monitor),
             fraud_proofs_emitted: vec![],
             summary: format!(
-                "Host containment cleanly disarmed; system restored [CAGE: Clear, receipt={}, digest={}]",
+                "Host containment cleanly disarmed by operator '{}'; system restored [CAGE: Clear, receipt={}, digest={}]",
+                approval.operator_id,
                 receipt.receipt_id,
                 &receipt.decision_digest[..8.min(receipt.decision_digest.len())]
             ),

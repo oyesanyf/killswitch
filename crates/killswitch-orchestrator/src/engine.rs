@@ -144,12 +144,15 @@ impl KillSwitchOrchestrator {
                 }),
             )
             .add_edge(LifecycleStage::Contain, LifecycleStage::Monitor)
-            // Conditional edge from Monitor: if 3 clean probes -> Rollback, else loop or Terminal
+            // Conditional edge from Monitor: fail-closed unless authenticated operator approval
+            // explicitly authorizes Rollback; health probes alone never trigger disarm.
             .add_conditional_edge(
                 LifecycleStage::Monitor,
                 Arc::new(|state| {
-                    if let Some(probe) = state.probe_results.last() {
-                        if probe.eligible_for_early_rollback {
+                    if let Some(approval) = &state.operator_approval {
+                        if approval.decision == killswitch_types::graph::ApprovalDecision::Approved
+                            && approval.confirmation_token.trim().len() >= 32
+                        {
                             return LifecycleStage::Rollback;
                         }
                     }

@@ -320,16 +320,35 @@ pub async fn handle_cage_release(
         }
     }
 
-    // 10. If no remaining active leases, disarm host kernel isolation
+    // 10. If no remaining active CAGE leases, lift ONLY CAGE-initiated quarantine if no global
+    // tamper or operator lock is active (never unauthenticated emergency-disarm).
     if state.journal.unexpired_leases().is_empty() {
-        let _ = state
-            .containment_manager
-            .execute_unauthenticated_emergency_disarm(&format!(
-                "Quorum-governed release approved for workload '{}' (quorum count: {})",
-                req.workload_id, req.quorum_count
-            ))
-            .await;
-        info!("🔓 [CAGE-SUBSTRATE] Zero remaining leases; host OS kernel isolation lifted");
+        let last_cause = state.last_trigger_cause.read().await.clone();
+        let tamper_active =
+            killswitch_telemetry::tamper_and_process_killswitch::KILLSWITCH_ACTIVE
+                .load(std::sync::atomic::Ordering::SeqCst);
+        if last_cause.is_none() && !tamper_active {
+            match state
+                .containment_manager
+                .disarm_cage_quorum_quarantine(&req.workload_id, digest, req.quorum_count)
+                .await
+            {
+                Ok(_) => {
+                    info!("🔓 [CAGE-SUBSTRATE] Zero remaining CAGE leases; CAGE-scoped host isolation lifted");
+                }
+                Err(e) => {
+                    warn!(
+                        "⚠️ [CAGE-SUBSTRATE] Lease released for '{}', host isolation preserved fail-closed: {}",
+                        req.workload_id, e
+                    );
+                }
+            }
+        } else {
+            warn!(
+                "⚠️ [CAGE-SUBSTRATE] Lease released for '{}', but non-CAGE trigger/tamper lock active — preserving host quarantine",
+                req.workload_id
+            );
+        }
     }
 
     // 11. Construct signed release receipt
