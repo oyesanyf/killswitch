@@ -16,10 +16,12 @@ use crate::freeze::NativeProcessFreezer;
 use crate::killchain::{is_critical_system_pid, is_immutable_os_kernel_pid};
 use killswitch_types::errors::{KillSwitchError, KillSwitchResult};
 use killswitch_types::status::{ProcessFreezer, ProcessIsolationState};
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::process::{Child, Command};
 use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 use std::sync::OnceLock;
 use sysinfo::{Pid, ProcessRefreshKind, System};
 
@@ -352,6 +354,10 @@ pub fn freeze_subtree_kernel(
     freezer: &dyn ProcessFreezer,
 ) -> SubtreeFreezeReport {
     let root_pid = *seed_pids.first().unwrap_or(&0);
+    #[cfg_attr(
+        not(any(target_os = "windows", target_os = "linux")),
+        allow(unused_mut)
+    )]
     let mut kernel_mechanism: &'static str = {
         #[cfg(target_os = "windows")]
         {
@@ -371,6 +377,10 @@ pub fn freeze_subtree_kernel(
         }
     };
 
+    #[cfg_attr(
+        not(any(target_os = "windows", target_os = "linux")),
+        allow(unused_mut)
+    )]
     let mut job_bound_pids = Vec::new();
 
     #[cfg(target_os = "windows")]

@@ -1197,7 +1197,10 @@ impl NetworkIsolator for MacOsPfIsolator {
                         if pid != std::process::id()
                             && crate::agent_registry::TrackedAgentTreeRegistry::global()
                                 .is_tracked_pid(pid)
-                            && !crate::killchain::is_critical_system_pid(pid)
+                            && !crate::killchain::is_critical_system_pid(
+                                pid,
+                                s.proc_name.as_deref().unwrap_or(""),
+                            )
                         {
                             unsafe {
                                 let _ = libc::kill(pid as libc::pid_t, libc::SIGKILL);

@@ -13,12 +13,16 @@
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+#[cfg(not(target_os = "macos"))]
+use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use killswitch_types::KillSwitchError;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info};
+#[cfg(not(target_os = "macos"))]
+use tracing::debug;
+use tracing::info;
 
 /// Default maximum entries stored in the in-memory execution sensor FIFO ring buffer.
 pub const EXEC_SENSOR_DEFAULT_CAPACITY: usize = 2048;

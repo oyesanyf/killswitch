@@ -1286,12 +1286,9 @@ table inet killswitch_quarantine {\n\
 
 #[cfg(target_os = "linux")]
 fn find_nft_binary() -> Option<&'static str> {
-    for candidate in ["/usr/sbin/nft", "/sbin/nft", "/usr/bin/nft", "nft"] {
-        if candidate == "nft" || Path::new(candidate).exists() {
-            return Some(candidate);
-        }
-    }
-    None
+    ["/usr/sbin/nft", "/sbin/nft", "/usr/bin/nft", "nft"]
+        .into_iter()
+        .find(|&candidate| candidate == "nft" || Path::new(candidate).exists())
 }
 
 /// Atomically installs `table inet killswitch_quarantine` via `nft -f -` and performs

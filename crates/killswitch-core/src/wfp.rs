@@ -16,7 +16,9 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 #[cfg(windows)]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
-use tracing::{info, warn};
+use tracing::info;
+#[cfg(windows)]
+use tracing::warn;
 
 use killswitch_types::errors::{KillSwitchError, KillSwitchResult};
 use killswitch_types::status::{IsolationReceipt, NetworkIsolationEngine, NetworkIsolator};
@@ -2907,17 +2909,20 @@ pub fn remove_all_killswitch_bfe_registry_rules() -> usize {
 // -----------------------------------------------------------------------------
 // Direct TCP / UDP Socket Inspection & Termination (`iphlpapi.dll`)
 // -----------------------------------------------------------------------------
+#[cfg(any(windows, test))]
 #[inline]
 fn is_exact_localhost_v4(octets: [u8; 4]) -> bool {
     octets == [127, 0, 0, 1]
 }
 
+#[cfg(any(windows, test))]
 #[inline]
 fn is_exact_localhost_v6(octets: [u8; 16]) -> bool {
     let addr = Ipv6Addr::from(octets);
     addr == Ipv6Addr::LOCALHOST || addr.to_ipv4_mapped() == Some(Ipv4Addr::LOCALHOST)
 }
 
+#[cfg(any(windows, test))]
 #[inline]
 fn is_blocked_proxy_port(port: u16, preserved_ports: &[u16]) -> bool {
     !preserved_ports.contains(&port) && QUARANTINE_BLOCKED_LOOPBACK_PROXY_PORTS.contains(&port)
@@ -4085,7 +4090,8 @@ mod tests {
             std::mem::size_of::<FwpRange0>(),
             std::mem::size_of::<FwpValue0>() * 2
         );
-        assert_eq!(std::mem::size_of::<MibTcp6Row>(), 56);
+        assert_eq!(std::mem::size_of::<MibTcp6Row>(), 52);
+        assert_eq!(std::mem::size_of::<MibTcp6RowOwnerPid>(), 56);
     }
 
     #[test]
