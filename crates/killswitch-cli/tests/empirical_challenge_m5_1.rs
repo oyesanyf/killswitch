@@ -34,17 +34,23 @@ use killswitch_types::status::{HealthProbeRunner, OperatorAuthenticator};
 // Helper Fixtures
 // =============================================================================
 
-async fn body_to_bytes(body: axum::body::Body) -> axum::body::Bytes {
-    axum::body::to_bytes(body, usize::MAX).await.unwrap()
-}
-
 const TEST_MASTER_TOKEN: &str = "test_master_token_0123456789abcdef0123456789abcdef";
 
 fn setup_test_server_state() -> (Arc<ServerState>, tempfile::TempDir) {
-    std::env::set_var("KILLSWITCH_MASTER_TOKEN", TEST_MASTER_TOKEN);
     let temp_dir = tempfile::tempdir().unwrap();
-    let containment = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
-    (Arc::new(ServerState::with_defaults(containment)), temp_dir)
+    let containment = Arc::new(
+        HostContainmentManager::new_default_with_master_token(
+            Some(temp_dir.path()),
+            TEST_MASTER_TOKEN.to_string(),
+        )
+        .unwrap(),
+    );
+    let mut state = ServerState::with_defaults(containment);
+    state.control_token = Arc::new(TEST_MASTER_TOKEN.to_string());
+    state
+        .active_bound_port
+        .store(0, std::sync::atomic::Ordering::SeqCst);
+    (Arc::new(state), temp_dir)
 }
 
 struct CyclicProbeNode {
@@ -192,7 +198,13 @@ async fn test_challenge_cyclic_langgraph_recursion_limit_enforcement() {
 async fn test_challenge_cyclic_langgraph_rollback_and_probe_lifecycle() {
     // Build a graph containing: Contain -> Monitor -> [Conditional: eligible -> Rollback, else -> Terminal] -> Terminal
     let temp_dir = tempfile::tempdir().unwrap();
-    let containment = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
+    let containment = Arc::new(
+        HostContainmentManager::new_default_with_master_token(
+            Some(temp_dir.path()),
+            TEST_MASTER_TOKEN.to_string(),
+        )
+        .unwrap(),
+    );
 
     // 1. Ineligible for rollback: should transition to Terminal without rolling back
     {
@@ -231,7 +243,8 @@ async fn test_challenge_cyclic_langgraph_rollback_and_probe_lifecycle() {
         assert_eq!(trans.to_stage, LifecycleStage::Terminal);
     }
 
-    // 2. Eligible for rollback (3 clean probes): should transition to Rollback
+    // 2. Fail-closed invariant: 3 clean probes WITHOUT authenticated operator_approval MUST NOT rollback.
+    // With authenticated operator_approval containing valid CSPRNG/master token, Monitor transitions cleanly to Rollback.
     {
         let builder = StateGraphBuilder::new()
             .add_node(
@@ -248,11 +261,17 @@ async fn test_challenge_cyclic_langgraph_rollback_and_probe_lifecycle() {
                     containment.clone(),
                 )),
             )
+            .add_node(
+                LifecycleStage::Terminal,
+                Arc::new(DummyStepNode(LifecycleStage::Terminal)),
+            )
             .add_conditional_edge(
                 LifecycleStage::Monitor,
                 Arc::new(|state| {
-                    if let Some(probe) = state.probe_results.last() {
-                        if probe.eligible_for_early_rollback {
+                    if let Some(app) = &state.operator_approval {
+                        if app.decision == killswitch_types::graph::ApprovalDecision::Approved
+                            && app.confirmation_token.trim().len() >= 32
+                        {
                             return LifecycleStage::Rollback;
                         }
                     }
@@ -261,8 +280,27 @@ async fn test_challenge_cyclic_langgraph_rollback_and_probe_lifecycle() {
             );
 
         let graph = builder.compile();
+        // 2a. Unapproved: clean probes still hold fail-closed (Terminal, NOT Rollback)
+        let mut unapproved_state =
+            KillSwitchGraphState::new("inc-probe-test-unapproved", OrchestratorMode::Autonomous);
+        unapproved_state.containment_status.isolated = true;
+        let trans_unapproved = graph
+            .step(&mut unapproved_state, LifecycleStage::Monitor)
+            .await
+            .unwrap();
+        assert_eq!(trans_unapproved.to_stage, LifecycleStage::Terminal);
+        assert!(unapproved_state.containment_status.isolated);
+
+        // 2b. Authenticated operator approval authorizes RollbackNode disarm
         let mut state = KillSwitchGraphState::new("inc-probe-test-2", OrchestratorMode::Autonomous);
         state.containment_status.isolated = true;
+        state.operator_approval = Some(killswitch_types::graph::OperatorApprovalState {
+            decision: killswitch_types::graph::ApprovalDecision::Approved,
+            operator_id: "secops_lead".to_string(),
+            confirmation_token: TEST_MASTER_TOKEN.to_string(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            comments: Some("Authenticated operator rollback".to_string()),
+        });
 
         let trans1 = graph
             .step(&mut state, LifecycleStage::Monitor)
@@ -276,7 +314,7 @@ async fn test_challenge_cyclic_langgraph_rollback_and_probe_lifecycle() {
             .unwrap();
         assert!(
             !state.containment_status.isolated,
-            "Rollback must disarm isolation"
+            "Authenticated Rollback must disarm isolation"
         );
         assert!(state.verify_trace_chain());
     }
@@ -559,27 +597,55 @@ async fn test_challenge_axum_server_concurrent_request_stress() {
 
 #[tokio::test]
 async fn test_challenge_axum_server_3_strike_rate_limit_lockout_and_bypass() {
-    let (state, _temp_dir) = setup_test_server_state();
-    let app = build_router(state.clone());
+    let temp_dir = tempfile::tempdir().unwrap();
+    let local_master = "challenge_m5_1_master_token_0123456789abcdef0123456789abcdef";
+    let containment = Arc::new(
+        HostContainmentManager::new_default_with_master_token(
+            Some(temp_dir.path()),
+            local_master.to_string(),
+        )
+        .unwrap(),
+    );
+    let mut raw_state = ServerState::with_defaults(containment);
+    raw_state.control_token = Arc::new(local_master.to_string());
+    let state = Arc::new(raw_state);
 
-    // Isolate endpoint first
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    state
+        .active_bound_port
+        .store(port, std::sync::atomic::Ordering::SeqCst);
+
+    let app = build_router(state.clone());
+    let server_handle = tokio::spawn(async move {
+        let _ = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await;
+    });
+
+    let http = reqwest::Client::new();
+    let base_url = format!("http://127.0.0.1:{}", port);
+
+    // 1. Authenticated /engage over real loopback socket
     let engage_body = serde_json::json!({
         "operator": "secops_admin",
         "reason": "Challenge test isolation",
-        "token": "CONFIRM ISOLATE",
+        "token": local_master,
         "level": "network_quarantine"
     });
-    let req = Request::builder()
-        .uri("/engage")
-        .method("POST")
-        .header("Content-Type", "application/json")
-        .body(Body::from(serde_json::to_vec(&engage_body).unwrap()))
+    let engage_resp = http
+        .post(format!("{}/engage", base_url))
+        .json(&engage_body)
+        .send()
+        .await
         .unwrap();
-    let resp = app.clone().oneshot(req).await.unwrap();
     assert!(
-        resp.status() == StatusCode::OK || resp.status() == StatusCode::FORBIDDEN,
+        engage_resp.status() == reqwest::StatusCode::OK
+            || engage_resp.status() == reqwest::StatusCode::FORBIDDEN,
         "Engage request must either succeed or return 403 Forbidden under non-root kernel permission constraints, got: {}",
-        resp.status()
+        engage_resp.status()
     );
 
     // Verify initial lockout state is clean
@@ -595,17 +661,15 @@ async fn test_challenge_axum_server_3_strike_rate_limit_lockout_and_bypass() {
 
     // Strikes 1, 2, and 3: each must fail authentication
     for strike in 1..=3 {
-        let req = Request::builder()
-            .uri("/disarm")
-            .method("POST")
-            .header("Content-Type", "application/json")
-            .body(Body::from(serde_json::to_vec(&bad_disarm_body).unwrap()))
+        let resp = http
+            .post(format!("{}/disarm", base_url))
+            .json(&bad_disarm_body)
+            .send()
+            .await
             .unwrap();
-
-        let resp = app.clone().oneshot(req).await.unwrap();
         assert_eq!(
             resp.status(),
-            StatusCode::UNAUTHORIZED,
+            reqwest::StatusCode::UNAUTHORIZED,
             "Strike {} must be rejected with 401 Unauthorized",
             strike
         );
@@ -628,46 +692,41 @@ async fn test_challenge_axum_server_3_strike_rate_limit_lockout_and_bypass() {
 
     // Strike 4: Attempting authentication during active lockout is rejected
     {
-        let req = Request::builder()
-            .uri("/disarm")
-            .method("POST")
-            .header("Content-Type", "application/json")
-            .body(Body::from(serde_json::to_vec(&bad_disarm_body).unwrap()))
+        let resp = http
+            .post(format!("{}/disarm", base_url))
+            .json(&bad_disarm_body)
+            .send()
+            .await
             .unwrap();
-
-        let resp = app.clone().oneshot(req).await.unwrap();
         // Server rejects either 401 UNAUTHORIZED or 429 TOO_MANY_REQUESTS
         assert!(
-            resp.status() == StatusCode::UNAUTHORIZED
-                || resp.status() == StatusCode::TOO_MANY_REQUESTS,
+            resp.status() == reqwest::StatusCode::UNAUTHORIZED
+                || resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS,
             "Request during active lockout must be rejected"
         );
     }
 
-    // Emergency Master Token Bypass: "CONFIRM RESTORE" must bypass the active 300s lockout
+    // Emergency Master Token Bypass: valid CSPRNG master token must bypass the active 300s lockout
     {
         let master_body = serde_json::json!({
             "operator": "secops_admin",
             "reason": "Authorized emergency restore bypass",
-            "token": TEST_MASTER_TOKEN
+            "token": local_master
         });
 
-        let req = Request::builder()
-            .uri("/disarm")
-            .method("POST")
-            .header("Content-Type", "application/json")
-            .body(Body::from(serde_json::to_vec(&master_body).unwrap()))
+        let resp = http
+            .post(format!("{}/disarm", base_url))
+            .json(&master_body)
+            .send()
+            .await
             .unwrap();
-
-        let resp = app.clone().oneshot(req).await.unwrap();
         assert_eq!(
             resp.status(),
-            StatusCode::OK,
+            reqwest::StatusCode::OK,
             "Master emergency restore token must bypass 300s lockout"
         );
 
-        let body_bytes = body_to_bytes(resp.into_body()).await;
-        let disarm_resp: DisarmResponse = serde_json::from_slice(&body_bytes).unwrap();
+        let disarm_resp: DisarmResponse = resp.json().await.unwrap();
         assert!(disarm_resp.success);
         assert!(!disarm_resp.status.isolated);
 
@@ -679,4 +738,27 @@ async fn test_challenge_axum_server_3_strike_rate_limit_lockout_and_bypass() {
         );
         assert_eq!(post_bypass_lockout.failed_attempts, 0);
     }
+
+    // Legacy static confirmation phrase "CONFIRM ISOLATE" must be rejected with 401 Unauthorized
+    {
+        let legacy_engage_body = serde_json::json!({
+            "operator": "secops_admin",
+            "reason": "Legacy static phrase attempt",
+            "token": "CONFIRM ISOLATE",
+            "level": "network_quarantine"
+        });
+        let legacy_resp = http
+            .post(format!("{}/engage", base_url))
+            .json(&legacy_engage_body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            legacy_resp.status(),
+            reqwest::StatusCode::UNAUTHORIZED,
+            "Legacy 'CONFIRM ISOLATE' phrase on /engage must fail closed with 401"
+        );
+    }
+
+    server_handle.abort();
 }

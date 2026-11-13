@@ -772,31 +772,65 @@ fn test_bounded_agents_apc_privileged_execution_gating() {
 // MODULE 6: CONTROL PLANE MUTUAL AUTHENTICATION & LOOPBACK HARDENING (R4)
 // ============================================================================
 
-pub use killswitch_server::auth::{verify_control_plane_request, AuthVerdict, TEST_MASTER_TOKEN};
+pub use killswitch_server::auth::{verify_control_plane_request_with_token, AuthVerdict};
+
+const E2E_CONTROL_TOKEN: &str = "ks-e2e-test-token-0123456789abcdef0123456789abcdef";
 
 #[test]
 fn test_control_plane_unauthenticated_requests_return_401() {
     let frozen_pids = vec![];
     // No token provided to /engage, /mode, /rl/learn, or /rate-limit/allowlist
-    let verdict = verify_control_plane_request(None, None, Some(100), 100, &frozen_pids);
+    let verdict = verify_control_plane_request_with_token(
+        None,
+        None,
+        Some(100),
+        100,
+        &frozen_pids,
+        E2E_CONTROL_TOKEN,
+    );
     assert_eq!(verdict, AuthVerdict::Unauthorized401);
 
     // Empty token
-    let verdict_empty =
-        verify_control_plane_request(Some("   "), None, Some(100), 100, &frozen_pids);
+    let verdict_empty = verify_control_plane_request_with_token(
+        Some("   "),
+        None,
+        Some(100),
+        100,
+        &frozen_pids,
+        E2E_CONTROL_TOKEN,
+    );
     assert_eq!(verdict_empty, AuthVerdict::Unauthorized401);
 
-    // Invalid token
-    let verdict_bad =
-        verify_control_plane_request(Some("bad_token"), None, Some(100), 100, &frozen_pids);
-    assert_eq!(verdict_bad, AuthVerdict::Unauthorized401);
+    // Invalid token and legacy static bypasses MUST be rejected fail-closed
+    for rejected in [
+        "bad_token",
+        "CONFIRM ISOLATE",
+        "CONFIRM RESTORE",
+        "KS-TOKEN-SEC-REM-9999-VERIFIED-AUTH",
+    ] {
+        let verdict_bad = verify_control_plane_request_with_token(
+            Some(rejected),
+            None,
+            Some(100),
+            100,
+            &frozen_pids,
+            E2E_CONTROL_TOKEN,
+        );
+        assert_eq!(verdict_bad, AuthVerdict::Unauthorized401);
+    }
 }
 
 #[test]
 fn test_control_plane_authenticated_modification_success() {
     let frozen_pids = vec![];
-    let verdict =
-        verify_control_plane_request(Some(TEST_MASTER_TOKEN), None, Some(100), 100, &frozen_pids);
+    let verdict = verify_control_plane_request_with_token(
+        Some(E2E_CONTROL_TOKEN),
+        None,
+        Some(100),
+        100,
+        &frozen_pids,
+        E2E_CONTROL_TOKEN,
+    );
     assert_eq!(verdict, AuthVerdict::Authorized);
 }
 
@@ -804,8 +838,14 @@ fn test_control_plane_authenticated_modification_success() {
 fn test_control_plane_caller_pid_spoofing_detection() {
     let frozen_pids = vec![];
     // Claimed PID 100, but peer socket PID is 200
-    let verdict =
-        verify_control_plane_request(Some(TEST_MASTER_TOKEN), None, Some(100), 200, &frozen_pids);
+    let verdict = verify_control_plane_request_with_token(
+        Some(E2E_CONTROL_TOKEN),
+        None,
+        Some(100),
+        200,
+        &frozen_pids,
+        E2E_CONTROL_TOKEN,
+    );
     assert_eq!(verdict, AuthVerdict::Forbidden403PidSpoofing);
 }
 
@@ -813,8 +853,14 @@ fn test_control_plane_caller_pid_spoofing_detection() {
 fn test_control_plane_quarantined_caller_blocking() {
     let frozen_pids = vec![300];
     // Caller is currently frozen/quarantined in PID 300
-    let verdict =
-        verify_control_plane_request(Some(TEST_MASTER_TOKEN), None, Some(300), 300, &frozen_pids);
+    let verdict = verify_control_plane_request_with_token(
+        Some(E2E_CONTROL_TOKEN),
+        None,
+        Some(300),
+        300,
+        &frozen_pids,
+        E2E_CONTROL_TOKEN,
+    );
     assert_eq!(verdict, AuthVerdict::Forbidden403CallerQuarantined);
 }
 

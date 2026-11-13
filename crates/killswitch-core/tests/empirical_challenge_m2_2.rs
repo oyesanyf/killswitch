@@ -12,10 +12,7 @@
 use killswitch_core::{
     auth::OperatorAuthManager,
     freeze::NativeProcessFreezer,
-    killchain::{
-        execute_host_disarm_unauthenticated, is_critical_system_pid, KillChainHostManager,
-        SimulatedNetworkIsolator,
-    },
+    killchain::{is_critical_system_pid, KillChainHostManager, SimulatedNetworkIsolator},
     pf::{
         generate_quarantine_rules, DarwinPfTrans, DarwinPfTransElement, DarwinPfiocRule,
         MacOsPfIsolator, PfAction, PfDirection, PfProtocol, DIOCADDRULE, DIOCSTART, DIOCSTOP,
@@ -28,8 +25,8 @@ use killswitch_types::{
     errors::{KillSwitchError, Result},
     status::{
         ContainmentLevel, HealthProbeRunner, KillChainStatus, NetworkIsolationEngine,
-        NetworkIsolator, ProcessFreezer, ProcessIsolationMethod, ProcessIsolationState,
-        DEFAULT_CONTROL_PORT,
+        NetworkIsolator, OperatorCredentials, ProcessFreezer, ProcessIsolationMethod,
+        ProcessIsolationState, DEFAULT_CONTROL_PORT,
     },
 };
 use parking_lot::RwLock;
@@ -890,19 +887,23 @@ async fn test_health_probe_progression_1_2_3_clean_probes_early_rollback() {
     assert!(report3.process_tree_integrity_ok);
     assert_eq!(report3.consecutive_healthy_probes, 3);
     assert!(
-        report3.eligible_for_early_rollback,
-        "Probe 3 MUST BE eligible for early rollback!"
+        !report3.eligible_for_early_rollback,
+        "Fail-closed invariant: 3 clean probes MUST NOT authorize unauthenticated early rollback!"
     );
 
     let status3 = manager.get_status();
     assert_eq!(status3.consecutive_healthy_probes, 3);
+    assert!(
+        status3.isolated,
+        "Host must remain isolated until authenticated disarm"
+    );
 
-    // Disarm and verify clean state
-    let disarmed = manager
-        .disarm_isolation("test_admin", "Test Complete", None)
+    // Verify unauthenticated disarm (None credentials) is rejected fail-closed
+    assert!(manager
+        .disarm_isolation("test_admin", "Unauthenticated probe completion", None)
         .await
-        .unwrap();
-    assert!(!disarmed.isolated);
+        .is_err());
+    assert!(manager.get_status().isolated);
 }
 
 #[tokio::test]
@@ -911,10 +912,10 @@ async fn test_health_probe_anomaly_resets_consecutive_counter() {
     let ledger = Arc::new(RwLock::new(
         StateLedger::open_or_init(Some(dir.path())).unwrap(),
     ));
-    let auth = Arc::new(OperatorAuthManager::new(
-        Some(dir.path().to_path_buf()),
-        None,
-    ));
+    let test_tok = "ks-m2-2-probe-reset-token-0123456789abcdef0123456789abcdef";
+    let mut auth = OperatorAuthManager::new(Some(dir.path().to_path_buf()), None);
+    auth.set_custom_master_token(test_tok.to_string());
+    let auth = Arc::new(auth);
     let freezer = Arc::new(ControllableProcessFreezer::default());
     let manager = Arc::new(KillChainHostManager::new(
         Arc::new(SimulatedNetworkIsolator),
@@ -953,22 +954,29 @@ async fn test_health_probe_anomaly_resets_consecutive_counter() {
     assert_eq!(r3.consecutive_healthy_probes, 1);
     assert!(!r3.eligible_for_early_rollback);
 
+    let creds = killswitch_types::status::OperatorCredentials {
+        operator_id: "test_admin".to_string(),
+        auth_token: Some(test_tok.to_string()),
+        password: None,
+        caller_pid: Some(std::process::id()),
+        confirmation_phrase: None,
+    };
     manager
-        .disarm_isolation("test_admin", "Clean Disarm", None)
+        .disarm_isolation("test_admin", "Clean Disarm", Some(&creds))
         .await
         .unwrap();
 }
 
 #[tokio::test]
-async fn test_watchdog_early_rollback_automatic_disarm_integration() {
+async fn test_three_clean_probes_do_not_trigger_automatic_rollback() {
     let dir = tempdir().unwrap();
     let ledger = Arc::new(RwLock::new(
         StateLedger::open_or_init(Some(dir.path())).unwrap(),
     ));
-    let auth = Arc::new(OperatorAuthManager::new(
-        Some(dir.path().to_path_buf()),
-        None,
-    ));
+    let test_tok = "ks-m2-2-no-auto-rollback-0123456789abcdef0123456789abcdef";
+    let mut auth = OperatorAuthManager::new(Some(dir.path().to_path_buf()), None);
+    auth.set_custom_master_token(test_tok.to_string());
+    let auth = Arc::new(auth);
     let freezer = Arc::new(ControllableProcessFreezer::default());
     let manager = Arc::new(KillChainHostManager::new(
         Arc::new(SimulatedNetworkIsolator),
@@ -980,7 +988,7 @@ async fn test_watchdog_early_rollback_automatic_disarm_integration() {
     manager
         .engage_isolation(
             "sec_bot",
-            "Automatic early rollback integration test",
+            "Fail-closed probe non-rollback verification",
             ContainmentLevel::HermeticIsolation,
             Some(std::process::id()),
         )
@@ -991,42 +999,50 @@ async fn test_watchdog_early_rollback_automatic_disarm_integration() {
     manager.run_probe().unwrap();
     manager.run_probe().unwrap();
     let r3 = manager.run_probe().unwrap();
-    assert!(r3.eligible_for_early_rollback);
+    assert_eq!(r3.consecutive_healthy_probes, 3);
+    assert!(
+        !r3.eligible_for_early_rollback,
+        "Fail-closed: 3 clean probes must NEVER authorize unauthenticated rollback"
+    );
 
-    // Simulate the watchdog triggering early rollback when eligible
-    if r3.eligible_for_early_rollback {
-        manager
-            .execute_unauthenticated_emergency_disarm(
-                "Early automatic rollback: process tree integrity verified across consecutive probes",
-            )
-            .await
-            .unwrap();
-    }
+    // Unauthenticated disarm without creds MUST fail closed
+    assert!(manager
+        .disarm_isolation("sec_bot", "Unauthenticated attempt", None)
+        .await
+        .is_err());
+    assert!(manager.get_status().isolated);
+
+    // Authenticated disarm with operator credentials must succeed cleanly
+    let creds = killswitch_types::status::OperatorCredentials {
+        operator_id: "sec_bot".to_string(),
+        auth_token: Some(test_tok.to_string()),
+        password: None,
+        caller_pid: Some(std::process::id()),
+        confirmation_phrase: None,
+    };
+    manager
+        .disarm_isolation("sec_bot", "Authenticated operator restore", Some(&creds))
+        .await
+        .unwrap();
 
     let status = manager.get_status();
-    assert!(
-        !status.isolated,
-        "Status must be disarmed after early rollback"
-    );
+    assert!(!status.isolated);
     assert_eq!(status.containment_level, ContainmentLevel::Disarmed);
 
-    // Verify ledger history records disarm
     let history = manager.get_history();
-    assert!(history
-        .iter()
-        .any(|h| h.action == "DISARMED_SHUTDOWN" || h.action == "DISARMED"));
+    assert!(history.iter().any(|h| h.action == "DISARMED"));
 }
 
 #[tokio::test]
-async fn test_unauthenticated_emergency_disarm_and_state_recovery() {
+async fn test_fail_closed_disarm_rejection_and_authenticated_recovery() {
     let dir = tempdir().unwrap();
     let ledger = Arc::new(RwLock::new(
         StateLedger::open_or_init(Some(dir.path())).unwrap(),
     ));
-    let auth = Arc::new(OperatorAuthManager::new(
-        Some(dir.path().to_path_buf()),
-        None,
-    ));
+    let test_tok = "ks-m2-2-auth-recovery-tok-0123456789abcdef0123456789abcdef";
+    let mut auth = OperatorAuthManager::new(Some(dir.path().to_path_buf()), None);
+    auth.set_custom_master_token(test_tok.to_string());
+    let auth = Arc::new(auth);
     let freezer = Arc::new(ControllableProcessFreezer::default());
     let manager = Arc::new(KillChainHostManager::new(
         Arc::new(SimulatedNetworkIsolator),
@@ -1048,9 +1064,23 @@ async fn test_unauthenticated_emergency_disarm_and_state_recovery() {
 
     assert!(manager.get_status().isolated);
 
-    // Trigger emergency disarm without credentials (e.g. on SIGTERM or service stop)
+    // Unauthenticated disarm must fail closed
+    assert!(manager
+        .disarm_isolation("admin", "No creds attempt", None)
+        .await
+        .is_err());
+    assert!(manager.get_status().isolated);
+
+    // Authenticated disarm must succeed
+    let creds = killswitch_types::status::OperatorCredentials {
+        operator_id: "admin".to_string(),
+        auth_token: Some(test_tok.to_string()),
+        password: None,
+        caller_pid: Some(std::process::id()),
+        confirmation_phrase: None,
+    };
     let disarm_status = manager
-        .execute_unauthenticated_emergency_disarm("SIGTERM received by supervisor")
+        .disarm_isolation("admin", "Authenticated operator recovery", Some(&creds))
         .await
         .unwrap();
 
@@ -1062,29 +1092,16 @@ async fn test_unauthenticated_emergency_disarm_and_state_recovery() {
     assert!(!ledger_read.isolated);
 }
 
-#[test]
-fn test_unconditional_global_host_disarm_safety() {
-    // Call the global standalone unconditional host disarm hook
-    let disarm_result = execute_host_disarm_unauthenticated();
-    assert!(
-        disarm_result.is_ok(),
-        "Global unconditional host disarm must never fail"
-    );
-    let status = disarm_result.unwrap();
-    assert!(!status.isolated);
-    assert_eq!(status.containment_level, ContainmentLevel::Disarmed);
-}
-
 #[tokio::test]
-async fn test_manual_disarm_abrupt_watchdog_cancellation() {
+async fn test_unauthenticated_disarm_rejected_fail_closed() {
     let dir = tempdir().unwrap();
+    let master_token = "KILLSWITCH_M2_2_FAIL_CLOSED_TEST_TOKEN_0123456789ABCDEF";
     let ledger = Arc::new(RwLock::new(
         StateLedger::open_or_init(Some(dir.path())).unwrap(),
     ));
-    let auth = Arc::new(OperatorAuthManager::new(
-        Some(dir.path().to_path_buf()),
-        None,
-    ));
+    let mut auth_mgr = OperatorAuthManager::new(Some(dir.path().to_path_buf()), None);
+    auth_mgr.set_custom_master_token(master_token.to_string());
+    let auth = Arc::new(auth_mgr);
     let freezer = Arc::new(ControllableProcessFreezer::default());
     let manager = Arc::new(KillChainHostManager::new(
         Arc::new(SimulatedNetworkIsolator),
@@ -1093,7 +1110,46 @@ async fn test_manual_disarm_abrupt_watchdog_cancellation() {
         ledger,
     ));
 
-    // Engage isolation (which spawns the background watchdog task)
+    manager
+        .engage_isolation(
+            "operator",
+            "Testing fail-closed disarm gate",
+            ContainmentLevel::HermeticIsolation,
+            Some(std::process::id()),
+        )
+        .await
+        .unwrap();
+
+    // Unauthenticated disarm without credentials must fail closed
+    let disarm_result = manager
+        .disarm_isolation("operator", "Attempted bypass without credentials", None)
+        .await;
+    assert!(
+        disarm_result.is_err(),
+        "Disarm without authenticated OperatorCredentials must fail closed"
+    );
+    assert!(manager.get_status().isolated);
+}
+
+#[tokio::test]
+async fn test_manual_disarm_abrupt_watchdog_cancellation() {
+    let dir = tempdir().unwrap();
+    let master_token = "KILLSWITCH_M2_2_MANUAL_CANCEL_CSPRNG_KEY_0123456789ABCDEF";
+    let ledger = Arc::new(RwLock::new(
+        StateLedger::open_or_init(Some(dir.path())).unwrap(),
+    ));
+    let mut auth_mgr = OperatorAuthManager::new(Some(dir.path().to_path_buf()), None);
+    auth_mgr.set_custom_master_token(master_token.to_string());
+    let auth = Arc::new(auth_mgr);
+    let freezer = Arc::new(ControllableProcessFreezer::default());
+    let manager = Arc::new(KillChainHostManager::new(
+        Arc::new(SimulatedNetworkIsolator),
+        freezer,
+        auth,
+        ledger,
+    ));
+
+    // Engage isolation (which spawns the background watchdog monitor task)
     manager
         .engage_isolation(
             "operator",
@@ -1106,9 +1162,16 @@ async fn test_manual_disarm_abrupt_watchdog_cancellation() {
 
     assert!(manager.get_status().isolated);
 
-    // Immediately trigger manual disarm without waiting for probes or timeout
+    // Immediately trigger authenticated manual disarm without waiting for probes
+    let creds = OperatorCredentials {
+        operator_id: "operator".to_string(),
+        auth_token: Some(master_token.to_string()),
+        password: None,
+        caller_pid: Some(std::process::id()),
+        confirmation_phrase: None,
+    };
     let disarmed = manager
-        .disarm_isolation("operator", "Abrupt manual cancellation", None)
+        .disarm_isolation("operator", "Abrupt manual cancellation", Some(&creds))
         .await
         .unwrap();
 
@@ -1121,10 +1184,10 @@ async fn test_manual_disarm_abrupt_watchdog_cancellation() {
     assert!(!manager.get_status().isolated);
 }
 
-#[test]
-fn test_unconditional_disarm_resumes_frozen_pids_from_ledger() {
+#[tokio::test]
+async fn test_authenticated_disarm_resumes_frozen_pids_from_ledger() {
     let temp = tempdir().expect("tempdir");
-    std::env::set_var("KILLSWITCH_DATABASE_DIR", temp.path());
+    let master_token = "KILLSWITCH_M2_2_RESUME_LEDGER_CSPRNG_KEY_0123456789ABCDEF";
 
     // 1. Initialize ledger and record an engaged state with simulated frozen PIDs
     let mut ledger = StateLedger::open_or_init(Some(temp.path())).expect("open ledger");
@@ -1161,13 +1224,38 @@ fn test_unconditional_disarm_resumes_frozen_pids_from_ledger() {
     assert_eq!(snapshot_before.status.frozen_pids, vec![fake_frozen_pid]);
     assert_eq!(snapshot_before.process_records.len(), 1);
 
-    // 2. Invoke execute_host_disarm_unauthenticated
-    let disarm_res = execute_host_disarm_unauthenticated();
-    assert!(
-        disarm_res.is_ok(),
-        "execute_host_disarm_unauthenticated must succeed"
-    );
-    let status = disarm_res.unwrap();
+    let ledger_arc = Arc::new(RwLock::new(ledger));
+    let mut auth_mgr = OperatorAuthManager::new(Some(temp.path().to_path_buf()), None);
+    auth_mgr.set_custom_master_token(master_token.to_string());
+    let auth = Arc::new(auth_mgr);
+    let freezer = Arc::new(ControllableProcessFreezer::default());
+    let manager = Arc::new(KillChainHostManager::new(
+        Arc::new(SimulatedNetworkIsolator),
+        freezer,
+        auth,
+        ledger_arc,
+    ));
+
+    // 2a. Unauthenticated disarm must fail closed and keep frozen PIDs quarantined
+    let unauth_res = manager
+        .disarm_isolation("test_operator", "Unauthorized disarm", None)
+        .await;
+    assert!(unauth_res.is_err());
+    assert!(manager.get_status().isolated);
+    assert_eq!(manager.get_status().frozen_pids, vec![fake_frozen_pid]);
+
+    // 2b. Invoke authenticated disarm with valid OperatorCredentials
+    let creds = OperatorCredentials {
+        operator_id: "test_operator".to_string(),
+        auth_token: Some(master_token.to_string()),
+        password: None,
+        caller_pid: Some(std::process::id()),
+        confirmation_phrase: None,
+    };
+    let status = manager
+        .disarm_isolation("test_operator", "Verified operator recovery", Some(&creds))
+        .await
+        .expect("authenticated disarm must succeed");
     assert!(!status.isolated);
     assert_eq!(status.containment_level, ContainmentLevel::Disarmed);
     assert_eq!(status.processes_frozen_count, 0);
@@ -1182,10 +1270,8 @@ fn test_unconditional_disarm_resumes_frozen_pids_from_ledger() {
 
     let history = &ledger_after.snapshot().history;
     assert!(!history.is_empty());
-    assert_eq!(history[0].action, "DISARMED_UNCONDITIONAL");
-    assert_eq!(history[0].operator, "SYSTEM_SHUTDOWN");
-
-    std::env::remove_var("KILLSWITCH_DATABASE_DIR");
+    assert_eq!(history[0].action, "DISARMED");
+    assert_eq!(history[0].operator, "test_operator");
 }
 
 #[tokio::test]

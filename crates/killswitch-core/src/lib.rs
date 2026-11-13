@@ -36,9 +36,9 @@ pub use auth::{FrozenPidsProvider, OperatorAuthManager};
 pub use fprime::{FPrimeDispatchResult, FPrimeOpcode, FPrimeSupervisor, FPrimeTopologyStatus};
 pub use freeze::NativeProcessFreezer;
 pub use killchain::{
-    default_network_isolator, execute_host_disarm_unauthenticated, is_critical_system_pid,
-    is_developer_or_agent_runtime, is_immutable_os_kernel_pid, HostContainmentManager,
-    KillChainHostManager, SimulatedNetworkIsolator,
+    default_network_isolator, is_critical_system_pid, is_developer_or_agent_runtime,
+    is_immutable_os_kernel_pid, HostContainmentManager, KillChainHostManager,
+    SimulatedNetworkIsolator,
 };
 pub use landlock::{
     apply_landlock_sandbox, get_active_non_loopback_connections, get_landlock_abi_version,

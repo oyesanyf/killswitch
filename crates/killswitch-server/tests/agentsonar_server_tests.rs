@@ -2,11 +2,9 @@
 //! authentication (`401 Unauthorized` without valid token, `200 OK` with token),
 //! AST-guarded `/api/agentsonar/classify`, and WebUI Card 11 zero-`innerHTML` invariant.
 
-use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::body::Body;
-use axum::extract::ConnectInfo;
 use axum::http::{Request, StatusCode};
 use tower::ServiceExt;
 
@@ -17,12 +15,20 @@ use killswitch_server::server::ServerState;
 const TEST_MASTER_TOKEN: &str = "KS-TOKEN-AGENTSONAR-SERVER-TEST-2026-VERIFIED";
 
 fn setup_server_state() -> Arc<ServerState> {
-    std::env::set_var("KILLSWITCH_MASTER_TOKEN", TEST_MASTER_TOKEN);
-    std::env::set_var("KILLSWITCH_CONTROL_TOKEN", TEST_MASTER_TOKEN);
     let temp_dir = tempfile::tempdir().unwrap();
-    let containment =
-        Arc::new(HostContainmentManager::new_simulated(Some(temp_dir.path())).unwrap());
-    Arc::new(ServerState::with_defaults(containment))
+    let containment = Arc::new(
+        HostContainmentManager::new_simulated_with_master_token(
+            Some(temp_dir.path()),
+            TEST_MASTER_TOKEN.to_string(),
+        )
+        .unwrap(),
+    );
+    let mut raw_state = ServerState::with_defaults(containment);
+    raw_state.control_token = Arc::new(TEST_MASTER_TOKEN.to_string());
+    raw_state
+        .active_bound_port
+        .store(0, std::sync::atomic::Ordering::SeqCst);
+    Arc::new(raw_state)
 }
 
 async fn read_json(body: Body) -> serde_json::Value {
@@ -33,10 +39,9 @@ async fn read_json(body: Body) -> serde_json::Value {
 #[tokio::test]
 async fn test_agentsonar_mutating_endpoints_enforce_r4_auth_and_crud() {
     let state = setup_server_state();
-    let loopback = SocketAddr::from(([127, 0, 0, 1], 49210));
 
     // 1. Unauthenticated POST /api/agentsonar/agents -> 401 Unauthorized
-    let mut unauth_req = Request::builder()
+    let unauth_req = Request::builder()
         .uri("/api/agentsonar/agents")
         .method("POST")
         .header("Content-Type", "application/json")
@@ -50,7 +55,6 @@ async fn test_agentsonar_mutating_endpoints_enforce_r4_auth_and_crud() {
             .unwrap(),
         ))
         .unwrap();
-    unauth_req.extensions_mut().insert(ConnectInfo(loopback));
     let unauth_resp = build_router(state.clone())
         .oneshot(unauth_req)
         .await
@@ -58,7 +62,7 @@ async fn test_agentsonar_mutating_endpoints_enforce_r4_auth_and_crud() {
     assert_eq!(unauth_resp.status(), StatusCode::UNAUTHORIZED);
 
     // 2. Authenticated POST /api/agentsonar/agents -> 200 OK
-    let mut auth_req = Request::builder()
+    let auth_req = Request::builder()
         .uri("/api/agentsonar/agents")
         .method("POST")
         .header("Content-Type", "application/json")
@@ -73,7 +77,6 @@ async fn test_agentsonar_mutating_endpoints_enforce_r4_auth_and_crud() {
             .unwrap(),
         ))
         .unwrap();
-    auth_req.extensions_mut().insert(ConnectInfo(loopback));
     let auth_resp = build_router(state.clone()).oneshot(auth_req).await.unwrap();
     assert_eq!(auth_resp.status(), StatusCode::OK);
     let body = read_json(auth_resp.into_body()).await;
@@ -114,7 +117,7 @@ async fn test_agentsonar_mutating_endpoints_enforce_r4_auth_and_crud() {
     assert!(schema_json["options"]["table_construction"]["agentsonar_events"].is_object());
 
     // 4. POST /api/agentsonar/classify scores flow and blocks privileged external_cmd
-    let mut cls_req = Request::builder()
+    let cls_req = Request::builder()
         .uri("/api/agentsonar/classify")
         .method("POST")
         .header("Content-Type", "application/json")
@@ -126,14 +129,13 @@ async fn test_agentsonar_mutating_endpoints_enforce_r4_auth_and_crud() {
             .unwrap(),
         ))
         .unwrap();
-    cls_req.extensions_mut().insert(ConnectInfo(loopback));
     let cls_resp = build_router(state.clone()).oneshot(cls_req).await.unwrap();
     assert_eq!(cls_resp.status(), StatusCode::OK);
     let cls_json = read_json(cls_resp.into_body()).await;
     assert_eq!(cls_json["agent"], "verified-api-agent");
     assert_eq!(cls_json["scores"]["default"], 1.0);
 
-    let mut bad_ext_req = Request::builder()
+    let bad_ext_req = Request::builder()
         .uri("/api/agentsonar/classify")
         .method("POST")
         .header("Content-Type", "application/json")
@@ -146,7 +148,6 @@ async fn test_agentsonar_mutating_endpoints_enforce_r4_auth_and_crud() {
             .unwrap(),
         ))
         .unwrap();
-    bad_ext_req.extensions_mut().insert(ConnectInfo(loopback));
     let bad_ext_resp = build_router(state.clone())
         .oneshot(bad_ext_req)
         .await
@@ -154,7 +155,7 @@ async fn test_agentsonar_mutating_endpoints_enforce_r4_auth_and_crud() {
     assert_eq!(bad_ext_resp.status(), StatusCode::BAD_REQUEST);
 
     // Cleanup test agent rule
-    let mut cleanup_req = Request::builder()
+    let cleanup_req = Request::builder()
         .uri("/api/agentsonar/agents")
         .method("POST")
         .header("Content-Type", "application/json")
@@ -167,7 +168,6 @@ async fn test_agentsonar_mutating_endpoints_enforce_r4_auth_and_crud() {
             .unwrap(),
         ))
         .unwrap();
-    cleanup_req.extensions_mut().insert(ConnectInfo(loopback));
     let _ = build_router(state.clone())
         .oneshot(cleanup_req)
         .await

@@ -17,7 +17,7 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 use killswitch_adjudication::ZeroFalsePositiveAdjudicator;
-use killswitch_core::killchain::{execute_host_disarm_unauthenticated, HostContainmentManager};
+use killswitch_core::killchain::HostContainmentManager;
 use killswitch_core::service::{default_service_manager, NativeServiceManager};
 use killswitch_orchestrator::engine::{KillSwitchOrchestrator, OrchestratorConfig};
 use killswitch_server::error::ServerError;
@@ -145,7 +145,16 @@ impl UnifiedRuntime {
         if config.db_dir.is_none() {
             let legacy_ledger = PathBuf::from("killchain_state.json");
             if legacy_ledger.exists() && !legacy_ledger.is_symlink() {
-                let _ = std::fs::remove_file(&legacy_ledger);
+                if let Ok(raw) = std::fs::read_to_string(&legacy_ledger) {
+                    if !raw.contains("\"isolated\": true") && !raw.contains("\"isolated\":true") {
+                        let _ = std::fs::remove_file(&legacy_ledger);
+                    } else {
+                        warn!(
+                            "⚠️ [LOADER] Preserving legacy active quarantine ledger '{}'",
+                            legacy_ledger.display()
+                        );
+                    }
+                }
             }
         }
 
@@ -160,10 +169,20 @@ impl UnifiedRuntime {
             && containment_manager.get_status().isolated
             && !killswitch_core::wfp::has_live_active_wfp_filters()
         {
-            warn!("⚠️ [LOADER] Reconciling stale ledger state on boot: ledger showed isolated=true with zero live WFP filters in BFE.");
+            let status_snapshot = containment_manager.get_status();
+            warn!("🛡️ [LOADER] Re-enforcing persistent ledger quarantine on boot: WFP filters absent while ledger recorded isolated=true.");
             let _ = containment_manager
-                .execute_unauthenticated_emergency_disarm(
-                    "Boot reconciliation: zero live WFP kernel filters active in BFE",
+                .engage_isolation(
+                    status_snapshot
+                        .isolated_by
+                        .as_deref()
+                        .unwrap_or("BOOT_PERSISTENCE"),
+                    status_snapshot
+                        .reason
+                        .as_deref()
+                        .unwrap_or("Fail-closed boot re-enforcement of persisted containment"),
+                    status_snapshot.containment_level,
+                    None,
                 )
                 .await;
         }
@@ -192,6 +211,29 @@ impl UnifiedRuntime {
         if std::env::var("KILLSWITCH_SELF_DIAGNOSTIC").is_err() {
             let _ =
                 killswitch_telemetry::global_agentsonar_engine().start_background_collector(false);
+        }
+
+        // Wire tamper detection directly into active Fail-Closed HostContainmentManager escalation
+        {
+            let cm = Arc::clone(&containment_manager);
+            killswitch_telemetry::tamper_and_process_killswitch::register_tamper_containment_handler(
+                Arc::new(move |reason: &str| {
+                    let cm_inner = Arc::clone(&cm);
+                    let reason_owned = reason.to_string();
+                    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                        handle.spawn(async move {
+                            let _ = cm_inner
+                                .engage_isolation(
+                                    "tamper_guard",
+                                    &reason_owned,
+                                    killswitch_types::status::ContainmentLevel::HermeticIsolation,
+                                    None,
+                                )
+                                .await;
+                        });
+                    }
+                }),
+            );
         }
 
         info!("🛡️ [LOADER] Booting Phase 4: LangGraph Orchestrator & BLAKE3 Checkpointer");
@@ -254,7 +296,7 @@ impl UnifiedRuntime {
     }
 
     /// Runs the unified system until shutdown signal is received.
-    /// Unconditionally executes `execute_host_disarm_unauthenticated()` before termination.
+    /// Strictly fail-closed: HTTP server shutdown preserves active OS/ledger containment.
     pub async fn run(self) -> Result<()> {
         info!(
             "🚀 [LOADER] Starting KillSwitch Unified Runtime on http://{}:{}",
@@ -264,8 +306,7 @@ impl UnifiedRuntime {
         let server = self.server.clone();
         let shutdown_signal = async {
             tokio::signal::ctrl_c().await.ok();
-            warn!("🛑 [SHUTDOWN] Interruption signal received! Disarming containment...");
-            let _ = execute_host_disarm_unauthenticated();
+            warn!("🛑 [SHUTDOWN] Control-plane interruption signal received. Stopping HTTP control plane while keeping active containment FAIL-CLOSED.");
         };
 
         server

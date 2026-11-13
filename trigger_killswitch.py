@@ -74,21 +74,44 @@ def detect_killswitch_url():
     return "http://127.0.0.1:3031"
 
 
+import os
+
+
+def resolve_operator_token():
+    """Resolves the runtime operator control token from environment variables."""
+    tok = (
+        os.environ.get("KILLSWITCH_CONTROL_TOKEN")
+        or os.environ.get("KILLSWITCH_MASTER_TOKEN")
+        or ""
+    ).strip()
+    if len(tok) < 32:
+        raise RuntimeError(
+            "KILLSWITCH_CONTROL_TOKEN (>= 32 chars) must be set to authenticate control-plane requests."
+        )
+    return tok
+
+
 def trigger_killswitch(base_url, reason="Triggered by Python emergency script"):
     """Sends the emergency containment command to activate KillSwitch."""
     url = f"{base_url}/engage"
+    token = resolve_operator_token()
     payload = {
         "operator": "python_automation",
         "reason": reason,
         "level": "hermetic_isolation",
-        "token": "CONFIRM ISOLATE"
+        "token": token
     }
 
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url,
         data=data,
-        headers={"Content-Type": "application/json", "User-Agent": "KillSwitch-Python"},
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "KillSwitch-Python",
+            "Authorization": f"Bearer {token}",
+            "X-KillSwitch-Token": token,
+        },
         method="POST"
     )
 
@@ -104,17 +127,23 @@ def trigger_killswitch(base_url, reason="Triggered by Python emergency script"):
 def restore_internet(base_url):
     """Restores full internet access by disarming the KillSwitch."""
     url = f"{base_url}/disarm"
+    token = resolve_operator_token()
     payload = {
         "operator": "python_automation",
         "reason": "Restored via Python script",
-        "token": "CONFIRM RESTORE"
+        "token": token
     }
 
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url,
         data=data,
-        headers={"Content-Type": "application/json", "User-Agent": "KillSwitch-Python"},
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "KillSwitch-Python",
+            "Authorization": f"Bearer {token}",
+            "X-KillSwitch-Token": token,
+        },
         method="POST"
     )
 

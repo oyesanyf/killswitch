@@ -17,9 +17,7 @@ use killswitch_cli::client::KillSwitchClient;
 use killswitch_cli::loader::{UnifiedConfig, UnifiedRuntime};
 use killswitch_cli::verify::SubsystemVerifier;
 use killswitch_core::freeze::NativeProcessFreezer;
-use killswitch_core::killchain::{
-    execute_host_disarm_unauthenticated, is_critical_system_pid, HostContainmentManager,
-};
+use killswitch_core::killchain::{is_critical_system_pid, HostContainmentManager};
 use killswitch_orchestrator::engine::{KillSwitchOrchestrator, OrchestratorConfig};
 use killswitch_telemetry::otel_lineage::{
     DlpClassification, DlpPolicy, EgressVerdict, EndpointLineageEngine, FileKey, ProcessKey,
@@ -385,11 +383,18 @@ async fn test_dlp_lineage_exfiltration_taint_propagation_and_egress_block() {
     );
 }
 
+const M5_2_DLP_TOKEN: &str = "ks-m5-2-teardown-token-0123456789abcdef0123456789abcdef";
+
 #[tokio::test]
 async fn test_dlp_lineage_autonomous_trigger_containment_and_state_ledger() {
     let temp_dir = tempfile::tempdir().unwrap();
-    let containment_mgr =
-        Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
+    let containment_mgr = Arc::new(
+        HostContainmentManager::new_default_with_master_token(
+            Some(temp_dir.path()),
+            M5_2_DLP_TOKEN.to_string(),
+        )
+        .unwrap(),
+    );
     let adjudicator = Arc::new(ZeroFalsePositiveAdjudicator::new());
     let lineage_engine = Arc::new(EndpointLineageEngine::new_in_memory());
 
@@ -527,9 +532,24 @@ async fn test_dlp_lineage_autonomous_trigger_containment_and_state_ledger() {
                 latest_entry.reason
             );
 
-            // Cleanly disarm containment for teardown
+            // Verify unauthenticated disarm is rejected fail-closed; then disarm with valid credentials
+            assert!(containment_mgr
+                .disarm_isolation("teardown", "Unauthenticated attempt", None)
+                .await
+                .is_err());
+            let teardown_creds = OperatorCredentials {
+                operator_id: "teardown_operator".to_string(),
+                auth_token: Some(M5_2_DLP_TOKEN.to_string()),
+                password: None,
+                caller_pid: Some(std::process::id()),
+                confirmation_phrase: None,
+            };
             let _ = containment_mgr
-                .execute_unauthenticated_emergency_disarm("Teardown test containment")
+                .disarm_isolation(
+                    "teardown_operator",
+                    "Teardown test containment",
+                    Some(&teardown_creds),
+                )
                 .await;
         }
         Err(e) => {
@@ -788,7 +808,14 @@ fn test_process_ancestry_depth_5_boundary_and_cyclic_immunity() {
 #[tokio::test]
 async fn test_reversible_mode_emergency_unauthenticated_disarm() {
     let temp_dir = tempfile::tempdir().unwrap();
-    let mgr = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
+    let test_tok = "ks-m5-2-auth-disarm-token-0123456789abcdef0123456789abcdef";
+    let mgr = Arc::new(
+        HostContainmentManager::new_default_with_master_token(
+            Some(temp_dir.path()),
+            test_tok.to_string(),
+        )
+        .unwrap(),
+    );
 
     // 1. Initial State: Normal / Not Isolated
     assert!(!mgr.get_status().isolated);
@@ -811,16 +838,29 @@ async fn test_reversible_mode_emergency_unauthenticated_disarm() {
                 ContainmentLevel::NetworkQuarantine
             );
 
-            // 3. Trigger Unauthenticated Emergency Disarm
-            let restored = mgr
-                .execute_unauthenticated_emergency_disarm("Emergency unauthenticated disarm test")
+            // 3. Unauthenticated disarm (None) MUST be rejected fail-closed; authenticated disarm must succeed
+            assert!(mgr
+                .disarm_isolation("intruder", "Unauthenticated attempt", None)
                 .await
-                .expect("Emergency disarm must succeed");
+                .is_err());
+            assert!(mgr.get_status().isolated);
+
+            let creds = OperatorCredentials {
+                operator_id: "secops_admin".to_string(),
+                auth_token: Some(test_tok.to_string()),
+                password: None,
+                caller_pid: Some(std::process::id()),
+                confirmation_phrase: None,
+            };
+            let restored = mgr
+                .disarm_isolation("secops_admin", "Authenticated disarm test", Some(&creds))
+                .await
+                .expect("Authenticated disarm must succeed");
 
             // 4. Verify clean restoration
             assert!(
                 !restored.isolated,
-                "Host must no longer be isolated after disarm"
+                "Host must no longer be isolated after authenticated disarm"
             );
             assert_eq!(
                 restored.containment_level,
@@ -843,24 +883,15 @@ async fn test_reversible_mode_emergency_unauthenticated_disarm() {
                 "History ledger must contain both engage and disarm records"
             );
             let disarm_entry = history.first().unwrap();
-            assert_eq!(disarm_entry.action, "DISARMED_SHUTDOWN");
-            assert!(disarm_entry
-                .reason
-                .contains("Emergency unauthenticated disarm"));
+            assert_eq!(disarm_entry.action, "DISARMED");
+            assert!(disarm_entry.reason.contains("Authenticated disarm test"));
         }
         Err(KillSwitchError::InsufficientPrivileges { .. }) => {
-            // In non-root environments (e.g. macOS CI without sudo), kernel isolation
-            // drivers (/dev/pf) correctly fail closed and reject unprivileged modification.
-            let restored = mgr
-                .execute_unauthenticated_emergency_disarm("Emergency unauthenticated disarm test")
+            // In non-root environments, unauthenticated disarm still fails closed
+            assert!(mgr
+                .disarm_isolation("intruder", "Unauthenticated attempt", None)
                 .await
-                .expect("Emergency disarm must succeed");
-            assert!(!restored.isolated, "Host must be disarmed");
-            let history = mgr.get_history();
-            if !history.is_empty() {
-                let disarm_entry = history.first().unwrap();
-                assert_eq!(disarm_entry.action, "DISARMED_SHUTDOWN");
-            }
+                .is_err());
         }
         Err(e) => panic!("Engage isolation failed unexpectedly: {:?}", e),
     }
@@ -869,9 +900,14 @@ async fn test_reversible_mode_emergency_unauthenticated_disarm() {
 #[tokio::test]
 async fn test_reversible_mode_authenticated_disarm_and_bad_credentials() {
     let test_master_token = "test_master_token_0123456789abcdef0123456789abcdef";
-    std::env::set_var("KILLSWITCH_MASTER_TOKEN", test_master_token);
     let temp_dir = tempfile::tempdir().unwrap();
-    let mgr = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
+    let mgr = Arc::new(
+        HostContainmentManager::new_default_with_master_token(
+            Some(temp_dir.path()),
+            test_master_token.to_string(),
+        )
+        .unwrap(),
+    );
 
     // 1. Engage Containment
     let _ = mgr
@@ -970,41 +1006,67 @@ async fn test_client_server_disarm_integration_and_offline_fallback() {
         Err(e) => panic!("Engage isolation failed unexpectedly: {:?}", e),
     }
 
-    // 2. Disarm via in-process emergency function
-    let disarm_status =
-        execute_host_disarm_unauthenticated().expect("Direct emergency disarm must succeed");
-    assert!(!disarm_status.isolated);
+    // 2. Unauthenticated emergency disarm is removed; runtime must fail-closed without credentials
+    let unauth_err = runtime
+        .containment_manager
+        .disarm_isolation("intruder", "Unauthenticated attempt", None)
+        .await;
+    assert!(unauth_err.is_err());
 
-    // 3. Test KillSwitchClient offline fallback
-    // Point client to a port where no server is listening
+    // 3. Test KillSwitchClient offline fail-closed rejection when credentials are missing or server is unreachable
     let offline_client = KillSwitchClient::new("127.0.0.1", 64433);
-    let fallback_res = offline_client
-        .disarm("emergency_user", "Server is dead, restore endpoint", None)
-        .await
-        .expect("Offline fallback disarm must succeed");
-
-    assert!(fallback_res.success);
+    let fallback_err = offline_client
+        .disarm(
+            "emergency_user",
+            "Server is dead, unauthenticated restore",
+            None,
+        )
+        .await;
     assert!(
-        fallback_res
-            .message
-            .contains("Direct in-process emergency restore"),
-        "Message must confirm in-process emergency fallback execution: {}",
-        fallback_res.message
+        fallback_err.is_err(),
+        "Offline client disarm without valid OperatorCredentials MUST fail closed"
     );
+
+    // Authenticated client offline recovery with valid token succeeds cleanly
+    let test_tok = "ks-m5-2-client-offline-0123456789abcdef0123456789abcdef";
+    std::env::set_var("KILLSWITCH_MASTER_TOKEN", test_tok);
+    let auth_res = offline_client
+        .disarm("operator", "Authenticated offline recovery", Some(test_tok))
+        .await
+        .expect("Offline client disarm with valid token must succeed");
+    assert!(auth_res.success);
 }
 
 #[tokio::test]
 async fn test_idempotent_disarm_and_rapid_oscillation_stress() {
     let temp_dir = tempfile::tempdir().unwrap();
-    let mgr = Arc::new(HostContainmentManager::new_default(Some(temp_dir.path())).unwrap());
+    let test_tok = "ks-m5-2-oscillation-tok-0123456789abcdef0123456789abcdef";
+    let mgr = Arc::new(
+        HostContainmentManager::new_default_with_master_token(
+            Some(temp_dir.path()),
+            test_tok.to_string(),
+        )
+        .unwrap(),
+    );
+    let creds = OperatorCredentials {
+        operator_id: "stress_operator".to_string(),
+        auth_token: Some(test_tok.to_string()),
+        password: None,
+        caller_pid: Some(std::process::id()),
+        confirmation_phrase: None,
+    };
 
-    // 1. Idempotency test: Disarming an already-disarmed endpoint
+    // 1. Idempotency test: Disarming an already-disarmed endpoint with valid credentials
     assert!(!mgr.get_status().isolated);
     for i in 1..=5 {
         let res = mgr
-            .execute_unauthenticated_emergency_disarm(&format!("Idempotent disarm {}", i))
+            .disarm_isolation(
+                "stress_operator",
+                &format!("Idempotent disarm {}", i),
+                Some(&creds),
+            )
             .await
-            .expect("Disarming already disarmed system must succeed cleanly");
+            .expect("Authenticated disarming of already disarmed system must succeed cleanly");
         assert!(!res.isolated, "System must remain disarmed");
     }
 
@@ -1024,24 +1086,25 @@ async fn test_idempotent_disarm_and_rapid_oscillation_stress() {
             Ok(isolated) => {
                 assert!(isolated.isolated, "Cycle {} must isolate", cycle);
                 let disarm_res = mgr
-                    .execute_unauthenticated_emergency_disarm(&format!(
-                        "Oscillation disarm {}",
-                        cycle
-                    ))
+                    .disarm_isolation(
+                        "stress_operator",
+                        &format!("Oscillation disarm {}", cycle),
+                        Some(&creds),
+                    )
                     .await
-                    .expect("Disarm in rapid oscillation must succeed");
+                    .expect("Authenticated disarm in rapid oscillation must succeed");
                 assert!(!disarm_res.isolated, "Cycle {} must restore", cycle);
                 actual_cycles += 1;
             }
             Err(KillSwitchError::InsufficientPrivileges { .. }) => {
-                // Non-root runner: kernel isolation drivers fail closed.
                 let disarm_res = mgr
-                    .execute_unauthenticated_emergency_disarm(&format!(
-                        "Oscillation disarm {}",
-                        cycle
-                    ))
+                    .disarm_isolation(
+                        "stress_operator",
+                        &format!("Oscillation disarm {}", cycle),
+                        Some(&creds),
+                    )
                     .await
-                    .expect("Disarm in rapid oscillation must succeed");
+                    .expect("Authenticated disarm must succeed");
                 assert!(!disarm_res.isolated, "Cycle {} must restore", cycle);
             }
             Err(e) => panic!("Oscillation engage failed: {:?}", e),

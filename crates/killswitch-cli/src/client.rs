@@ -12,7 +12,8 @@ use std::time::Duration;
 use tracing::{info, warn};
 
 use killswitch_adjudication::ZeroFalsePositiveAdjudicator;
-use killswitch_core::killchain::{execute_host_disarm_unauthenticated, HostContainmentManager};
+use killswitch_core::auth::{is_forbidden_static_token, try_load_host_control_secret};
+use killswitch_core::killchain::HostContainmentManager;
 use killswitch_core::service::default_service_manager;
 use killswitch_orchestrator::engine::{KillSwitchOrchestrator, OrchestratorConfig};
 use killswitch_server::types::*;
@@ -83,6 +84,39 @@ impl KillSwitchClient {
 
     pub fn default_local() -> Self {
         Self::new("127.0.0.1", 3030)
+    }
+
+    fn resolve_control_token(&self, explicit: Option<&str>) -> Option<String> {
+        if let Some(tok) = explicit {
+            let trimmed = tok.trim();
+            if trimmed.len() >= 32 && !is_forbidden_static_token(trimmed) {
+                return Some(trimmed.to_string());
+            }
+        }
+        for var in ["KILLSWITCH_CONTROL_TOKEN", "KILLSWITCH_MASTER_TOKEN"] {
+            if let Ok(tok) = std::env::var(var) {
+                let trimmed = tok.trim();
+                if trimmed.len() >= 32 && !is_forbidden_static_token(trimmed) {
+                    return Some(trimmed.to_string());
+                }
+            }
+        }
+        try_load_host_control_secret().ok().flatten()
+    }
+
+    async fn post_authenticated_json<T: serde::Serialize + ?Sized>(
+        &self,
+        url: &str,
+        body: &T,
+        explicit_token: Option<&str>,
+    ) -> std::result::Result<reqwest::Response, reqwest::Error> {
+        let mut req = self.client.post(url).json(body);
+        if let Some(tok) = self.resolve_control_token(explicit_token) {
+            req = req
+                .header("Authorization", format!("Bearer {}", tok))
+                .header("X-KillSwitch-Token", tok);
+        }
+        req.send().await
     }
 
     pub async fn get_status(&self) -> Result<StatusResponse> {
@@ -243,7 +277,7 @@ impl KillSwitchClient {
             task_instance_id: None,
         };
 
-        if let Ok(resp) = self.client.post(&url).json(&req).send().await {
+        if let Ok(resp) = self.post_authenticated_json(&url, &req, None).await {
             if resp.status().is_success() {
                 if let Ok(body) = resp.json::<EngageResponse>().await {
                     return Ok(body);
@@ -284,35 +318,58 @@ impl KillSwitchClient {
         reason: &str,
         token: Option<&str>,
     ) -> Result<DisarmResponse> {
+        let resolved_tok = self.resolve_control_token(token).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Disarm rejected fail-closed: cryptographic operator token (>= 32 chars) required. Set KILLSWITCH_CONTROL_TOKEN or run from an elevated operator shell."
+            )
+        })?;
         let url = format!("{}/disarm", self.base_url);
         let req = DisarmRequest {
             operator: Some(operator.to_string()),
             reason: Some(reason.to_string()),
-            token: Some(token.unwrap_or("CONFIRM RESTORE").to_string()),
+            token: Some(resolved_tok.clone()),
             caller_pid: Some(std::process::id()),
         };
 
-        if let Ok(resp) = self.client.post(&url).json(&req).send().await {
+        if let Ok(resp) = self
+            .post_authenticated_json(&url, &req, Some(&resolved_tok))
+            .await
+        {
             if resp.status().is_success() {
                 if let Ok(body) = resp.json::<DisarmResponse>().await {
-                    // Also run in-process cleanup to ensure any local WFP/BFE rules are purged
-                    let _ = execute_host_disarm_unauthenticated();
                     return Ok(body);
                 }
+            } else {
+                let status = resp.status();
+                let msg = resp.text().await.unwrap_or_default();
+                anyhow::bail!(
+                    "Disarm rejected by KillSwitch server (HTTP {}): {}",
+                    status,
+                    msg
+                );
             }
         }
 
-        warn!("🛡️ Executing direct in-process native host disarm & network restoration...");
-        let fallback_status = execute_host_disarm_unauthenticated()
-            .context("Emergency direct in-process disarm failed")?;
+        warn!("🛡️ Control server offline; authenticating direct in-process disarm via OperatorCredentials...");
+        let mgr = HostContainmentManager::new_default(None)
+            .context("Failed to open local HostContainmentManager")?;
+        let creds = killswitch_types::status::OperatorCredentials {
+            operator_id: operator.to_string(),
+            auth_token: Some(resolved_tok.clone()),
+            password: None,
+            caller_pid: Some(std::process::id()),
+            confirmation_phrase: Some(resolved_tok),
+        };
+        let status = mgr
+            .disarm_isolation(operator, reason, Some(&creds))
+            .await
+            .context("Authenticated in-process disarm failed")?;
 
-        info!("✅ Emergency host disarm executed successfully in process.");
+        info!("✅ Authenticated host disarm executed.");
         Ok(DisarmResponse {
             success: true,
-            message:
-                "Direct in-process emergency restore & native host network restoration executed"
-                    .to_string(),
-            status: fallback_status,
+            message: "Authenticated host disarm & network restoration executed".to_string(),
+            status,
         })
     }
 
@@ -358,7 +415,7 @@ impl KillSwitchClient {
             force_node: force_node.map(|s| s.to_string()),
         };
 
-        if let Ok(resp) = self.client.post(&url).json(&req).send().await {
+        if let Ok(resp) = self.post_authenticated_json(&url, &req, None).await {
             if resp.status().is_success() {
                 if let Ok(body) = resp.json::<GraphStepResponse>().await {
                     return Ok(body);
@@ -392,17 +449,29 @@ impl KillSwitchClient {
 
     pub async fn set_mode(&self, mode: &str, operator: Option<&str>) -> Result<ModeResponse> {
         let url = format!("{}/mode", self.base_url);
+        let tok = self.resolve_control_token(None);
         let req = ModeRequest {
             mode: mode.to_string(),
             operator: operator.map(|s| s.to_string()),
-            token: None,
+            token: tok.clone(),
         };
 
-        if let Ok(resp) = self.client.post(&url).json(&req).send().await {
+        if let Ok(resp) = self
+            .post_authenticated_json(&url, &req, tok.as_deref())
+            .await
+        {
             if resp.status().is_success() {
                 if let Ok(body) = resp.json::<ModeResponse>().await {
                     return Ok(body);
                 }
+            } else {
+                let status = resp.status();
+                let msg = resp.text().await.unwrap_or_default();
+                anyhow::bail!(
+                    "Mode change rejected by KillSwitch server (HTTP {}): {}",
+                    status,
+                    msg
+                );
             }
         }
 
@@ -443,11 +512,20 @@ impl KillSwitchClient {
             service_name: None,
         };
 
-        if let Ok(resp) = self.client.post(&url).json(&req).send().await {
+        if let Ok(resp) = self.post_authenticated_json(&url, &req, None).await {
             if resp.status().is_success() {
                 if let Ok(body) = resp.json::<ServiceControlResponse>().await {
                     return Ok(body);
                 }
+            } else {
+                let status = resp.status();
+                let msg = resp.text().await.unwrap_or_default();
+                anyhow::bail!(
+                    "Service control action '{}' rejected (HTTP {}): {}",
+                    action,
+                    status,
+                    msg
+                );
             }
         }
 
@@ -463,7 +541,7 @@ impl KillSwitchClient {
                 svc.install_service(&cfg)?;
             }
             "stop" => {
-                let _ = execute_host_disarm_unauthenticated();
+                // Strictly fail-closed: stopping the service never disarms active containment.
                 svc.stop_service(name)?;
             }
             "start" => svc.start_service(name)?,
@@ -471,7 +549,7 @@ impl KillSwitchClient {
                 let _ = svc.restart_service(name);
             }
             "delete" | "uninstall" => {
-                let _ = execute_host_disarm_unauthenticated();
+                // Strictly fail-closed: uninstalling the service never disarms active containment.
                 svc.uninstall_service(name)?;
             }
             _ => anyhow::bail!("Unsupported service action: {}", action),
@@ -533,7 +611,7 @@ impl KillSwitchClient {
             process_name: None,
         };
 
-        if let Ok(resp) = self.client.post(&url).json(&req).send().await {
+        if let Ok(resp) = self.post_authenticated_json(&url, &req, None).await {
             if resp.status().is_success() {
                 if let Ok(body) = resp.json::<LineageSeedResponse>().await {
                     return Ok(body);
@@ -575,7 +653,7 @@ impl KillSwitchClient {
             destination_url: destination_url.to_string(),
         };
 
-        if let Ok(resp) = self.client.post(&url).json(&req).send().await {
+        if let Ok(resp) = self.post_authenticated_json(&url, &req, None).await {
             if resp.status().is_success() {
                 if let Ok(body) = resp.json::<LineageEvaluateResponse>().await {
                     return Ok(body);
@@ -657,24 +735,49 @@ impl KillSwitchClient {
 
     pub async fn trigger_health_probe(&self, force_rollback: bool) -> Result<HealthProbeResponse> {
         let url = format!("{}/health-probe", self.base_url);
+        let tok = self.resolve_control_token(None);
         let req = HealthProbeRequest {
             operator: Some("operator".to_string()),
             force_rollback: Some(force_rollback),
-            token: None,
+            token: tok.clone(),
         };
 
-        if let Ok(resp) = self.client.post(&url).json(&req).send().await {
+        if let Ok(resp) = self
+            .post_authenticated_json(&url, &req, tok.as_deref())
+            .await
+        {
             if resp.status().is_success() {
                 if let Ok(body) = resp.json::<HealthProbeResponse>().await {
                     return Ok(body);
                 }
+            } else if resp.status().is_client_error() {
+                let status = resp.status();
+                let msg = resp.text().await.unwrap_or_default();
+                anyhow::bail!("Health probe rejected (HTTP {}): {}", status, msg);
             }
         }
 
         let mgr = HostContainmentManager::new_default(None)?;
         let report = mgr.run_probe()?;
-        let status = if force_rollback || report.eligible_for_early_rollback {
-            execute_host_disarm_unauthenticated()?
+        let status = if force_rollback {
+            let resolved_tok = tok.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "force_rollback requires a cryptographic operator token (KILLSWITCH_CONTROL_TOKEN)"
+                )
+            })?;
+            let creds = killswitch_types::status::OperatorCredentials {
+                operator_id: "operator".to_string(),
+                auth_token: Some(resolved_tok.clone()),
+                password: None,
+                caller_pid: Some(std::process::id()),
+                confirmation_phrase: Some(resolved_tok),
+            };
+            mgr.disarm_isolation(
+                "operator",
+                "Authenticated operator force_rollback via CLI probe",
+                Some(&creds),
+            )
+            .await?
         } else {
             mgr.get_status()
         };
@@ -761,7 +864,7 @@ impl KillSwitchClient {
         req: &ResearchDiscoverRequest,
     ) -> Result<ResearchMenuResponse> {
         let url = format!("{}/api/research/discover", self.base_url);
-        if let Ok(resp) = self.client.post(&url).json(req).send().await {
+        if let Ok(resp) = self.post_authenticated_json(&url, req, None).await {
             if resp.status().is_success() {
                 if let Ok(body) = resp.json::<ResearchMenuResponse>().await {
                     return Ok(body);
@@ -847,7 +950,7 @@ impl KillSwitchClient {
         req: &ResearchApproveRequest,
     ) -> Result<ResearchApproveResponse> {
         let url = format!("{}/api/research/approve", self.base_url);
-        if let Ok(resp) = self.client.post(&url).json(req).send().await {
+        if let Ok(resp) = self.post_authenticated_json(&url, req, None).await {
             if resp.status().is_success() {
                 if let Ok(body) = resp.json::<ResearchApproveResponse>().await {
                     return Ok(body);
@@ -1011,7 +1114,7 @@ impl KillSwitchClient {
         req: &killswitch_telemetry::CageEvaluationRequest,
     ) -> Result<killswitch_telemetry::CageEvaluationResponse> {
         let url = format!("{}/api/cage/evaluate", self.base_url);
-        if let Ok(resp) = self.client.post(&url).json(req).send().await {
+        if let Ok(resp) = self.post_authenticated_json(&url, req, None).await {
             if resp.status().is_success() {
                 if let Ok(body) = resp
                     .json::<killswitch_telemetry::CageEvaluationResponse>()
@@ -1030,7 +1133,7 @@ impl KillSwitchClient {
         payload: &serde_json::Value,
     ) -> Result<killswitch_telemetry::CompiledSubstrateArtifact> {
         let url = format!("{}/api/cage/compile-substrate", self.base_url);
-        if let Ok(resp) = self.client.post(&url).json(payload).send().await {
+        if let Ok(resp) = self.post_authenticated_json(&url, payload, None).await {
             if resp.status().is_success() {
                 if let Ok(body) = resp
                     .json::<killswitch_telemetry::CompiledSubstrateArtifact>()
@@ -1050,7 +1153,7 @@ impl KillSwitchClient {
         trace: &[killswitch_telemetry::GovernanceTraceEvent],
     ) -> Result<killswitch_telemetry::TraceConformanceReport> {
         let url = format!("{}/api/cage/verify-trace", self.base_url);
-        if let Ok(resp) = self.client.post(&url).json(trace).send().await {
+        if let Ok(resp) = self.post_authenticated_json(&url, trace, None).await {
             if resp.status().is_success() {
                 if let Ok(body) = resp
                     .json::<killswitch_telemetry::TraceConformanceReport>()

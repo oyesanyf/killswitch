@@ -628,7 +628,8 @@ async fn test_killchain_host_manager_lifecycle_and_probes() {
 
     let probe3 = manager.run_probe().expect("Run probe 3");
     assert_eq!(probe3.consecutive_healthy_probes, 3);
-    assert!(probe3.eligible_for_early_rollback);
+    // Fail-closed: clean health probes must never auto-authorize rollback without operator credentials
+    assert!(!probe3.eligible_for_early_rollback);
 
     manager.reset_probe_counter();
     assert_eq!(manager.get_status().consecutive_healthy_probes, 0);

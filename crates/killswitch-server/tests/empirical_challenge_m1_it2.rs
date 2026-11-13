@@ -33,16 +33,21 @@ use killswitch_types::errors::KillSwitchError;
 
 const ADVERSARIAL_MASTER_TOKEN: &str = "adv_master_secret_key_9876543210_fedcba_0123456789abcdef";
 
-fn create_test_server_state(bound_port: u16) -> Arc<ServerState> {
-    std::env::set_var("KILLSWITCH_MASTER_TOKEN", ADVERSARIAL_MASTER_TOKEN);
+fn create_test_server_state(bound_port: u16) -> (Arc<ServerState>, tempfile::TempDir) {
     let temp_dir = tempfile::tempdir().unwrap();
-    let containment =
-        Arc::new(HostContainmentManager::new_simulated(Some(temp_dir.path())).unwrap());
-    let state = Arc::new(ServerState::with_defaults(containment));
+    let containment = Arc::new(
+        HostContainmentManager::new_simulated_with_master_token(
+            Some(temp_dir.path()),
+            ADVERSARIAL_MASTER_TOKEN.to_string(),
+        )
+        .unwrap(),
+    );
+    let mut state = ServerState::with_defaults(containment);
+    state.control_token = Arc::new(ADVERSARIAL_MASTER_TOKEN.to_string());
     state
         .active_bound_port
         .store(bound_port, std::sync::atomic::Ordering::SeqCst);
-    state
+    (Arc::new(state), temp_dir)
 }
 
 // ============================================================================
@@ -127,6 +132,7 @@ fn test_adversarial_peer_pid_closed_socket_rejects_pid_zero() {
                 msg.contains("No kernel TCP table entry found")
                     || msg.contains("closed/unowned (PID 0)")
                     || msg.contains("No matching Linux socket inode found")
+                    || msg.contains("No matching macOS socket found")
                     || msg.contains("not supported on this platform"),
                 "Expected unowned/closed error message, got: {}",
                 msg
@@ -144,7 +150,7 @@ fn test_adversarial_peer_pid_closed_socket_rejects_pid_zero() {
 #[tokio::test]
 async fn test_adversarial_disarm_unresolvable_socket_fails_closed_401_no_fallback() {
     let server_port = 45999;
-    let state = create_test_server_state(server_port);
+    let (state, _temp_dir) = create_test_server_state(server_port);
     let app = build_router(state);
 
     // Use a completely unmapped / bogus client address that does not exist in kernel TCP table
@@ -204,7 +210,7 @@ async fn test_adversarial_disarm_caller_pid_spoofing_mismatch_fails_401() {
 
     let (server_stream, _) = listener.accept().expect("Must accept connection");
 
-    let state = create_test_server_state(server_port);
+    let (state, _temp_dir) = create_test_server_state(server_port);
     let app = build_router(state);
 
     let actual_pid = std::process::id();
@@ -242,7 +248,7 @@ async fn test_adversarial_disarm_caller_pid_spoofing_mismatch_fails_401() {
         .as_str()
         .unwrap_or_else(|| body_json["message"].as_str().unwrap_or(""));
 
-    #[cfg(any(windows, target_os = "linux"))]
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     {
         assert!(
             err_msg.contains("Caller PID spoofing detected"),
@@ -254,12 +260,12 @@ async fn test_adversarial_disarm_caller_pid_spoofing_mismatch_fails_401() {
             "Error message must specify claimed PID"
         );
     }
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     {
         assert!(
             err_msg.contains("Loopback peer PID verification failed")
                 || err_msg.contains("not supported on this platform"),
-            "Error message must flag fail-closed peer PID resolution on macOS, got: {}",
+            "Error message must flag fail-closed peer PID resolution, got: {}",
             err_msg
         );
     }
@@ -273,7 +279,7 @@ async fn test_adversarial_disarm_caller_pid_spoofing_mismatch_fails_401() {
 #[tokio::test]
 async fn test_adversarial_health_probe_unresolvable_socket_fails_closed_401() {
     let server_port = 45998;
-    let state = create_test_server_state(server_port);
+    let (state, _temp_dir) = create_test_server_state(server_port);
     let app = build_router(state);
 
     let unmapped_client_addr: SocketAddr = "127.0.0.1:1".parse().unwrap();

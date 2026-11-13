@@ -628,10 +628,26 @@ pub fn verify_tpm_and_ledger_anchor(
     let probe = probe_hardware_tpm();
     let seal_path = resolve_tpm_seal_path(ledger_file_path);
 
-    // If the seal file does not exist yet, automatically create the initial seal so existing
-    // installations are immediately protected.
+    // Fail-closed: never auto-re-seal a missing .tpm.seal file during verification; an absent
+    // seal on an existing ledger indicates tampering or uninitialized seal integrity.
     if !seal_path.exists() {
-        let _ = seal_ledger_anchor(ledger_file_path, active_ledger_hash, active_sequence_number);
+        return TpmStatusReport {
+            tpm_present: probe.present,
+            tpm_version: probe.version,
+            tpm_provider: probe.provider,
+            tpm_interface_type: probe.interface_type,
+            tpm_sealed: false,
+            tpm_integrity_verified: false,
+            pcr_0_7_sha256: probe.pcr_0_7_sha256,
+            pcr_update_counter: probe.pcr_update_counter,
+            anchored_ledger_hash: "MISSING_SEAL".to_string(),
+            anchored_sequence_number: 0,
+            last_sealed_at: None,
+            status_detail: format!(
+                "TPM ledger seal '{}' missing (fail-closed: manual seal or authenticated recovery required)",
+                seal_path.display()
+            ),
+        };
     }
 
     let raw_content = match std::fs::read_to_string(&seal_path) {

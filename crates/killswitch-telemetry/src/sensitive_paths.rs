@@ -297,11 +297,7 @@ fn is_docker_socket_path(stripped: &str, raw: &str) -> bool {
     }
 
     let lower_raw = raw.to_ascii_lowercase().replace('/', "\\");
-    if lower_raw.contains("pipe\\docker_engine") || lower_raw.contains("docker.sock") {
-        return true;
-    }
-
-    false
+    lower_raw.contains("pipe\\docker_engine") || lower_raw.contains("docker.sock")
 }
 
 fn is_windows_hive_match(stripped: &str, hive_name: &str) -> bool {

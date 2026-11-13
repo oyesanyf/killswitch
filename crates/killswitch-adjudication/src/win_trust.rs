@@ -723,14 +723,9 @@ pub fn is_untrusted_writable_location(path_str: &str) -> bool {
         .to_string_lossy()
         .replace('/', "\\")
         .to_ascii_lowercase();
-    if !sys_temp.is_empty()
+    !sys_temp.is_empty()
         && (norm.starts_with(&sys_temp)
             || norm.contains(&format!("\\{}\\", sys_temp.trim_matches('\\'))))
-    {
-        return true;
-    }
-
-    false
 }
 
 /// Check if a vendor/publisher string corresponds to a known trusted software publisher.

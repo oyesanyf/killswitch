@@ -10,17 +10,15 @@ use std::net::SocketAddr;
 use subtle::ConstantTimeEq;
 use tracing::warn;
 
+use killswitch_core::auth::is_forbidden_static_token;
 use killswitch_core::peer_pid::resolve_loopback_peer_pid;
-use killswitch_types::status::{
-    KILLCHAIN_ISOLATE_CONFIRMATION_PHRASE, KILLCHAIN_RESTORE_CONFIRMATION_PHRASE,
-};
 use killswitch_types::validate_caller_pid;
 
 use crate::error::ServerError;
 use crate::server::ServerState;
 
 pub const DEFAULT_CONTROL_PLANE_HEADER: &str = "X-KillSwitch-Token";
-pub const TEST_MASTER_TOKEN: &str = "KS-TOKEN-SEC-REM-9999-VERIFIED-AUTH";
+// Hardcoded TEST_MASTER_TOKEN removed from production: runtime operator tokens must be CSPRNG-provisioned.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthVerdict {
@@ -106,7 +104,11 @@ pub fn verify_control_plane_request_with_token(
         _ => return AuthVerdict::Unauthorized401,
     };
 
-    if !constant_time_token_match(token, expected_token) {
+    if is_forbidden_static_token(token)
+        || is_forbidden_static_token(expected_token)
+        || expected_token.trim().len() < 32
+        || !constant_time_token_match(token, expected_token)
+    {
         return AuthVerdict::Unauthorized401;
     }
 
@@ -123,23 +125,8 @@ pub fn verify_control_plane_request_with_token(
     AuthVerdict::Authorized
 }
 
-/// Standalone verification helper defaulting to `TEST_MASTER_TOKEN`.
-pub fn verify_control_plane_request(
-    token_header: Option<&str>,
-    body_token: Option<&str>,
-    claimed_pid: Option<u32>,
-    actual_peer_pid: u32,
-    frozen_pids: &[u32],
-) -> AuthVerdict {
-    verify_control_plane_request_with_token(
-        token_header,
-        body_token,
-        claimed_pid,
-        actual_peer_pid,
-        frozen_pids,
-        TEST_MASTER_TOKEN,
-    )
-}
+// Standalone `verify_control_plane_request` defaulting to hardcoded TEST_MASTER_TOKEN removed.
+// Callers must supply the runtime-provisioned cryptographic token to `verify_control_plane_request_with_token`.
 
 /// End-to-end verification helper used inside Axum request handlers.
 pub fn verify_control_plane_auth(
@@ -167,16 +154,9 @@ pub fn verify_control_plane_auth(
         }
     };
 
-    // 2. Validate token against state control token or confirmation phrase (for /engage and /disarm)
-    let token_valid = if (endpoint_name == "/engage"
-        && constant_time_token_match(token_to_verify, KILLCHAIN_ISOLATE_CONFIRMATION_PHRASE))
-        || (endpoint_name == "/disarm"
-            && constant_time_token_match(token_to_verify, KILLCHAIN_RESTORE_CONFIRMATION_PHRASE))
-    {
-        true
-    } else {
-        state.is_valid_control_token(token_to_verify)
-    };
+    // 2. Validate token strictly against cryptographic state/operator control token
+    //    Confirmation phrases alone MUST NEVER authorize control-plane actions.
+    let token_valid = state.is_valid_control_token(token_to_verify);
 
     if !token_valid {
         return Err(ServerError::AuthenticationFailed(format!(
@@ -190,21 +170,37 @@ pub fn verify_control_plane_auth(
         .active_bound_port
         .load(std::sync::atomic::Ordering::SeqCst);
     let actual_peer_pid = if let Some(ConnectInfo(addr)) = connect_info {
+        if !addr.ip().is_loopback() {
+            return Err(ServerError::AuthenticationFailed(format!(
+                "Non-loopback control-plane client {} rejected",
+                addr.ip()
+            )));
+        }
         match resolve_loopback_peer_pid(*addr, bound_port) {
             Ok(pid) => Some(pid),
             Err(e) => {
-                if claimed_pid.is_some() {
-                    return Err(ServerError::AuthenticationFailed(format!(
-                        "Loopback peer PID verification failed on connected socket: {}",
-                        e
-                    )));
-                }
-                None
+                return Err(ServerError::AuthenticationFailed(format!(
+                    "Loopback peer PID verification failed on connected socket: {}",
+                    e
+                )));
             }
         }
     } else {
         None
     };
+
+    if actual_peer_pid.is_none()
+        && (bound_port != 0
+            || matches!(
+                endpoint_name,
+                "/engage" | "/disarm" | "/service/control" | "/mode" | "/api/service/control"
+            ))
+    {
+        return Err(ServerError::AuthenticationFailed(format!(
+            "Peer PID could not be verified via OS socket table for critical endpoint '{}'",
+            endpoint_name
+        )));
+    }
 
     if let (Some(claimed), Some(actual)) = (claimed_pid, actual_peer_pid) {
         if claimed != actual {

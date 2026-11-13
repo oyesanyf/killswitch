@@ -1022,8 +1022,8 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
             <label for="ctl-reason">Custom Reason Note
               <input id="ctl-reason" type="text" value="Manual emergency disconnect">
             </label>
-            <label for="ctl-token">Confirmation Phrase
-              <input id="ctl-token" type="text" value="CONFIRM RESTORE">
+            <label for="ctl-token">Operator Control Token
+              <input id="ctl-token" type="password" value="" placeholder="Paste operator token (from elevated daemon/CLI)">
             </label>
           </div>
           <div class="kv-grid">
@@ -1712,13 +1712,42 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       }
     }
 
+    function getControlToken() {
+      const inputEl = document.getElementById('ctl-token');
+      const inputVal = (inputEl && typeof inputEl.value === 'string') ? inputEl.value.trim() : '';
+      if (inputVal.length > 0) {
+        sessionStorage.setItem('ks_control_token', inputVal);
+        return inputVal;
+      }
+      const stored = (sessionStorage.getItem('ks_control_token') || '').trim();
+      if (stored.length > 0) {
+        if (inputEl) inputEl.value = stored;
+        return stored;
+      }
+      const prompted = window.prompt('Enter KillSwitch Operator Control Token (32+ chars from privileged runtime secret):');
+      if (prompted && prompted.trim().length > 0) {
+        const clean = prompted.trim();
+        sessionStorage.setItem('ks_control_token', clean);
+        if (inputEl) inputEl.value = clean;
+        return clean;
+      }
+      return '';
+    }
+
     async function api(path, opts) {
-      const token = sessionStorage.getItem('ks_control_token') || 'KS-TOKEN-SEC-REM-9999-VERIFIED-AUTH';
+      const method = ((opts && opts.method) || 'GET').toUpperCase();
+      const extraHeaders = {};
+      if (method !== 'GET' && method !== 'HEAD') {
+        const token = getControlToken();
+        if (!token) {
+          throw new Error('Operator Control Token is required. Paste your cryptographic control token in the Operator Control Token field.');
+        }
+        extraHeaders['Authorization'] = 'Bearer ' + token;
+        extraHeaders['X-KillSwitch-Token'] = token;
+      }
       const mergedHeaders = Object.assign({
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + token,
-        'X-KillSwitch-Token': token
-      }, (opts && opts.headers) || {});
+        'Content-Type': 'application/json'
+      }, extraHeaders, (opts && opts.headers) || {});
       const res = await fetch(path, Object.assign({}, opts || {}, { headers: mergedHeaders }));
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -2031,13 +2060,17 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
     async function engageKillSwitch(btn) {
       return withButtonFeedback(btn, '🚨 Disconnecting Internet...', async () => {
         try {
+          const token = getControlToken();
+          if (!token) {
+            throw new Error('Operator Control Token is required to engage containment.');
+          }
           const res = await api('/engage', {
             method: 'POST',
             body: JSON.stringify({
               operator: document.getElementById('ctl-operator').value || 'user_console',
               reason: document.getElementById('ctl-reason').value || 'Manual emergency disconnect from WebUI',
               level: document.getElementById('ctl-level').value || 'hermetic_isolation',
-              token: document.getElementById('ctl-token').value || 'CONFIRM ISOLATE'
+              token: token
             })
           });
           await refreshAll(false);
@@ -2056,12 +2089,16 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       return withButtonFeedback(btn, '🟢 Reconnecting...', async () => {
         try {
           const opEl = document.getElementById('ctl-operator');
+          const token = getControlToken();
+          if (!token) {
+            throw new Error('Operator Control Token is required to disarm containment.');
+          }
           await api('/disarm', {
             method: 'POST',
             body: JSON.stringify({
               operator: (opEl && opEl.value) ? opEl.value : 'user_console',
               reason: 'User clicked Reconnect Internet in WebUI',
-              token: 'CONFIRM RESTORE'
+              token: token
             })
           });
           await refreshAll(false);
@@ -2079,7 +2116,10 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
     async function runHealthProbe(forceRollback, btn) {
       return withButtonFeedback(btn, '🩺 Checking Computer...', async () => {
         try {
-          const token = sessionStorage.getItem('ks_control_token') || 'KS-TOKEN-SEC-REM-9999-VERIFIED-AUTH';
+          const token = getControlToken();
+          if (!token) {
+            throw new Error('Operator Control Token is required for health probe execution.');
+          }
           const res = await api('/health-probe', {
             method: 'POST',
             body: JSON.stringify({ force_rollback: forceRollback, token: token })
@@ -3897,7 +3937,7 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       setCardStatus('siquery-toast', 'Executing Siquery SQL query...', 'primary');
 
       try {
-        const token = sessionStorage.getItem('ks_control_token') || 'KS-TOKEN-SEC-REM-9999-VERIFIED-AUTH';
+        const token = getControlToken();
         const res = await fetch('/api/siquery/query', {
           method: 'POST',
           headers: {
@@ -3988,7 +4028,7 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       setCardStatus('siquery-toast', 'Running 12-Sweep Active EDR Security Audit...', 'primary');
 
       try {
-        const token = sessionStorage.getItem('ks_control_token') || 'KS-TOKEN-SEC-REM-9999-VERIFIED-AUTH';
+        const token = getControlToken();
         const res = await fetch('/api/siquery/protect-sweep', {
           method: 'POST',
           headers: {
@@ -4124,7 +4164,7 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
 
     async function triageAgentSonarFlow(action, procName, domainName) {
       try {
-        const token = sessionStorage.getItem('ks_control_token') || 'KS-TOKEN-SEC-REM-9999-VERIFIED-AUTH';
+        const token = getControlToken();
         const body = action === 'known_agent'
           ? { action: 'known_agent', agent: procName || 'triaged-agent', proc_pattern: procName || '*', domain_pattern: domainName || '*' }
           : { action: 'ignore_noise', domain: domainName };
@@ -4158,7 +4198,7 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
         btnSample.addEventListener('click', async () => {
           btnSample.disabled = true;
           try {
-            const token = sessionStorage.getItem('ks_control_token') || 'KS-TOKEN-SEC-REM-9999-VERIFIED-AUTH';
+            const token = getControlToken();
             const res = await fetch('/api/agentsonar/sample', {
               method: 'POST',
               headers: {
@@ -4186,7 +4226,7 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
           const submitBtn = document.getElementById('btn-as-save-rule');
           if (submitBtn) submitBtn.disabled = true;
           try {
-            const token = sessionStorage.getItem('ks_control_token') || 'KS-TOKEN-SEC-REM-9999-VERIFIED-AUTH';
+            const token = getControlToken();
             const payload = {
               action: 'add',
               agent: document.getElementById('as-agent-name').value.trim(),
@@ -4221,7 +4261,7 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
           const submitBtn = document.getElementById('btn-as-save-heuristics');
           if (submitBtn) submitBtn.disabled = true;
           try {
-            const token = sessionStorage.getItem('ks_control_token') || 'KS-TOKEN-SEC-REM-9999-VERIFIED-AUTH';
+            const token = getControlToken();
             const payload = {
               min_byte_ratio: Number(document.getElementById('as-min-byte-ratio').value),
               min_pkt_ratio: Number(document.getElementById('as-min-pkt-ratio').value),

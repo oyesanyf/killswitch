@@ -4,9 +4,9 @@
 //! Author: challenger_sec4_1 (teamwork_challenger)
 
 use axum::body::Body;
-use axum::extract::ConnectInfo;
 use axum::http::{Request, StatusCode};
 use std::net::SocketAddr;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use subtle::ConstantTimeEq;
 use tower::ServiceExt;
@@ -22,18 +22,35 @@ use killswitch_types::status::KILLCHAIN_ISOLATE_CONFIRMATION_PHRASE;
 
 const CHALLENGE_MASTER_TOKEN: &str = "KS-TOKEN-CHALLENGE-2026-CRYPTOGRAPHIC-SECRET-KEY";
 
-fn setup_challenge_state() -> (Arc<ServerState>, Arc<HostContainmentManager>) {
-    std::env::set_var("KILLSWITCH_MASTER_TOKEN", CHALLENGE_MASTER_TOKEN);
-    std::env::set_var("KILLSWITCH_CONTROL_TOKEN", CHALLENGE_MASTER_TOKEN);
+fn setup_challenge_state() -> (Arc<ServerState>, tempfile::TempDir) {
     let temp_dir = tempfile::tempdir().unwrap();
-    let containment =
-        Arc::new(HostContainmentManager::new_simulated(Some(temp_dir.path())).unwrap());
-    let state = Arc::new(ServerState::with_defaults(containment.clone()));
-    (state, containment)
+    let containment = Arc::new(
+        HostContainmentManager::new_simulated_with_master_token(
+            Some(temp_dir.path()),
+            CHALLENGE_MASTER_TOKEN.to_string(),
+        )
+        .unwrap(),
+    );
+    let mut state = ServerState::with_defaults(containment);
+    state.control_token = Arc::new(CHALLENGE_MASTER_TOKEN.to_string());
+    state.active_bound_port.store(0, Ordering::SeqCst);
+    (Arc::new(state), temp_dir)
 }
 
-async fn body_to_bytes(body: axum::body::Body) -> axum::body::Bytes {
-    axum::body::to_bytes(body, usize::MAX).await.unwrap()
+async fn spawn_live_server(state: Arc<ServerState>) -> (u16, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    state.active_bound_port.store(port, Ordering::SeqCst);
+    let app = build_router(state);
+    let handle = tokio::spawn(async move {
+        let _ = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await;
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    (port, handle)
 }
 
 // ============================================================================
@@ -245,8 +262,8 @@ fn test_verification_oracle_unauthenticated_and_malformed_tokens() {
 
 #[tokio::test]
 async fn test_http_engage_auth_boundaries() {
-    let (state, _) = setup_challenge_state();
-    let app = build_router(state);
+    let (state, _temp_dir) = setup_challenge_state();
+    let app = build_router(state.clone());
 
     // Case 1: Unauthenticated request (no token in headers, no token in body) -> 401
     let body = serde_json::json!({
@@ -323,46 +340,44 @@ async fn test_http_engage_auth_boundaries() {
         "Fake token /engage must return 401"
     );
 
-    // Case 5: Confirmation phrase "CONFIRM ISOLATE" in body -> 200 OK
+    let (port, handle) = spawn_live_server(state).await;
+    let client = reqwest::Client::new();
+    let engage_url = format!("http://127.0.0.1:{}/engage", port);
+
+    // Case 5: Confirmation phrase "CONFIRM ISOLATE" over live loopback TCP -> 401 Unauthorized
     let body = serde_json::json!({
         "operator": "test_operator",
         "reason": "Containment test",
         "token": "CONFIRM ISOLATE"
     });
-    let req = Request::builder()
-        .uri("/engage")
-        .method("POST")
-        .header("Content-Type", "application/json")
-        .body(Body::from(serde_json::to_vec(&body).unwrap()))
-        .unwrap();
-    let resp = app.clone().oneshot(req).await.unwrap();
+    let resp = client.post(&engage_url).json(&body).send().await.unwrap();
     assert_eq!(
         resp.status(),
-        StatusCode::OK,
-        "'CONFIRM ISOLATE' on /engage must succeed with 200"
+        reqwest::StatusCode::UNAUTHORIZED,
+        "'CONFIRM ISOLATE' on /engage must fail closed with 401"
     );
 
-    // Case 6: Valid cryptographic control token in Authorization header -> 200 OK
+    // Case 6: Valid cryptographic control token over live loopback TCP -> 200 OK
     let body = serde_json::json!({
         "operator": "test_operator",
         "reason": "Containment test with token"
     });
-    let req = Request::builder()
-        .uri("/engage")
-        .method("POST")
-        .header("Content-Type", "application/json")
+    let resp = client
+        .post(&engage_url)
         .header(
             "Authorization",
             format!("Bearer {}", CHALLENGE_MASTER_TOKEN),
         )
-        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .json(&body)
+        .send()
+        .await
         .unwrap();
-    let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(
         resp.status(),
-        StatusCode::OK,
-        "Valid cryptographic token on /engage must succeed with 200"
+        reqwest::StatusCode::OK,
+        "Valid cryptographic token on /engage over live loopback TCP must succeed with 200"
     );
+    handle.abort();
 }
 
 // ============================================================================
@@ -371,26 +386,20 @@ async fn test_http_engage_auth_boundaries() {
 
 #[tokio::test]
 async fn test_http_mode_auth_boundaries() {
-    let (state, _) = setup_challenge_state();
-    let app = build_router(state);
-    let loopback_addr = SocketAddr::from(([127, 0, 0, 1], 52123));
+    let (state, _temp_dir) = setup_challenge_state();
+    let (port, handle) = spawn_live_server(state).await;
+    let client = reqwest::Client::new();
+    let mode_url = format!("http://127.0.0.1:{}/mode", port);
 
-    // Case 1: Unauthenticated request over loopback (ConnectInfo present) -> 401
+    // Case 1: Unauthenticated request over live loopback TCP -> 401
     let body = serde_json::json!({
         "mode": "manual",
         "operator": "test_operator"
     });
-    let mut req = Request::builder()
-        .uri("/mode")
-        .method("POST")
-        .header("Content-Type", "application/json")
-        .body(Body::from(serde_json::to_vec(&body).unwrap()))
-        .unwrap();
-    req.extensions_mut().insert(ConnectInfo(loopback_addr));
-    let resp = app.clone().oneshot(req).await.unwrap();
+    let resp = client.post(&mode_url).json(&body).send().await.unwrap();
     assert_eq!(
         resp.status(),
-        StatusCode::UNAUTHORIZED,
+        reqwest::StatusCode::UNAUTHORIZED,
         "Unauthenticated loopback /mode must return 401"
     );
 
@@ -400,17 +409,10 @@ async fn test_http_mode_auth_boundaries() {
         "operator": "test_operator",
         "token": "CONFIRM ISOLATE"
     });
-    let mut req = Request::builder()
-        .uri("/mode")
-        .method("POST")
-        .header("Content-Type", "application/json")
-        .body(Body::from(serde_json::to_vec(&body).unwrap()))
-        .unwrap();
-    req.extensions_mut().insert(ConnectInfo(loopback_addr));
-    let resp = app.clone().oneshot(req).await.unwrap();
+    let resp = client.post(&mode_url).json(&body).send().await.unwrap();
     assert_eq!(
         resp.status(),
-        StatusCode::UNAUTHORIZED,
+        reqwest::StatusCode::UNAUTHORIZED,
         "'CONFIRM ISOLATE' must FAIL on /mode with 401"
     );
 
@@ -420,17 +422,10 @@ async fn test_http_mode_auth_boundaries() {
         "operator": "test_operator",
         "token": ""
     });
-    let mut req = Request::builder()
-        .uri("/mode")
-        .method("POST")
-        .header("Content-Type", "application/json")
-        .body(Body::from(serde_json::to_vec(&body).unwrap()))
-        .unwrap();
-    req.extensions_mut().insert(ConnectInfo(loopback_addr));
-    let resp = app.clone().oneshot(req).await.unwrap();
+    let resp = client.post(&mode_url).json(&body).send().await.unwrap();
     assert_eq!(
         resp.status(),
-        StatusCode::UNAUTHORIZED,
+        reqwest::StatusCode::UNAUTHORIZED,
         "Empty token on /mode must return 401"
     );
 
@@ -439,18 +434,16 @@ async fn test_http_mode_auth_boundaries() {
         "mode": "manual",
         "operator": "test_operator"
     });
-    let mut req = Request::builder()
-        .uri("/mode")
-        .method("POST")
-        .header("Content-Type", "application/json")
+    let resp = client
+        .post(&mode_url)
         .header("Authorization", "Bearer ")
-        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .json(&body)
+        .send()
+        .await
         .unwrap();
-    req.extensions_mut().insert(ConnectInfo(loopback_addr));
-    let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(
         resp.status(),
-        StatusCode::UNAUTHORIZED,
+        reqwest::StatusCode::UNAUTHORIZED,
         "Malformed Bearer on /mode must return 401"
     );
 
@@ -460,42 +453,34 @@ async fn test_http_mode_auth_boundaries() {
         "operator": "test_operator",
         "token": "bad_token_123"
     });
-    let mut req = Request::builder()
-        .uri("/mode")
-        .method("POST")
-        .header("Content-Type", "application/json")
-        .body(Body::from(serde_json::to_vec(&body).unwrap()))
-        .unwrap();
-    req.extensions_mut().insert(ConnectInfo(loopback_addr));
-    let resp = app.clone().oneshot(req).await.unwrap();
+    let resp = client.post(&mode_url).json(&body).send().await.unwrap();
     assert_eq!(
         resp.status(),
-        StatusCode::UNAUTHORIZED,
+        reqwest::StatusCode::UNAUTHORIZED,
         "Fake token on /mode must return 401"
     );
 
-    // Case 6: Valid cryptographic control token -> 200 OK
+    // Case 6: Valid cryptographic control token over live loopback TCP -> 200 OK
     let body = serde_json::json!({
         "mode": "manual",
         "operator": "test_operator"
     });
-    let mut req = Request::builder()
-        .uri("/mode")
-        .method("POST")
-        .header("Content-Type", "application/json")
+    let resp = client
+        .post(&mode_url)
         .header(
             "Authorization",
             format!("Bearer {}", CHALLENGE_MASTER_TOKEN),
         )
-        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .json(&body)
+        .send()
+        .await
         .unwrap();
-    req.extensions_mut().insert(ConnectInfo(loopback_addr));
-    let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(
         resp.status(),
-        StatusCode::OK,
-        "Valid cryptographic token on /mode must succeed with 200"
+        reqwest::StatusCode::OK,
+        "Valid cryptographic token on /mode over live loopback TCP must succeed with 200"
     );
+    handle.abort();
 }
 
 // ============================================================================
@@ -504,7 +489,7 @@ async fn test_http_mode_auth_boundaries() {
 
 #[tokio::test]
 async fn test_http_rl_learn_auth_boundaries() {
-    let (state, _) = setup_challenge_state();
+    let (state, _temp_dir) = setup_challenge_state();
     let app = build_router(state);
 
     let base_rl_body = serde_json::json!({
@@ -614,7 +599,7 @@ async fn test_http_rl_learn_auth_boundaries() {
 
 #[tokio::test]
 async fn test_http_rate_limit_allowlist_auth_boundaries() {
-    let (state, _) = setup_challenge_state();
+    let (state, _temp_dir) = setup_challenge_state();
     let app = build_router(state);
 
     let base_body = serde_json::json!({
@@ -724,16 +709,14 @@ async fn test_http_rate_limit_allowlist_auth_boundaries() {
 // 8. CALLER QUARANTINE & ANTI-SPOOFING VERIFICATION
 // ============================================================================
 
-fn setup_challenge_state_with_frozen_pid(frozen_pid: u32) -> Arc<ServerState> {
-    std::env::set_var("KILLSWITCH_MASTER_TOKEN", CHALLENGE_MASTER_TOKEN);
-    std::env::set_var("KILLSWITCH_CONTROL_TOKEN", CHALLENGE_MASTER_TOKEN);
+fn setup_challenge_state_with_frozen_pid(frozen_pid: u32) -> (Arc<ServerState>, tempfile::TempDir) {
     let temp_dir = tempfile::tempdir().unwrap();
     let isolator = killswitch_core::killchain::default_network_isolator();
     let freezer = Arc::new(killswitch_core::freeze::NativeProcessFreezer::new());
-    let auth = Arc::new(killswitch_core::auth::OperatorAuthManager::new(
-        None,
-        Some(temp_dir.path().to_path_buf()),
-    ));
+    let mut auth =
+        killswitch_core::auth::OperatorAuthManager::new(None, Some(temp_dir.path().to_path_buf()));
+    auth.set_custom_master_token(CHALLENGE_MASTER_TOKEN.to_string());
+    let auth = Arc::new(auth);
     let ledger = Arc::new(parking_lot::RwLock::new(
         killswitch_core::state_ledger::StateLedger::open_or_init(Some(temp_dir.path())).unwrap(),
     ));
@@ -748,50 +731,63 @@ fn setup_challenge_state_with_frozen_pid(frozen_pid: u32) -> Arc<ServerState> {
     let containment = Arc::new(killswitch_core::killchain::KillChainHostManager::new(
         isolator, freezer, auth, ledger,
     ));
-    Arc::new(ServerState::with_defaults(containment))
+    let mut state = ServerState::with_defaults(containment);
+    state.control_token = Arc::new(CHALLENGE_MASTER_TOKEN.to_string());
+    state.active_bound_port.store(0, Ordering::SeqCst);
+    (Arc::new(state), temp_dir)
 }
 
 #[tokio::test]
 async fn test_http_quarantined_caller_pid_rejection() {
-    let state = setup_challenge_state_with_frozen_pid(7777);
+    let my_pid = std::process::id();
+    let (state, _temp_dir) = setup_challenge_state_with_frozen_pid(my_pid);
     assert!(state
         .containment_manager
         .get_status()
         .frozen_pids
-        .contains(&7777));
+        .contains(&my_pid));
 
-    let app = build_router(state);
-
-    // Call /engage presenting valid master token, but claiming caller_pid 7777 (which is quarantined)
-    let body = serde_json::json!({
+    // 1. Verify /engage rejects quarantined OS peer PID over live loopback TCP
+    // (on Linux/Windows where peer PID resolves) or claimed PID otherwise.
+    let (port, handle) = spawn_live_server(state.clone()).await;
+    let client = reqwest::Client::new();
+    let engage_body = serde_json::json!({
         "operator": "test_operator",
         "reason": "Containment engage from frozen process",
         "token": CHALLENGE_MASTER_TOKEN,
-        "caller_pid": 7777
+        "caller_pid": my_pid
     });
-
-    let req = Request::builder()
-        .uri("/engage")
-        .method("POST")
-        .header("Content-Type", "application/json")
-        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+    let resp = client
+        .post(format!("http://127.0.0.1:{}/engage", port))
+        .json(&engage_body)
+        .send()
+        .await
         .unwrap();
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+    {
+        assert_eq!(
+            resp.status(),
+            reqwest::StatusCode::FORBIDDEN,
+            "Quarantined caller PID over live loopback TCP must return 403 Forbidden on /engage"
+        );
+        let json: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(json["error"]["code"], "CALLER_QUARANTINED");
+    }
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+    {
+        assert!(
+            resp.status() == reqwest::StatusCode::FORBIDDEN
+                || resp.status() == reqwest::StatusCode::UNAUTHORIZED
+        );
+    }
+    handle.abort();
 
-    let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(
-        resp.status(),
-        StatusCode::FORBIDDEN,
-        "Quarantined caller PID 7777 must return 403 Forbidden on /engage"
-    );
-
-    let body_bytes = body_to_bytes(resp.into_body()).await;
-    let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
-    assert_eq!(json["error"]["code"], "CALLER_QUARANTINED");
-
-    // Also verify /rate-limit/allowlist rejects quarantined caller PID
+    // 2. Also verify /rate-limit/allowlist rejects quarantined caller PID via in-memory oneshot
+    state.active_bound_port.store(0, Ordering::SeqCst);
+    let app = build_router(state);
     let rl_body = serde_json::json!({
         "destination_host": "evil-exfil.com",
-        "caller_pid": 7777,
+        "caller_pid": my_pid,
         "token": CHALLENGE_MASTER_TOKEN
     });
     let req = Request::builder()
@@ -805,18 +801,18 @@ async fn test_http_quarantined_caller_pid_rejection() {
     assert_eq!(
         resp.status(),
         StatusCode::FORBIDDEN,
-        "Quarantined caller PID 7777 must return 403 Forbidden on /rate-limit/allowlist"
+        "Quarantined caller PID must return 403 Forbidden on /rate-limit/allowlist"
     );
 }
 
 #[tokio::test]
 async fn test_adversarial_in_memory_mode_unauthenticated_bypass_finding() {
-    let (state, _) = setup_challenge_state();
-    let app = build_router(state);
+    let (state, _temp_dir) = setup_challenge_state();
+    let app = build_router(state.clone());
 
     // ADVERSARIAL CHALLENGE VERIFICATION:
     // When ConnectInfo is absent (e.g. in-memory test, IPC bridge, or reverse proxy not forwarding ConnectInfo),
-    // /mode MUST fail closed with 401 Unauthorized across all unauthenticated requests.
+    // /mode MUST fail closed with 401 Unauthorized across all requests (even with a valid token, since /mode requires OS peer PID).
     let mode_body = serde_json::json!({
         "mode": "manual",
         "operator": "adversary_without_token"
@@ -851,7 +847,7 @@ async fn test_adversarial_in_memory_mode_unauthenticated_bypass_finding() {
     let resp_empty = app.clone().oneshot(req_empty).await.unwrap();
     assert_eq!(resp_empty.status(), StatusCode::UNAUTHORIZED);
 
-    // Case 3: In-memory /mode with valid cryptographic control token must succeed with 200 OK
+    // Case 3: Critical /mode without kernel-verified socket peer PID fails closed even with token
     let auth_mode_body = serde_json::json!({
         "mode": "manual",
         "operator": "authorized_operator",
@@ -864,12 +860,30 @@ async fn test_adversarial_in_memory_mode_unauthenticated_bypass_finding() {
         .body(Body::from(serde_json::to_vec(&auth_mode_body).unwrap()))
         .unwrap();
     let resp_auth = app.oneshot(req_auth).await.unwrap();
-    assert_eq!(resp_auth.status(), StatusCode::OK);
+    assert_eq!(resp_auth.status(), StatusCode::UNAUTHORIZED);
+
+    // Case 4: Live loopback TCP /mode with valid cryptographic token + OS peer PID succeeds with 200 OK
+    let (port, handle) = spawn_live_server(state).await;
+    let client = reqwest::Client::new();
+    let resp_live = client
+        .post(format!("http://127.0.0.1:{}/mode", port))
+        .json(&auth_mode_body)
+        .send()
+        .await
+        .unwrap();
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+    assert_eq!(resp_live.status(), reqwest::StatusCode::OK);
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+    assert!(
+        resp_live.status() == reqwest::StatusCode::OK
+            || resp_live.status() == reqwest::StatusCode::UNAUTHORIZED
+    );
+    handle.abort();
 }
 
 #[tokio::test]
 async fn test_live_tcp_loopback_caller_pid_spoofing_detection() {
-    let (state, _) = setup_challenge_state();
+    let (state, _temp_dir) = setup_challenge_state();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let local_addr = listener.local_addr().unwrap();
     let port = local_addr.port();
@@ -903,7 +917,7 @@ async fn test_live_tcp_loopback_caller_pid_spoofing_detection() {
 
     let resp = client.post(&url).json(&spoof_body).send().await.unwrap();
 
-    #[cfg(any(windows, target_os = "linux"))]
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     {
         assert_eq!(
             resp.status(),
@@ -933,9 +947,9 @@ async fn test_live_tcp_loopback_caller_pid_spoofing_detection() {
             "Matching caller PID over real loopback TCP socket MUST succeed with 200 OK"
         );
     }
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     {
-        // On unsupported platforms (macOS), loopback peer PID resolution is not supported
+        // On unsupported platforms, loopback peer PID resolution is not supported
         // in kernel TCP tables, so the engage request either succeeds with 200 OK under
         // valid token authentication or fails closed with 401 UNAUTHORIZED.
         assert!(

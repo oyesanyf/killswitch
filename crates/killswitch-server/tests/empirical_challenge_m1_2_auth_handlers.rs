@@ -1,13 +1,11 @@
 //! Empirical Challenge Test Suite: Server Auth, Handlers & Routing (Challenger 2)
 //!
 //! Objectives:
-//! 1. POST /disarm authentication:
-//!    - Token "CONFIRM RESTORE" in body -> 200 OK without 401
-//!    - Token "CONFIRM RESTORE" in Authorization: Bearer header -> 200 OK
-//!    - Token "CONFIRM RESTORE" in X-KillSwitch-Token header -> 200 OK
+//! 1. POST /disarm authentication (Fail-Closed Phase 1):
+//!    - Confirmation phrase "CONFIRM RESTORE" in body/Bearer/X-KillSwitch-Token -> 401 Unauthorized
 //!    - Invalid token "WRONG_TOKEN" -> 401 Unauthorized
-//!    - Missing token -> 401 Unauthorized
-//!    - Master token TEST_MASTER_TOKEN -> 200 OK
+//!    - Missing/empty token -> 401 Unauthorized
+//!    - Master token TEST_MASTER_TOKEN over real loopback TCP (kernel peer-PID verified) -> 200 OK
 //! 2. EDR behavioral scenario ingestion:
 //!    - Probe "reverse_shell", "lolbin_credential_dump", "ransomware_burst"
 //!    - Verify both `/api/edr/behavioral/ingest` and `/api/edr-bench/ingest` routing
@@ -21,6 +19,8 @@
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use std::net::SocketAddr;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tower::ServiceExt;
 
@@ -31,12 +31,35 @@ use killswitch_types::status::KILLCHAIN_RESTORE_CONFIRMATION_PHRASE;
 
 const TEST_MASTER_TOKEN: &str = "test_master_token_0123456789abcdef0123456789abcdef";
 
-fn setup_test_server_state() -> Arc<ServerState> {
-    std::env::set_var("KILLSWITCH_MASTER_TOKEN", TEST_MASTER_TOKEN);
+fn setup_test_server_state() -> (Arc<ServerState>, tempfile::TempDir) {
     let temp_dir = tempfile::tempdir().unwrap();
-    let containment =
-        Arc::new(HostContainmentManager::new_simulated(Some(temp_dir.path())).unwrap());
-    Arc::new(ServerState::with_defaults(containment))
+    let containment = Arc::new(
+        HostContainmentManager::new_simulated_with_master_token(
+            Some(temp_dir.path()),
+            TEST_MASTER_TOKEN.to_string(),
+        )
+        .unwrap(),
+    );
+    let mut state = ServerState::with_defaults(containment);
+    state.control_token = Arc::new(TEST_MASTER_TOKEN.to_string());
+    state.active_bound_port.store(0, Ordering::SeqCst);
+    (Arc::new(state), temp_dir)
+}
+
+async fn spawn_live_server(state: Arc<ServerState>) -> (u16, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    state.active_bound_port.store(port, Ordering::SeqCst);
+    let app = build_router(state);
+    let handle = tokio::spawn(async move {
+        let _ = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await;
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    (port, handle)
 }
 
 async fn body_to_json(body: axum::body::Body) -> serde_json::Value {
@@ -49,9 +72,9 @@ async fn body_to_json(body: axum::body::Body) -> serde_json::Value {
 // ============================================================================
 
 #[tokio::test]
-async fn test_disarm_with_confirm_restore_phrase_succeeds_200() {
-    let state = setup_test_server_state();
-    let app = build_router(state);
+async fn test_disarm_with_confirm_restore_phrase_rejected_401() {
+    let (state, _temp_dir) = setup_test_server_state();
+    let (port, handle) = spawn_live_server(state).await;
 
     // Verify confirmation phrase matches constant
     assert_eq!(KILLCHAIN_RESTORE_CONFIRMATION_PHRASE, "CONFIRM RESTORE");
@@ -62,86 +85,76 @@ async fn test_disarm_with_confirm_restore_phrase_succeeds_200() {
         "token": "CONFIRM RESTORE"
     });
 
-    let req = Request::builder()
-        .uri("/disarm")
-        .method("POST")
-        .header("Content-Type", "application/json")
-        .body(Body::from(serde_json::to_vec(&req_body).unwrap()))
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("http://127.0.0.1:{}/disarm", port))
+        .json(&req_body)
+        .send()
+        .await
         .unwrap();
-
-    let resp = app.oneshot(req).await.unwrap();
     assert_eq!(
         resp.status(),
-        StatusCode::OK,
-        "POST /disarm with CONFIRM RESTORE must return 200 OK without 401"
+        reqwest::StatusCode::UNAUTHORIZED,
+        "POST /disarm with CONFIRM RESTORE must fail closed with 401 Unauthorized"
     );
-
-    let json = body_to_json(resp.into_body()).await;
-    assert_eq!(json["success"].as_bool(), Some(true));
-    assert!(json["message"].as_str().unwrap().contains("disarmed"));
+    handle.abort();
 }
 
 #[tokio::test]
-async fn test_disarm_with_confirm_restore_in_bearer_header_succeeds_200() {
-    let state = setup_test_server_state();
-    let app = build_router(state);
+async fn test_disarm_with_confirm_restore_in_bearer_header_rejected_401() {
+    let (state, _temp_dir) = setup_test_server_state();
+    let (port, handle) = spawn_live_server(state).await;
 
     let req_body = serde_json::json!({
         "operator": "secops_admin",
         "reason": "Threat neutralized"
     });
 
-    let req = Request::builder()
-        .uri("/disarm")
-        .method("POST")
-        .header("Content-Type", "application/json")
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("http://127.0.0.1:{}/disarm", port))
         .header("Authorization", "Bearer CONFIRM RESTORE")
-        .body(Body::from(serde_json::to_vec(&req_body).unwrap()))
+        .json(&req_body)
+        .send()
+        .await
         .unwrap();
-
-    let resp = app.oneshot(req).await.unwrap();
     assert_eq!(
         resp.status(),
-        StatusCode::OK,
-        "POST /disarm with Authorization: Bearer CONFIRM RESTORE must return 200 OK"
+        reqwest::StatusCode::UNAUTHORIZED,
+        "POST /disarm with Authorization: Bearer CONFIRM RESTORE must fail closed with 401"
     );
-
-    let json = body_to_json(resp.into_body()).await;
-    assert_eq!(json["success"].as_bool(), Some(true));
+    handle.abort();
 }
 
 #[tokio::test]
-async fn test_disarm_with_confirm_restore_in_x_killswitch_token_header_succeeds_200() {
-    let state = setup_test_server_state();
-    let app = build_router(state);
+async fn test_disarm_with_confirm_restore_in_x_killswitch_token_header_rejected_401() {
+    let (state, _temp_dir) = setup_test_server_state();
+    let (port, handle) = spawn_live_server(state).await;
 
     let req_body = serde_json::json!({
         "operator": "secops_admin",
         "reason": "Threat neutralized"
     });
 
-    let req = Request::builder()
-        .uri("/disarm")
-        .method("POST")
-        .header("Content-Type", "application/json")
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("http://127.0.0.1:{}/disarm", port))
         .header("X-KillSwitch-Token", "CONFIRM RESTORE")
-        .body(Body::from(serde_json::to_vec(&req_body).unwrap()))
+        .json(&req_body)
+        .send()
+        .await
         .unwrap();
-
-    let resp = app.oneshot(req).await.unwrap();
     assert_eq!(
         resp.status(),
-        StatusCode::OK,
-        "POST /disarm with X-KillSwitch-Token: CONFIRM RESTORE must return 200 OK"
+        reqwest::StatusCode::UNAUTHORIZED,
+        "POST /disarm with X-KillSwitch-Token: CONFIRM RESTORE must fail closed with 401"
     );
-
-    let json = body_to_json(resp.into_body()).await;
-    assert_eq!(json["success"].as_bool(), Some(true));
+    handle.abort();
 }
 
 #[tokio::test]
 async fn test_disarm_with_invalid_token_rejected_401() {
-    let state = setup_test_server_state();
+    let (state, _temp_dir) = setup_test_server_state();
     let app = build_router(state);
 
     let req_body = serde_json::json!({
@@ -167,7 +180,7 @@ async fn test_disarm_with_invalid_token_rejected_401() {
 
 #[tokio::test]
 async fn test_disarm_with_missing_or_empty_token_rejected_401() {
-    let state = setup_test_server_state();
+    let (state, _temp_dir) = setup_test_server_state();
     let app = build_router(state);
 
     // 1. Missing token field in body
@@ -214,8 +227,8 @@ async fn test_disarm_with_missing_or_empty_token_rejected_401() {
 
 #[tokio::test]
 async fn test_disarm_with_master_token_succeeds_200() {
-    let state = setup_test_server_state();
-    let app = build_router(state);
+    let (state, _temp_dir) = setup_test_server_state();
+    let (port, handle) = spawn_live_server(state).await;
 
     let req_body = serde_json::json!({
         "operator": "master_admin",
@@ -223,19 +236,19 @@ async fn test_disarm_with_master_token_succeeds_200() {
         "token": TEST_MASTER_TOKEN
     });
 
-    let req = Request::builder()
-        .uri("/disarm")
-        .method("POST")
-        .header("Content-Type", "application/json")
-        .body(Body::from(serde_json::to_vec(&req_body).unwrap()))
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("http://127.0.0.1:{}/disarm", port))
+        .json(&req_body)
+        .send()
+        .await
         .unwrap();
-
-    let resp = app.oneshot(req).await.unwrap();
     assert_eq!(
         resp.status(),
-        StatusCode::OK,
-        "POST /disarm with valid master token must return 200 OK"
+        reqwest::StatusCode::OK,
+        "POST /disarm with valid master token over live loopback TCP must return 200 OK"
     );
+    handle.abort();
 }
 
 // ============================================================================
@@ -244,13 +257,14 @@ async fn test_disarm_with_master_token_succeeds_200() {
 
 #[tokio::test]
 async fn test_edr_behavioral_ingest_reverse_shell() {
-    let state = setup_test_server_state();
+    let (state, _temp_dir) = setup_test_server_state();
     let app = build_router(state);
 
     let req = Request::builder()
         .uri("/api/edr/behavioral/ingest")
         .method("POST")
         .header("Content-Type", "application/json")
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
         .body(Body::from(
             serde_json::json!({
                 "scenario": "reverse_shell"
@@ -276,13 +290,14 @@ async fn test_edr_behavioral_ingest_reverse_shell() {
 
 #[tokio::test]
 async fn test_edr_behavioral_ingest_lolbin_credential_dump() {
-    let state = setup_test_server_state();
+    let (state, _temp_dir) = setup_test_server_state();
     let app = build_router(state);
 
     let req = Request::builder()
         .uri("/api/edr/behavioral/ingest")
         .method("POST")
         .header("Content-Type", "application/json")
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
         .body(Body::from(
             serde_json::json!({
                 "scenario": "lolbin_credential_dump"
@@ -308,13 +323,14 @@ async fn test_edr_behavioral_ingest_lolbin_credential_dump() {
 
 #[tokio::test]
 async fn test_edr_behavioral_ingest_ransomware_burst() {
-    let state = setup_test_server_state();
+    let (state, _temp_dir) = setup_test_server_state();
     let app = build_router(state);
 
     let req = Request::builder()
         .uri("/api/edr/behavioral/ingest")
         .method("POST")
         .header("Content-Type", "application/json")
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
         .body(Body::from(
             serde_json::json!({
                 "scenario": "ransomware_burst"
@@ -336,7 +352,7 @@ async fn test_edr_behavioral_ingest_ransomware_burst() {
 
 #[tokio::test]
 async fn test_edr_behavioral_routing_empirical_check() {
-    let state = setup_test_server_state();
+    let (state, _temp_dir) = setup_test_server_state();
     let app = build_router(state);
 
     // Test canonical route: /api/edr/behavioral/ingest
@@ -344,6 +360,7 @@ async fn test_edr_behavioral_routing_empirical_check() {
         .uri("/api/edr/behavioral/ingest")
         .method("POST")
         .header("Content-Type", "application/json")
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
         .body(Body::from(
             serde_json::json!({ "scenario": "reverse_shell" }).to_string(),
         ))
@@ -356,6 +373,7 @@ async fn test_edr_behavioral_routing_empirical_check() {
         .uri("/edr/behavioral/ingest")
         .method("POST")
         .header("Content-Type", "application/json")
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
         .body(Body::from(
             serde_json::json!({ "scenario": "reverse_shell" }).to_string(),
         ))
@@ -368,6 +386,7 @@ async fn test_edr_behavioral_routing_empirical_check() {
         .uri("/api/edr-bench/ingest")
         .method("POST")
         .header("Content-Type", "application/json")
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
         .body(Body::from(
             serde_json::json!({ "scenario": "reverse_shell" }).to_string(),
         ))
@@ -390,7 +409,7 @@ async fn test_edr_behavioral_routing_empirical_check() {
 
 #[tokio::test]
 async fn test_swe_bench_evaluate_broad_fail_pass_to_pass_preset() {
-    let state = setup_test_server_state();
+    let (state, _temp_dir) = setup_test_server_state();
     let app = build_router(state);
 
     // Request with preset "broad_fail_pass_to_pass"
@@ -398,6 +417,7 @@ async fn test_swe_bench_evaluate_broad_fail_pass_to_pass_preset() {
         .uri("/api/edr-bench/evaluate")
         .method("POST")
         .header("Content-Type", "application/json")
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
         .body(Body::from(
             serde_json::json!({
                 "preset": "broad_fail_pass_to_pass",
@@ -436,13 +456,14 @@ async fn test_swe_bench_evaluate_broad_fail_pass_to_pass_preset() {
 
 #[tokio::test]
 async fn test_swe_bench_evaluate_surgical_verified_preset() {
-    let state = setup_test_server_state();
+    let (state, _temp_dir) = setup_test_server_state();
     let app = build_router(state);
 
     let req = Request::builder()
         .uri("/api/edr-bench/evaluate")
         .method("POST")
         .header("Content-Type", "application/json")
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
         .body(Body::from(
             serde_json::json!({
                 "preset": "surgical_verified",
@@ -465,32 +486,29 @@ async fn test_swe_bench_evaluate_surgical_verified_preset() {
 
 #[tokio::test]
 async fn test_swe_bench_anti_blind_killswitch_vetoes_isolation_in_engage() {
-    let state = setup_test_server_state();
-    let app = build_router(state);
+    let (state, _temp_dir) = setup_test_server_state();
+    let (port, handle) = spawn_live_server(state).await;
 
     // Overbroad candidate rule submitted to /engage
     let bad_rule =
         killswitch_adjudication::edr_bench::EdrBenchHarness::canonical_overbroad_blind_rule();
 
-    let req = Request::builder()
-        .uri("/engage")
-        .method("POST")
-        .header("Content-Type", "application/json")
-        .body(Body::from(
-            serde_json::json!({
-                "operator": "automated_candidate_detector",
-                "reason": "Suspicious activity detected by untrusted rule",
-                "token": "CONFIRM ISOLATE",
-                "candidate_rule": bad_rule
-            })
-            .to_string(),
-        ))
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("http://127.0.0.1:{}/engage", port))
+        .json(&serde_json::json!({
+            "operator": "automated_candidate_detector",
+            "reason": "Suspicious activity detected by untrusted rule",
+            "token": TEST_MASTER_TOKEN,
+            "candidate_rule": bad_rule
+        }))
+        .send()
+        .await
         .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
 
-    let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-
-    let json = body_to_json(resp.into_body()).await;
+    let json: serde_json::Value = resp.json().await.unwrap();
+    handle.abort();
     assert_eq!(
         json["success"].as_bool(),
         Some(false),
@@ -513,60 +531,56 @@ async fn test_swe_bench_anti_blind_killswitch_vetoes_isolation_in_engage() {
 
 #[tokio::test]
 async fn test_service_endpoints_status_and_control() {
-    let state = setup_test_server_state();
-    let app = build_router(state);
+    let (state, _temp_dir) = setup_test_server_state();
+    let (port, handle) = spawn_live_server(state).await;
+
+    let client = reqwest::Client::new();
+    let base = format!("http://127.0.0.1:{}", port);
 
     // 1. GET /service/status
-    let req = Request::builder()
-        .uri("/service/status")
-        .method("GET")
-        .body(Body::empty())
+    let resp = client
+        .get(format!("{}/service/status", base))
+        .send()
+        .await
         .unwrap();
-    let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
 
     // 2. GET /api/service/status alias
-    let req = Request::builder()
-        .uri("/api/service/status")
-        .method("GET")
-        .body(Body::empty())
+    let resp = client
+        .get(format!("{}/api/service/status", base))
+        .send()
+        .await
         .unwrap();
-    let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
 
-    // 3. POST /service/control status query
-    let req = Request::builder()
-        .uri("/service/control")
-        .method("POST")
-        .header("Content-Type", "application/json")
-        .body(Body::from(
-            serde_json::json!({
-                "action": "status",
-                "service_name": "killswitch"
-            })
-            .to_string(),
-        ))
+    // 3. POST /service/control status query (authenticated over live loopback TCP)
+    let resp = client
+        .post(format!("{}/service/control", base))
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
+        .json(&serde_json::json!({
+            "action": "status",
+            "service_name": "killswitch"
+        }))
+        .send()
+        .await
         .unwrap();
-    let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
 
     // 4. POST /service/control invalid action must return 400 Validation Error
-    let req = Request::builder()
-        .uri("/service/control")
-        .method("POST")
-        .header("Content-Type", "application/json")
-        .body(Body::from(
-            serde_json::json!({
-                "action": "bogus_unsupported_action",
-                "service_name": "killswitch"
-            })
-            .to_string(),
-        ))
+    let resp = client
+        .post(format!("{}/service/control", base))
+        .header("X-KillSwitch-Token", TEST_MASTER_TOKEN)
+        .json(&serde_json::json!({
+            "action": "bogus_unsupported_action",
+            "service_name": "killswitch"
+        }))
+        .send()
+        .await
         .unwrap();
-    let resp = app.oneshot(req).await.unwrap();
     assert_eq!(
         resp.status(),
-        StatusCode::BAD_REQUEST,
+        reqwest::StatusCode::BAD_REQUEST,
         "Invalid service action must return 400 Bad Request"
     );
+    handle.abort();
 }

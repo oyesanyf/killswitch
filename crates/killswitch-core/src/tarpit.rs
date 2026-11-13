@@ -60,6 +60,12 @@ impl ActiveProcessTarpit {
     pub fn release_pid(&self, pid: u32) {
         if let Some((_, flag)) = self.active_traps.remove(&pid) {
             flag.store(false, Ordering::SeqCst);
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            unsafe {
+                // Deliver SIGCONT synchronously so callers observe immediate resumption
+                // without waiting for the async duty-cycle sleep chunk to elapse.
+                libc::kill(pid as i32, libc::SIGCONT);
+            }
             info!("🟢 [ActiveProcessTarpit] Released PID {} from tarpit.", pid);
         }
     }

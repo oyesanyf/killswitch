@@ -10,7 +10,6 @@ use std::sync::Arc;
 use tracing::info;
 
 use killswitch_adjudication::{load_all_bench_tasks, EdrBenchHarness};
-use killswitch_core::killchain::execute_host_disarm_unauthenticated;
 use killswitch_telemetry::attack::AttackStage;
 use killswitch_telemetry::otel_lineage::{
     DlpClassification, DlpPolicy, EgressVerdict, FileKey, ProcessKey,
@@ -383,11 +382,6 @@ pub async fn post_disarm(
 
     let effective_pid = auth.actual_peer_pid.or(req.caller_pid);
 
-    let is_confirmation_phrase = crate::auth::constant_time_token_match(
-        &auth.token,
-        killswitch_types::status::KILLCHAIN_RESTORE_CONFIRMATION_PHRASE,
-    );
-
     let is_master_token = state.is_valid_control_token(&auth.token);
 
     if is_master_token {
@@ -402,21 +396,12 @@ pub async fn post_disarm(
         confirmation_phrase: Some(auth.token),
     };
 
-    let creds_opt = if is_confirmation_phrase {
-        None
-    } else {
-        Some(&creds)
-    };
-
     let mut new_status = match state
         .containment_manager
-        .disarm_isolation(operator, reason, creds_opt)
+        .disarm_isolation(operator, reason, Some(&creds))
         .await
     {
-        Ok(s) => {
-            let _ = execute_host_disarm_unauthenticated();
-            s
-        }
+        Ok(s) => s,
         Err(killswitch_types::errors::KillSwitchError::CallerQuarantined { pid }) => {
             return Err(ServerError::CallerQuarantined(pid));
         }
@@ -459,9 +444,13 @@ pub async fn post_disarm(
 }
 
 /// POST /health-probe
+///
+/// Executes health probe telemetry checks only. Never performs unauthenticated automatic rollback;
+/// explicit `force_rollback` requires full control-plane authentication and verified `OperatorCredentials`.
 pub async fn post_health_probe(
     State(state): State<Arc<ServerState>>,
     connect_info: Option<ConnectInfo<SocketAddr>>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<HealthProbeRequest>,
 ) -> Result<Json<HealthProbeResponse>, ServerError> {
     let report = state.containment_manager.run_probe()?;
@@ -470,94 +459,34 @@ pub async fn post_health_probe(
     let is_forced = req.force_rollback.unwrap_or(false);
 
     let containment_status = if is_forced {
-        // Enforce Tier-1 master token authentication on forced rollback
-        let token = match req.token.as_deref() {
-            Some(t) if !t.trim().is_empty() => t.trim(),
-            _ => {
-                return Err(ServerError::Core(
-                    killswitch_types::errors::KillSwitchError::AuthenticationFailed(
-                        "Tier-1 master token required to force early rollback".to_string(),
-                    ),
-                ));
-            }
+        let auth = crate::auth::verify_control_plane_auth(
+            &state,
+            &headers,
+            req.token.as_deref(),
+            None,
+            connect_info.as_ref(),
+            "/health-probe",
+        )?;
+
+        let creds = OperatorCredentials {
+            operator_id: "secops_health_probe".to_string(),
+            auth_token: Some(auth.token.clone()),
+            password: None,
+            caller_pid: auth.actual_peer_pid,
+            confirmation_phrase: Some(auth.token),
         };
 
-        let resolved_pid = if let Some(ConnectInfo(addr)) = connect_info {
-            let bound_port = state
-                .active_bound_port
-                .load(std::sync::atomic::Ordering::SeqCst);
-            match killswitch_core::peer_pid::resolve_loopback_peer_pid(addr, bound_port) {
-                Ok(pid) => Some(pid),
-                Err(e) => {
-                    return Err(ServerError::Core(
-                        killswitch_types::errors::KillSwitchError::AuthenticationFailed(format!(
-                            "Loopback peer PID verification failed on connected socket: {}",
-                            e
-                        )),
-                    ));
-                }
-            }
-        } else {
-            None
-        };
-
-        let is_control_authorized = state.is_valid_control_token(token);
-        if !is_control_authorized {
-            let creds = OperatorCredentials {
-                operator_id: "secops_admin".to_string(),
-                auth_token: Some(token.to_string()),
-                password: None,
-                caller_pid: resolved_pid,
-                confirmation_phrase: Some(token.to_string()),
-            };
-
-            state
-                .containment_manager
-                .authenticate_credentials(&creds)
-                .map_err(ServerError::Core)?;
-        }
-
-        rollback_executed = true;
-        state
+        let status = state
             .containment_manager
-            .execute_unauthenticated_emergency_disarm(
-                "Forced early rollback authorized by Tier-1 master token",
+            .disarm_isolation(
+                "secops_health_probe",
+                "Authenticated operator force_rollback via /health-probe",
+                Some(&creds),
             )
-            .await?
-    } else if report.eligible_for_early_rollback {
-        if let Some(ConnectInfo(addr)) = connect_info {
-            let bound_port = state
-                .active_bound_port
-                .load(std::sync::atomic::Ordering::SeqCst);
-            let caller_pid =
-                match killswitch_core::peer_pid::resolve_loopback_peer_pid(addr, bound_port) {
-                    Ok(pid) => pid,
-                    Err(e) => {
-                        return Err(ServerError::Core(
-                            killswitch_types::errors::KillSwitchError::AuthenticationFailed(
-                                format!(
-                                    "Loopback peer PID verification failed on connected socket: {}",
-                                    e
-                                ),
-                            ),
-                        ));
-                    }
-                };
-            let current_status = state.containment_manager.get_status();
-            let is_in_active_lease = state
-                .journal
-                .unexpired_leases()
-                .iter()
-                .any(|l| l.target_pid == Some(caller_pid));
-            if current_status.frozen_pids.contains(&caller_pid) || is_in_active_lease {
-                return Err(ServerError::CallerQuarantined(caller_pid));
-            }
-        }
+            .await
+            .map_err(ServerError::Core)?;
         rollback_executed = true;
-        state
-            .containment_manager
-            .execute_unauthenticated_emergency_disarm("Early rollback threshold verified")
-            .await?
+        status
     } else {
         state.containment_manager.get_status()
     };
@@ -817,23 +746,30 @@ pub async fn post_service_control(
             let _ = state.service_manager.install_service(&cfg);
         }
         "stop" => {
-            // Stopping service must unconditionally disarm host containment
-            let _ = state
-                .containment_manager
-                .execute_unauthenticated_emergency_disarm("Service stop requested")
-                .await;
-            let _ = execute_host_disarm_unauthenticated();
-            let _ = state.service_manager.stop_service(name);
+            // Strictly fail-closed: stopping the service must NEVER disarm active containment.
+            state
+                .service_manager
+                .stop_service(name)
+                .map_err(|e| ServerError::Internal(format!("Service stop failed: {}", e)))?;
         }
         "start" => {
-            let _ = state.service_manager.start_service(name);
+            state
+                .service_manager
+                .start_service(name)
+                .map_err(|e| ServerError::Internal(format!("Service start failed: {}", e)))?;
         }
         "restart" => {
-            let _ = state.service_manager.restart_service(name);
+            state
+                .service_manager
+                .restart_service(name)
+                .map_err(|e| ServerError::Internal(format!("Service restart failed: {}", e)))?;
         }
         "delete" | "uninstall" => {
-            let _ = execute_host_disarm_unauthenticated();
-            let _ = state.service_manager.uninstall_service(name);
+            // Strictly fail-closed: uninstalling the service must NEVER disarm active containment.
+            state
+                .service_manager
+                .uninstall_service(name)
+                .map_err(|e| ServerError::Internal(format!("Service uninstall failed: {}", e)))?;
         }
         "status" => {}
         _ => {

@@ -37,7 +37,11 @@ fn setup_test_server_state() -> Arc<ServerState> {
         HostContainmentManager::new_default(Some(temp_dir.path()))
             .expect("HostContainmentManager creation must succeed"),
     );
-    Arc::new(ServerState::with_defaults(containment))
+    let state = Arc::new(ServerState::with_defaults(containment));
+    state
+        .active_bound_port
+        .store(0, std::sync::atomic::Ordering::SeqCst);
+    state
 }
 
 async fn body_to_bytes(body: Body) -> axum::body::Bytes {
@@ -667,6 +671,7 @@ async fn test_c3_http_pep_dual_routing_parity_status_endpoint() {
 #[tokio::test]
 async fn test_c3_http_pep_dual_routing_parity_evaluate_endpoint() {
     let state = setup_test_server_state();
+    let tok = state.control_token.clone();
     let app = build_router(state);
 
     let clean_payload = serde_json::json!({
@@ -683,6 +688,7 @@ async fn test_c3_http_pep_dual_routing_parity_evaluate_endpoint() {
         .uri("/cage/evaluate")
         .method("POST")
         .header("Content-Type", "application/json")
+        .header("X-KillSwitch-Token", tok.as_str())
         .body(Body::from(serde_json::to_vec(&clean_payload).unwrap()))
         .expect("request build must succeed");
     let resp_1 = app
@@ -700,6 +706,7 @@ async fn test_c3_http_pep_dual_routing_parity_evaluate_endpoint() {
         .uri("/api/cage/evaluate")
         .method("POST")
         .header("Content-Type", "application/json")
+        .header("X-KillSwitch-Token", tok.as_str())
         .body(Body::from(serde_json::to_vec(&clean_payload).unwrap()))
         .expect("request build must succeed");
     let resp_2 = app
@@ -733,6 +740,7 @@ async fn test_c3_http_pep_dual_routing_parity_evaluate_endpoint() {
         .uri("/cage/evaluate")
         .method("POST")
         .header("Content-Type", "application/json")
+        .header("X-KillSwitch-Token", tok.as_str())
         .body(Body::from(serde_json::to_vec(&over_payload).unwrap()))
         .unwrap();
     let resp_over_1 = app.clone().oneshot(req_over_1).await.unwrap();
@@ -744,6 +752,7 @@ async fn test_c3_http_pep_dual_routing_parity_evaluate_endpoint() {
         .uri("/api/cage/evaluate")
         .method("POST")
         .header("Content-Type", "application/json")
+        .header("X-KillSwitch-Token", tok.as_str())
         .body(Body::from(serde_json::to_vec(&over_payload).unwrap()))
         .unwrap();
     let resp_over_2 = app.oneshot(req_over_2).await.unwrap();
@@ -762,6 +771,7 @@ async fn test_c3_http_pep_dual_routing_parity_evaluate_endpoint() {
 #[tokio::test]
 async fn test_c3_http_pep_dual_routing_parity_compile_substrate_endpoint() {
     let state = setup_test_server_state();
+    let tok = state.control_token.clone();
     let app = build_router(state);
 
     let native_spec = serde_json::json!({
@@ -781,6 +791,7 @@ async fn test_c3_http_pep_dual_routing_parity_compile_substrate_endpoint() {
         .uri("/cage/compile-substrate")
         .method("POST")
         .header("Content-Type", "application/json")
+        .header("X-KillSwitch-Token", tok.as_str())
         .body(Body::from(serde_json::to_vec(&native_spec).unwrap()))
         .unwrap();
     let resp_1 = app.clone().oneshot(req_1).await.unwrap();
@@ -793,6 +804,7 @@ async fn test_c3_http_pep_dual_routing_parity_compile_substrate_endpoint() {
         .uri("/api/cage/compile-substrate")
         .method("POST")
         .header("Content-Type", "application/json")
+        .header("X-KillSwitch-Token", tok.as_str())
         .body(Body::from(serde_json::to_vec(&native_spec).unwrap()))
         .unwrap();
     let resp_2 = app.clone().oneshot(req_2).await.unwrap();
@@ -818,6 +830,7 @@ async fn test_c3_http_pep_dual_routing_parity_compile_substrate_endpoint() {
             .uri(*uri)
             .method("POST")
             .header("Content-Type", "application/json")
+            .header("X-KillSwitch-Token", tok.as_str())
             .body(Body::from(serde_json::to_vec(&non_object_spec).unwrap()))
             .unwrap();
         let resp_err = app.clone().oneshot(req_err).await.unwrap();
@@ -836,6 +849,7 @@ async fn test_c3_http_pep_dual_routing_parity_compile_substrate_endpoint() {
             .uri(*uri)
             .method("POST")
             .header("Content-Type", "application/json")
+            .header("X-KillSwitch-Token", tok.as_str())
             .body(Body::from(serde_json::to_vec(&unrecognized_spec).unwrap()))
             .unwrap();
         let resp_err = app.clone().oneshot(req_err).await.unwrap();
@@ -851,6 +865,7 @@ async fn test_c3_http_pep_dual_routing_parity_compile_substrate_endpoint() {
 #[tokio::test]
 async fn test_c3_http_pep_dual_routing_parity_verify_trace_endpoint() {
     let state = setup_test_server_state();
+    let tok = state.control_token.clone();
     let app = build_router(state);
 
     let trace_events = vec![
@@ -893,6 +908,7 @@ async fn test_c3_http_pep_dual_routing_parity_verify_trace_endpoint() {
             .uri(*uri)
             .method("POST")
             .header("Content-Type", "application/json")
+            .header("X-KillSwitch-Token", tok.as_str())
             .body(Body::from(raw_array_bytes.clone()))
             .unwrap();
         let resp = app.clone().oneshot(req).await.unwrap();
@@ -914,6 +930,7 @@ async fn test_c3_http_pep_dual_routing_parity_verify_trace_endpoint() {
             .uri(*uri)
             .method("POST")
             .header("Content-Type", "application/json")
+            .header("X-KillSwitch-Token", tok.as_str())
             .body(Body::from(obj_bytes.clone()))
             .unwrap();
         let resp = app.clone().oneshot(req).await.unwrap();
@@ -957,6 +974,7 @@ async fn test_c3_http_pep_dual_routing_parity_verify_trace_endpoint() {
             .uri(*uri)
             .method("POST")
             .header("Content-Type", "application/json")
+            .header("X-KillSwitch-Token", tok.as_str())
             .body(Body::from(bad_bytes.clone()))
             .unwrap();
         let resp = app.clone().oneshot(req).await.unwrap();
