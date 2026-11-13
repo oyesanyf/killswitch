@@ -197,7 +197,7 @@ fn test_quarantine_receipt_preserved_ports_and_ips_integrity() {
     };
 
     assert_eq!(receipt_macos.engine, NetworkIsolationEngine::DarwinPf);
-    assert_eq!(receipt_macos.preserved_ports, preserved_ports);
+    assert_eq!(receipt_macos.preserved_ports, vec![DEFAULT_CONTROL_PORT]);
     assert!(receipt_macos
         .preserved_ips
         .contains(&IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))));
@@ -248,44 +248,51 @@ fn test_darwin_pf_quarantine_rules_structure_and_order() {
     let preserved_ports = vec![DEFAULT_CONTROL_PORT, 53, 67, 68];
     let (rules, syntax) = generate_quarantine_rules("test_killswitch_anchor", &preserved_ports);
 
-    assert!(rules.len() >= 7, "Expected at least 7 generated PF rules");
+    assert!(
+        rules.len() >= 20,
+        "Expected hardened IMDS/discovery/proxy/lateral + localhost control PF rules"
+    );
 
-    // Invariant: First rule must be quick pass on lo0
-    assert_eq!(rules[0].action, PfAction::Pass);
-    assert_eq!(rules[0].direction, PfDirection::InOut);
+    // Invariant: IMDS & discovery drops precede any localhost control pass; zero blanket lo0 pass
+    assert_eq!(rules[0].action, PfAction::Drop);
     assert!(rules[0].quick);
-    assert_eq!(rules[0].interface.as_deref(), Some("lo0"));
+    assert_eq!(rules[0].dst, "169.254.0.0/16");
+    assert!(!syntax.contains("pass quick on lo0 all"));
+    assert!(!syntax.contains("from 127.0.0.1 to any"));
+    assert!(!syntax.contains("from ::1 to any"));
 
-    // Invariant: Rules 1 & 2 must be explicit 127.0.0.1 and ::1 quick passes
-    assert_eq!(rules[1].src, "127.0.0.1");
-    assert!(rules[1].quick);
-    assert_eq!(rules[2].src, "::1");
-    assert!(rules[2].quick);
-
-    // Invariant: Port 3030 must be preserved for inbound and outbound TCP
+    // Invariant: Port 3030 must be preserved strictly between 127.0.0.1<->127.0.0.1 and ::1<->::1 on lo0
     let port_3030_rules: Vec<_> = rules
         .iter()
         .filter(|r| r.src_port == Some(3030) || r.dst_port == Some(3030))
         .collect();
     assert_eq!(
         port_3030_rules.len(),
-        2,
-        "Must have in and out rules for 3030"
+        8,
+        "Must have in/out src/dst rules for 3030 on 127.0.0.1 and ::1"
     );
     for r in &port_3030_rules {
         assert_eq!(r.action, PfAction::Pass);
         assert_eq!(r.protocol, PfProtocol::Tcp);
         assert!(r.quick);
+        assert_eq!(r.interface.as_deref(), Some("lo0"));
+        assert!(r.src == "127.0.0.1" || r.src == "::1");
+        assert_eq!(r.src, r.dst);
     }
 
-    // Invariant: DNS 53 (UDP & TCP) and DHCP 67/68 must strictly NOT be preserved
-    assert!(!rules.iter().any(|r| r.dst_port == Some(53)));
+    // Invariant: DNS 53 and DHCP 67/68 must be explicitly dropped and never passed
+    assert!(rules
+        .iter()
+        .any(|r| r.action == PfAction::Drop && r.dst_port == Some(53)));
     assert!(!rules
         .iter()
-        .any(|r| r.dst_port == Some(67) || r.src_port == Some(67)));
+        .any(|r| r.action == PfAction::Pass && r.dst_port == Some(53)));
     assert!(!rules
         .iter()
-        .any(|r| r.dst_port == Some(68) || r.src_port == Some(68)));
+        .any(|r| r.action == PfAction::Pass && (r.dst_port == Some(67) || r.src_port == Some(67))));
+    assert!(!rules
+        .iter()
+        .any(|r| r.action == PfAction::Pass && (r.dst_port == Some(68) || r.src_port == Some(68))));
 
     // Invariant: Last two rules must be hermetic block drop in & out all with quick: true
     let last_rule_in = &rules[rules.len() - 2];

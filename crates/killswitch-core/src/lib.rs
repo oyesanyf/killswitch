@@ -64,8 +64,8 @@ pub use landlock::{
     LandlockSandboxConfig, LinuxNetlinkIsolator, LinuxSocketEntry, TcpState,
 };
 pub use pf::{
-    generate_quarantine_rules, get_active_darwin_sockets, DarwinSocketEntry, MacOsPfIsolator,
-    PfRuleSpec, DEFAULT_PF_ANCHOR, PF_DEVICE_PATH,
+    generate_macos_seatbelt_profile, generate_quarantine_rules, get_active_darwin_sockets,
+    DarwinSocketEntry, MacOsPfIsolator, PfRuleSpec, DEFAULT_PF_ANCHOR, PF_DEVICE_PATH,
 };
 #[cfg(target_os = "windows")]
 pub use service::WindowsServiceManager;

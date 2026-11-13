@@ -1629,8 +1629,22 @@ pub fn spawn_sandboxed_agent_process(
 
     #[cfg(not(target_os = "windows"))]
     {
-        let mut cmd = Command::new(&config.program);
-        cmd.args(&config.args);
+        #[cfg(target_os = "macos")]
+        let mut cmd = {
+            let sbpl = crate::pf::generate_macos_seatbelt_profile(&config);
+            let mut c = Command::new("/usr/bin/sandbox-exec");
+            c.arg("-p")
+                .arg(sbpl)
+                .arg(&config.program)
+                .args(&config.args);
+            c
+        };
+        #[cfg(not(target_os = "macos"))]
+        let mut cmd = {
+            let mut c = Command::new(&config.program);
+            c.args(&config.args);
+            c
+        };
         if let Some(ref cwd) = config.current_dir {
             cmd.current_dir(cwd);
         }
@@ -1700,7 +1714,9 @@ pub fn spawn_sandboxed_agent_process(
         };
         #[cfg(target_os = "linux")]
         let isolation_mode = "linux_cgroup_landlock_seccomp";
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(target_os = "macos")]
+        let isolation_mode = "macos_seatbelt_sandbox";
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         let isolation_mode = "unix_confined_subtree";
         Ok(SandboxedAgentProcess {
             pid,
@@ -2111,6 +2127,63 @@ mod tests {
                 0,
                 "Seccomp-BPF must reject socket(AF_INET) with EPERM"
             );
+        }
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_macos_sandboxed_agent_enforces_seatbelt_isolation() {
+        let base = std::env::temp_dir().join(format!("ks-macos-sb-{}", std::process::id()));
+        let allowed_dir = base.join("allowed");
+        let forbidden_dir = base.join("forbidden");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&allowed_dir).unwrap();
+        std::fs::create_dir_all(&forbidden_dir).unwrap();
+
+        let allowed_file = allowed_dir.join("ok.txt");
+        let mut ok_cfg = SandboxedAgentConfig::new("test-sb-ok", "sh");
+        ok_cfg.args = vec![
+            "-c".to_string(),
+            format!("printf confined > '{}'", allowed_file.display()),
+        ];
+        ok_cfg.writable_paths = vec![allowed_dir.clone()];
+        let mut ok_proc =
+            spawn_sandboxed_agent_process(ok_cfg).expect("macOS Seatbelt spawn must succeed");
+        assert_eq!(ok_proc.isolation_mode, "macos_seatbelt_sandbox");
+        assert_eq!(ok_proc.wait_exit_code().unwrap(), 0);
+        assert_eq!(std::fs::read_to_string(&allowed_file).unwrap(), "confined");
+
+        let escape_file = forbidden_dir.join("escape.txt");
+        let mut deny_cfg = SandboxedAgentConfig::new("test-sb-deny", "sh");
+        deny_cfg.args = vec![
+            "-c".to_string(),
+            format!("printf escaped > '{}' 2>/dev/null", escape_file.display()),
+        ];
+        deny_cfg.writable_paths = vec![allowed_dir.clone()];
+        let mut deny_proc = spawn_sandboxed_agent_process(deny_cfg).unwrap();
+        assert_ne!(deny_proc.wait_exit_code().unwrap(), 0);
+        assert!(!escape_file.exists());
+
+        if std::path::Path::new("/usr/bin/python3").exists() {
+            if let Ok(listener) = std::net::TcpListener::bind("127.0.0.1:0") {
+                let port = listener.local_addr().unwrap().port();
+                let mut net_cfg = SandboxedAgentConfig::new("test-sb-net", "/usr/bin/python3");
+                net_cfg.args = vec![
+                    "-c".to_string(),
+                    format!(
+                        "import errno, socket, sys\ntry:\n s = socket.create_connection(('127.0.0.1', {port}), timeout=1)\n sys.exit(2)\nexcept OSError as e:\n sys.exit(0 if e.errno in (errno.EPERM, errno.EACCES) else 3)"
+                    ),
+                ];
+                let mut net_proc = spawn_sandboxed_agent_process(net_cfg).unwrap();
+                assert_eq!(
+                    net_proc.wait_exit_code().unwrap(),
+                    0,
+                    "macOS Seatbelt (deny network*) must block TCP connect"
+                );
+                drop(listener);
+            }
         }
 
         let _ = std::fs::remove_dir_all(&base);
