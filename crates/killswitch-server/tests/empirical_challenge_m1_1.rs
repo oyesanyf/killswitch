@@ -38,12 +38,38 @@ use killswitch_types::status::{AuthResult, OperatorAuthenticator, OperatorCreden
 
 const ADVERSARIAL_MASTER_TOKEN: &str = "adv_master_secret_key_9876543210_fedcba_0123456789abcdef";
 
-fn create_test_server_state() -> Arc<ServerState> {
-    std::env::set_var("KILLSWITCH_MASTER_TOKEN", ADVERSARIAL_MASTER_TOKEN);
+fn create_test_server_state() -> (Arc<ServerState>, tempfile::TempDir) {
     let temp_dir = tempfile::tempdir().unwrap();
-    let containment =
-        Arc::new(HostContainmentManager::new_simulated(Some(temp_dir.path())).unwrap());
-    Arc::new(ServerState::with_defaults(containment))
+    let containment = Arc::new(
+        HostContainmentManager::new_simulated_with_master_token(
+            Some(temp_dir.path()),
+            ADVERSARIAL_MASTER_TOKEN.to_string(),
+        )
+        .unwrap(),
+    );
+    let mut state = ServerState::with_defaults(containment);
+    state.control_token = Arc::new(ADVERSARIAL_MASTER_TOKEN.to_string());
+    state
+        .active_bound_port
+        .store(0, std::sync::atomic::Ordering::SeqCst);
+    (Arc::new(state), temp_dir)
+}
+
+async fn spawn_live_server(state: Arc<ServerState>) -> (u16, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    state
+        .active_bound_port
+        .store(port, std::sync::atomic::Ordering::SeqCst);
+    let app = build_router(state);
+    let handle = tokio::spawn(async move {
+        let _ = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await;
+    });
+    (port, handle)
 }
 
 // ============================================================================
@@ -66,7 +92,7 @@ fn test_stress_peer_pid_mismatched_caller_pid() {
 
     let my_pid = std::process::id();
     let resolved = resolve_loopback_peer_pid(client_addr, server_port);
-    if cfg!(not(any(windows, target_os = "linux"))) {
+    if cfg!(not(any(windows, target_os = "linux", target_os = "macos"))) {
         assert!(matches!(resolved, Err(KillSwitchError::NativeOsError(_))));
         return;
     }
@@ -106,6 +132,7 @@ fn test_stress_peer_pid_forged_and_unmapped_endpoints() {
             assert!(
                 msg.contains("No kernel TCP table entry found")
                     || msg.contains("No matching Linux socket inode found")
+                    || msg.contains("No matching macOS socket found")
                     || msg.contains("not supported on this platform"),
                 "Expected unmapped socket lookup error message, got: {}",
                 msg
@@ -319,7 +346,7 @@ fn test_stress_peer_pid_concurrent_connections() {
         errors,
         num_threads * 5
     );
-    if cfg!(not(any(windows, target_os = "linux"))) {
+    if cfg!(not(any(windows, target_os = "linux", target_os = "macos"))) {
         assert_eq!(successes, 0);
         return;
     }
@@ -453,76 +480,65 @@ fn test_stress_auth_timing_probe_distribution() {
 }
 
 /// 2c. Server `/disarm` API endpoint stress test:
-/// Test disarm request with missing token, 31-char token, wrong token, and correct token.
+/// Test disarm request with missing token, 31-char token, wrong token, and correct token over live loopback TCP.
 #[tokio::test]
 async fn test_stress_server_disarm_endpoint_authentication() {
-    let state = create_test_server_state();
-    let app = build_router(state);
+    let (state, _temp_dir) = create_test_server_state();
+    let (port, handle) = spawn_live_server(state).await;
+    let client = reqwest::Client::new();
+    let disarm_url = format!("http://127.0.0.1:{}/disarm", port);
 
     // 1. Missing token
-    let req_missing = Request::builder()
-        .uri("/disarm")
-        .method("POST")
-        .header("Content-Type", "application/json")
-        .body(Body::from(
-            serde_json::to_vec(&serde_json::json!({
-                "operator": "secops_admin",
-                "reason": "Missing token test"
-            }))
-            .unwrap(),
-        ))
+    let resp = client
+        .post(&disarm_url)
+        .json(&serde_json::json!({
+            "operator": "secops_admin",
+            "reason": "Missing token test"
+        }))
+        .send()
+        .await
         .unwrap();
-
-    let resp = app.clone().oneshot(req_missing).await.unwrap();
     assert_ne!(
         resp.status(),
-        StatusCode::OK,
+        reqwest::StatusCode::OK,
         "Disarm with missing token must not succeed"
     );
 
     // 2. Truncated token (31 chars)
-    let req_trunc = Request::builder()
-        .uri("/disarm")
-        .method("POST")
-        .header("Content-Type", "application/json")
-        .body(Body::from(
-            serde_json::to_vec(&serde_json::json!({
-                "operator": "secops_admin",
-                "reason": "Truncated token test",
-                "token": "0123456789abcdef0123456789abcde"
-            }))
-            .unwrap(),
-        ))
+    let resp_trunc = client
+        .post(&disarm_url)
+        .json(&serde_json::json!({
+            "operator": "secops_admin",
+            "reason": "Truncated token test",
+            "token": "0123456789abcdef0123456789abcde"
+        }))
+        .send()
+        .await
         .unwrap();
-
-    let resp_trunc = app.clone().oneshot(req_trunc).await.unwrap();
     assert_ne!(
         resp_trunc.status(),
-        StatusCode::OK,
+        reqwest::StatusCode::OK,
         "Disarm with 31-char token must not succeed"
     );
 
-    // 3. Valid master token succeeds
-    let req_valid = Request::builder()
-        .uri("/disarm")
-        .method("POST")
-        .header("Content-Type", "application/json")
-        .body(Body::from(
-            serde_json::to_vec(&serde_json::json!({
-                "operator": "secops_admin",
-                "reason": "Authorized test disarm",
-                "token": ADVERSARIAL_MASTER_TOKEN
-            }))
-            .unwrap(),
-        ))
+    // 3. Valid master token succeeds over live loopback TCP with OS-verified peer PID
+    let resp_valid = client
+        .post(&disarm_url)
+        .json(&serde_json::json!({
+            "operator": "secops_admin",
+            "reason": "Authorized test disarm",
+            "token": ADVERSARIAL_MASTER_TOKEN
+        }))
+        .send()
+        .await
         .unwrap();
-
-    let resp_valid = app.oneshot(req_valid).await.unwrap();
     assert_eq!(
         resp_valid.status(),
-        StatusCode::OK,
+        reqwest::StatusCode::OK,
         "Disarm with valid Tier-1 master token must succeed"
     );
+
+    handle.abort();
 }
 
 // ============================================================================
@@ -532,7 +548,7 @@ async fn test_stress_server_disarm_endpoint_authentication() {
 /// 3a. Substrate quarantine endpoint rejects requests without required headers
 #[tokio::test]
 async fn test_stress_substrate_quarantine_missing_headers() {
-    let state = create_test_server_state();
+    let (state, _temp_dir) = create_test_server_state();
     let app = build_router(state);
 
     // Missing X-CAGE-Quarantine-Assertion header
@@ -585,7 +601,7 @@ async fn test_stress_substrate_quarantine_missing_headers() {
 /// 3b. Substrate release requires quorum_count >= 2 and valid 64-hex digest
 #[tokio::test]
 async fn test_stress_substrate_release_quorum_and_digest_validation() {
-    let state = create_test_server_state();
+    let (state, _temp_dir) = create_test_server_state();
     let app = build_router(state);
 
     // Quorum count 1 (insufficient)
