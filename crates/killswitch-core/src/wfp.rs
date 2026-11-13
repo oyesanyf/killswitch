@@ -2922,7 +2922,7 @@ fn is_exact_localhost_v6(octets: [u8; 16]) -> bool {
     addr == Ipv6Addr::LOCALHOST || addr.to_ipv4_mapped() == Some(Ipv4Addr::LOCALHOST)
 }
 
-#[cfg(any(windows, test))]
+#[cfg(windows)]
 #[inline]
 fn is_blocked_proxy_port(port: u16, preserved_ports: &[u16]) -> bool {
     !preserved_ports.contains(&port) && QUARANTINE_BLOCKED_LOOPBACK_PROXY_PORTS.contains(&port)

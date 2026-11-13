@@ -1024,7 +1024,12 @@ pub fn generate_macos_seatbelt_profile(
         "/sbin",
         "/System",
         "/Library",
+        "/opt",
+        "/Applications",
+        "/private/preboot",
         "/private/var/db/dyld",
+        "/private/var/db/xcode_select_link",
+        "/private/var/select",
         "/private/etc",
         "/etc",
         "/dev",
@@ -1051,14 +1056,18 @@ pub fn generate_macos_seatbelt_profile(
         "(version 1)\n\
 (deny default)\n\
 (allow process-exec* process-fork sysctl-read)\n\
+(allow process-info-pidinfo (target self))\n\
 (allow signal (target same-sandbox))\n\
 (allow file-read-metadata)\n\
-(allow file-read* file-write* (literal \"/dev/null\") (literal \"/dev/zero\") (literal \"/dev/dtracehelper\"))\n",
+(allow mach-lookup (global-name \"com.apple.system.logger\") (global-name \"com.apple.system.opendirectoryd.libinfo\"))\n\
+(allow file-read* file-write* (literal \"/dev/null\") (literal \"/dev/zero\") (literal \"/dev/dtracehelper\"))\n\
+(allow file-ioctl (literal \"/dev/null\") (literal \"/dev/tty\") (literal \"/dev/dtracehelper\"))\n",
     );
     for r in &read_paths {
+        let escaped = escape_sbpl_path(r);
         sbpl.push_str(&format!(
-            "(allow file-read* (subpath \"{}\"))\n",
-            escape_sbpl_path(r)
+            "(allow file-read* file-map-executable (subpath \"{}\"))\n",
+            escaped
         ));
     }
     for w in &write_paths {
@@ -1321,6 +1330,7 @@ mod tests {
         assert!(sbpl.contains("(version 1)"));
         assert!(sbpl.contains("(deny default)"));
         assert!(sbpl.contains("(deny network*)"));
+        assert!(sbpl.contains("file-map-executable"));
         assert!(sbpl.contains("(allow file-read* file-write* (subpath \"/tmp/ks-agent-work\"))"));
         assert!(sbpl
             .contains("(allow file-read* file-write* (subpath \"/private/tmp/ks-agent-work\"))"));

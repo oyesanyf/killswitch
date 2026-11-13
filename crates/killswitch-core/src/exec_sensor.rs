@@ -547,6 +547,9 @@ impl NativeProcessSensor for MacOsProcessSensor {
 
     fn stop(&self) {
         self.running.store(false, Ordering::SeqCst);
+        if let Some(handle) = self.worker_handle.lock().take() {
+            let _ = handle.join();
+        }
     }
 
     fn is_running(&self) -> bool {
