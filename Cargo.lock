@@ -1033,6 +1033,7 @@ dependencies = [
  "killswitch-adjudication",
  "killswitch-conformal",
  "killswitch-core",
+ "killswitch-kernel-patcher",
  "killswitch-orchestrator",
  "killswitch-server",
  "killswitch-telemetry",
@@ -1074,6 +1075,22 @@ dependencies = [
  "tracing",
  "uuid",
  "windows 0.58.0",
+ "windows-sys 0.59.0",
+ "winreg",
+]
+
+[[package]]
+name = "killswitch-kernel-patcher"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
  "windows-sys 0.59.0",
  "winreg",
 ]
@@ -1124,6 +1141,7 @@ dependencies = [
  "killswitch-adjudication",
  "killswitch-conformal",
  "killswitch-core",
+ "killswitch-kernel-patcher",
  "killswitch-telemetry",
  "killswitch-types",
  "parking_lot",

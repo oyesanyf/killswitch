@@ -985,9 +985,31 @@ fn escape_sbpl_path(raw: &str) -> String {
     raw.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+/// Resolves a bare command name (e.g., `"sh"`) against `PATH` before Seatbelt locks directory reads.
+pub(crate) fn resolve_macos_program_path(program: &str) -> std::path::PathBuf {
+    let raw = std::path::Path::new(program);
+    if program.contains('/') || raw.is_absolute() {
+        return raw.to_path_buf();
+    }
+    if let Some(paths) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&paths) {
+            let candidate = dir.join(program);
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+    }
+    raw.to_path_buf()
+}
+
 /// Pushes a path and (on macOS `/var`, `/tmp`, `/etc` symlinks) its `/private/...` canonical form.
 fn push_sbpl_path_variants(out: &mut Vec<String>, path: &std::path::Path) {
-    let raw = path.to_string_lossy().to_string();
+    let raw_trimmed = path.to_string_lossy();
+    let raw = if raw_trimmed.len() > 1 {
+        raw_trimmed.trim_end_matches('/').to_string()
+    } else {
+        raw_trimmed.to_string()
+    };
     if raw.is_empty() {
         return;
     }
@@ -1039,9 +1061,9 @@ pub fn generate_macos_seatbelt_profile(
     for p in &config.readable_paths {
         push_sbpl_path_variants(&mut read_paths, p);
     }
-    let prog = std::path::Path::new(&config.program);
-    if prog.is_absolute() {
-        push_sbpl_path_variants(&mut read_paths, prog);
+    let resolved_prog = resolve_macos_program_path(&config.program);
+    if resolved_prog.is_absolute() {
+        push_sbpl_path_variants(&mut read_paths, &resolved_prog);
     }
     if let Some(ref cwd) = config.current_dir {
         push_sbpl_path_variants(&mut read_paths, cwd);
@@ -1055,8 +1077,9 @@ pub fn generate_macos_seatbelt_profile(
     let mut sbpl = String::from(
         "(version 1)\n\
 (deny default)\n\
+(import \"system.sb\")\n\
 (allow process-exec* process-fork sysctl-read)\n\
-(allow process-info-pidinfo (target self))\n\
+(allow process-info* (target self))\n\
 (allow signal (target same-sandbox))\n\
 (allow file-read-metadata)\n\
 (allow mach-lookup (global-name \"com.apple.system.logger\") (global-name \"com.apple.system.opendirectoryd.libinfo\"))\n\
@@ -1329,6 +1352,7 @@ mod tests {
         let sbpl = generate_macos_seatbelt_profile(&cfg);
         assert!(sbpl.contains("(version 1)"));
         assert!(sbpl.contains("(deny default)"));
+        assert!(sbpl.contains("(import \"system.sb\")"));
         assert!(sbpl.contains("(deny network*)"));
         assert!(sbpl.contains("file-map-executable"));
         assert!(sbpl.contains("(allow file-read* file-write* (subpath \"/tmp/ks-agent-work\"))"));

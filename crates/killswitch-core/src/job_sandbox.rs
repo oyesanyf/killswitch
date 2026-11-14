@@ -1156,7 +1156,18 @@ impl SandboxedAgentProcess {
                 ));
             };
             TrackedAgentTreeRegistry::global().unregister_pid(self.pid);
-            Ok(status.code().unwrap_or(1))
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::ExitStatusExt;
+                Ok(status
+                    .code()
+                    .or_else(|| status.signal().map(|sig| 128 + sig))
+                    .unwrap_or(1))
+            }
+            #[cfg(not(unix))]
+            {
+                Ok(status.code().unwrap_or(1))
+            }
         }
     }
 }
@@ -1642,11 +1653,9 @@ pub fn spawn_sandboxed_agent_process(
         #[cfg(target_os = "macos")]
         let mut cmd = {
             let sbpl = crate::pf::generate_macos_seatbelt_profile(&config);
+            let resolved_prog = crate::pf::resolve_macos_program_path(&config.program);
             let mut c = Command::new("/usr/bin/sandbox-exec");
-            c.arg("-p")
-                .arg(sbpl)
-                .arg(&config.program)
-                .args(&config.args);
+            c.arg("-p").arg(sbpl).arg(resolved_prog).args(&config.args);
             c
         };
         #[cfg(not(target_os = "macos"))]
