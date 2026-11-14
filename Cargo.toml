@@ -22,6 +22,7 @@ killswitch-orchestrator = { path = "crates/killswitch-orchestrator" }
 killswitch-server = { path = "crates/killswitch-server" }
 killswitch-cli = { path = "crates/killswitch-cli" }
 killswitch-conformal = { path = "crates/killswitch-conformal" }
+killswitch-kernel-patcher = { path = "crates/killswitch-kernel-patcher" }
 
 
 # OpenTelemetry & OpenLineage Integration
@@ -82,6 +83,8 @@ windows = { version = "0.58", features = [
     "Win32_System_Threading",
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_Security",
+    "Win32_Security_Isolation",
+    "Win32_Security_Authorization",
     "Win32_Security_WinTrust",
     "Win32_Security_Cryptography",
     "Win32_System_LibraryLoader",

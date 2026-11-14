@@ -288,6 +288,30 @@ enum Commands {
         #[arg(long)]
         token: Option<String>,
     },
+
+    /// Scan OS kernel vulnerabilities against NVD API 2.0 / CISA KEV and orchestrate native patching
+    #[command(name = "patch-kernel", visible_alias = "kernel-patch")]
+    PatchKernel {
+        /// Output planned OS patch command without executing or modifying system state
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Filter findings to CISA Known Exploited Vulnerabilities (KEV) only
+        #[arg(long)]
+        kev_only: bool,
+
+        /// Minimum CVSS v3.1 base score threshold (e.g. 7.0)
+        #[arg(long)]
+        min_cvss: Option<f32>,
+
+        /// Override target CPE 2.3 string (defaults to auto-detected host kernel)
+        #[arg(long)]
+        cpe: Option<String>,
+
+        /// Orchestrate native OS kernel patch workflow after scanning
+        #[arg(long)]
+        apply: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -631,7 +655,77 @@ async fn main() -> Result<()> {
         }) => {
             killswitch_cli::siquery_cli::handle_siquery(query, &format, tables, sweep, token)?;
         }
+        Some(Commands::PatchKernel {
+            dry_run,
+            kev_only,
+            min_cvss,
+            cpe,
+            apply,
+        }) => {
+            killswitch_cli::commands::handle_patch_kernel(dry_run, kev_only, min_cvss, cpe, apply)
+                .await?;
+        }
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn test_patch_kernel_cli_parsing() {
+        let cli = Cli::try_parse_from([
+            "killswitch",
+            "patch-kernel",
+            "--dry-run",
+            "--kev-only",
+            "--min-cvss",
+            "7.5",
+            "--cpe",
+            "cpe:2.3:o:microsoft:windows_11_23h2:*:*:*:*:*:*:*:*",
+            "--apply",
+        ])
+        .expect("Failed to parse patch-kernel subcommand");
+
+        match cli.command {
+            Some(Commands::PatchKernel {
+                dry_run,
+                kev_only,
+                min_cvss,
+                cpe,
+                apply,
+            }) => {
+                assert!(dry_run);
+                assert!(kev_only);
+                assert_eq!(min_cvss, Some(7.5));
+                assert_eq!(
+                    cpe.as_deref(),
+                    Some("cpe:2.3:o:microsoft:windows_11_23h2:*:*:*:*:*:*:*:*")
+                );
+                assert!(apply);
+            }
+            other => panic!("Expected Commands::PatchKernel, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_patch_kernel_secret_hygiene_no_nvd_api_key_flag() {
+        // Assert that passing --nvd-api-key is rejected as an unrecognized argument
+        let res = Cli::try_parse_from([
+            "killswitch",
+            "patch-kernel",
+            "--nvd-api-key",
+            "secret_test_key",
+        ]);
+        assert!(res.is_err(), "Expected error for --nvd-api-key CLI flag");
+        let err_msg = res.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("unexpected argument")
+                || err_msg.contains("not recognized")
+                || err_msg.contains("--nvd-api-key")
+        );
+    }
 }

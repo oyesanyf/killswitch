@@ -39,10 +39,13 @@ pub use agent_registry::{AgentLineageClass, SubtreeResolution, TrackedAgentRoot}
 pub use auth::{FrozenPidsProvider, OperatorAuthManager};
 pub use fprime::{FPrimeDispatchResult, FPrimeOpcode, FPrimeSupervisor, FPrimeTopologyStatus};
 pub use freeze::NativeProcessFreezer;
+#[cfg(target_os = "windows")]
+pub use job_sandbox::WindowsAppContainerSandbox;
 pub use job_sandbox::{
-    enumerate_live_descendants, enumerate_process_subtree, freeze_process_subtree,
-    freeze_subtree_kernel, resume_process_subtree, spawn_confined_process, ConfinedChild,
-    JobSandboxConfig, SubtreeFreezeReport,
+    enumerate_live_descendants, enumerate_process_subtree, format_windows_command_line,
+    freeze_process_subtree, freeze_subtree_kernel, resume_process_subtree, spawn_confined_process,
+    spawn_sandboxed_agent_process, ConfinedChild, JobSandboxConfig, SandboxedAgentConfig,
+    SandboxedAgentProcess, SubtreeFreezeReport,
 };
 pub use killchain::{
     default_network_isolator, is_critical_system_pid, is_developer_or_agent_runtime,
@@ -50,14 +53,19 @@ pub use killchain::{
     SimulatedNetworkIsolator, TrackedAgentTreeRegistry,
 };
 pub use landlock::{
-    apply_landlock_sandbox, get_active_non_loopback_connections, get_landlock_abi_version,
-    parse_linux_ipv4_hex, parse_linux_ipv6_hex, parse_proc_net_content, parse_tcp_line,
-    read_and_parse_proc_net_tcp, read_and_parse_proc_net_tcp6, LandlockSandboxConfig,
-    LinuxNetlinkIsolator, LinuxSocketEntry, TcpState,
+    apply_agent_seccomp_bpf, apply_landlock_sandbox, build_agent_seccomp_bpf,
+    build_sock_destroy_msg, build_sock_destroy_msg_for_proto,
+    generate_linux_nftables_quarantine_script, get_active_non_loopback_connections,
+    get_active_non_loopback_udp_and_raw_sockets, get_landlock_abi_version,
+    install_linux_nftables_quarantine, parse_linux_ipv4_hex, parse_linux_ipv6_hex,
+    parse_proc_net_content, parse_tcp_line, read_and_parse_proc_net_raw,
+    read_and_parse_proc_net_raw6, read_and_parse_proc_net_tcp, read_and_parse_proc_net_tcp6,
+    read_and_parse_proc_net_udp, read_and_parse_proc_net_udp6, remove_linux_nftables_quarantine,
+    LandlockSandboxConfig, LinuxNetlinkIsolator, LinuxSocketEntry, TcpState,
 };
 pub use pf::{
-    generate_quarantine_rules, get_active_darwin_sockets, DarwinSocketEntry, MacOsPfIsolator,
-    PfRuleSpec, DEFAULT_PF_ANCHOR, PF_DEVICE_PATH,
+    generate_macos_seatbelt_profile, generate_quarantine_rules, get_active_darwin_sockets,
+    DarwinSocketEntry, MacOsPfIsolator, PfRuleSpec, DEFAULT_PF_ANCHOR, PF_DEVICE_PATH,
 };
 #[cfg(target_os = "windows")]
 pub use service::WindowsServiceManager;

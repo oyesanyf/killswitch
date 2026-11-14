@@ -97,10 +97,22 @@ impl SubsystemVerifier {
 
     /// Executes subsystem diagnostics, optionally including Phase 8 (CAGE Governance).
     pub async fn run_with_governance(cage_governance: bool) -> Result<VerificationReport> {
+        struct SelfDiagnosticGuard {
+            had_env: bool,
+        }
+        impl Drop for SelfDiagnosticGuard {
+            fn drop(&mut self) {
+                killswitch_core::wfp::set_in_process_self_diagnostic(false);
+                if !self.had_env {
+                    std::env::remove_var("KILLSWITCH_SELF_DIAGNOSTIC");
+                }
+            }
+        }
+        let had_env = std::env::var("KILLSWITCH_SELF_DIAGNOSTIC").is_ok();
+        killswitch_core::wfp::set_in_process_self_diagnostic(true);
         std::env::set_var("KILLSWITCH_SELF_DIAGNOSTIC", "1");
-        let res = Self::run_with_governance_inner(cage_governance).await;
-        std::env::remove_var("KILLSWITCH_SELF_DIAGNOSTIC");
-        res
+        let _guard = SelfDiagnosticGuard { had_env };
+        Self::run_with_governance_inner(cage_governance).await
     }
 
     async fn run_with_governance_inner(cage_governance: bool) -> Result<VerificationReport> {

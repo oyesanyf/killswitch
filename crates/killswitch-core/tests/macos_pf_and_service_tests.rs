@@ -31,39 +31,41 @@ fn test_f29_macos_pf_anchor_quarantine_rules_generation() {
         "Syntax must reference anchor 'killswitch'"
     );
 
-    // Invariant: lo0, 127.0.0.1, ::1 preserved with quick
+    // Invariant: Zero blanket lo0 / from 127.0.0.1 to any / from ::1 to any bypasses
     assert!(
-        syntax.contains("pass quick on lo0 all"),
-        "Rule syntax must preserve lo0 interface"
+        !syntax.contains("pass quick on lo0 all"),
+        "Rule syntax must NOT contain blanket lo0 pass"
     );
     assert!(
-        syntax.contains("pass quick from 127.0.0.1 to any"),
-        "Rule syntax must explicitly pass 127.0.0.1"
+        !syntax.contains("from 127.0.0.1 to any"),
+        "Rule syntax must NOT contain blanket 127.0.0.1 to any pass"
     );
     assert!(
-        syntax.contains("pass quick from ::1 to any"),
-        "Rule syntax must explicitly pass ::1"
-    );
-
-    // Invariant: local control port 3030 preserved
-    assert!(
-        syntax.contains("port 3030"),
-        "Rule syntax must preserve port 3030"
+        !syntax.contains("from ::1 to any"),
+        "Rule syntax must NOT contain blanket ::1 to any pass"
     );
 
-    // Invariant: DNS 53 and DHCP 67/68 must strictly NOT be preserved
+    // Invariant: IMDS and local control port 3030 exact-localhost preservation
+    assert!(syntax.contains("169.254.0.0/16"));
+    assert!(syntax.contains("fe80::/10"));
     assert!(
-        !syntax.contains("port 53"),
-        "Rule syntax must not preserve DNS 53"
+        syntax.contains("pass in quick on lo0 proto tcp from 127.0.0.1 to 127.0.0.1 port 3030"),
+        "Rule syntax must strictly preserve port 3030 between 127.0.0.1 <-> 127.0.0.1"
     );
+
+    // Invariant: DNS 53 and DHCP 67/68 must have explicit block drops and zero pass rules
     assert!(
-        !syntax.contains("port 67"),
-        "Rule syntax must not preserve DHCP 67"
+        syntax.contains("block drop quick proto tcp from any to any port 53"),
+        "Rule syntax must explicitly block DNS 53"
     );
-    assert!(
-        !syntax.contains("port 68"),
-        "Rule syntax must not preserve DHCP 68"
-    );
+    for port in ["port 53 ", "port 67 ", "port 68 "] {
+        assert!(
+            !syntax
+                .lines()
+                .any(|l| l.starts_with("pass ") && l.contains(port)),
+            "Rule syntax must not preserve {port}"
+        );
+    }
 
     // Invariant: Default hermetic block drop with quick
     assert!(
@@ -118,6 +120,7 @@ fn test_f29_macos_pf_isolator_lifecycle_and_contract() {
 
 #[test]
 fn test_f29_darwin_socket_inspection() {
+    let _probe_listener = std::net::TcpListener::bind("127.0.0.1:0").ok();
     let sockets = get_active_darwin_sockets().expect("get_active_darwin_sockets must succeed");
     assert!(!sockets.is_empty(), "Socket list should not be empty");
 

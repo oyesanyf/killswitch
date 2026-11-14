@@ -15,6 +15,7 @@ killswitch-core = { workspace = true }
 killswitch-adjudication = { workspace = true }
 killswitch-telemetry = { workspace = true }
 killswitch-conformal = { workspace = true }
+killswitch-kernel-patcher = { workspace = true }
 
 # Web framework & async runtime
 axum = { workspace = true, features = ["macros"] }
