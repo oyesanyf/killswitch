@@ -2163,6 +2163,7 @@ mod tests {
 
         let allowed_file = allowed_dir.join("ok.txt");
         let mut ok_cfg = SandboxedAgentConfig::new("test-sb-ok", "sh");
+        ok_cfg.current_dir = Some(allowed_dir.clone());
         ok_cfg.args = vec![
             "-c".to_string(),
             format!("printf confined > '{}'", allowed_file.display()),
@@ -2176,6 +2177,7 @@ mod tests {
 
         let escape_file = forbidden_dir.join("escape.txt");
         let mut deny_cfg = SandboxedAgentConfig::new("test-sb-deny", "sh");
+        deny_cfg.current_dir = Some(allowed_dir.clone());
         deny_cfg.args = vec![
             "-c".to_string(),
             format!("printf escaped > '{}' 2>/dev/null", escape_file.display()),
@@ -2189,7 +2191,10 @@ mod tests {
             if let Ok(listener) = std::net::TcpListener::bind("127.0.0.1:0") {
                 let port = listener.local_addr().unwrap().port();
                 let mut net_cfg = SandboxedAgentConfig::new("test-sb-net", "/usr/bin/python3");
+                net_cfg.current_dir = Some(allowed_dir.clone());
+                net_cfg.readable_paths = vec![allowed_dir.clone()];
                 net_cfg.args = vec![
+                    "-I".to_string(),
                     "-c".to_string(),
                     format!(
                         "import errno, socket, sys\ntry:\n s = socket.create_connection(('127.0.0.1', {port}), timeout=1)\n sys.exit(2)\nexcept OSError as e:\n sys.exit(0 if e.errno in (errno.EPERM, errno.EACCES) else 3)"

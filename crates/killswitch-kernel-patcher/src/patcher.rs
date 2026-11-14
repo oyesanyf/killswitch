@@ -63,8 +63,16 @@ impl KernelPatcher {
         // Invariant: Never passed via CLI arguments to prevent leaking into OS process tables.
         let resolved_api_key = options
             .api_key
-            .clone()
-            .or_else(|| std::env::var("NVD_API_KEY").ok());
+            .as_deref()
+            .map(str::trim)
+            .filter(|k| !k.is_empty())
+            .map(ToOwned::to_owned)
+            .or_else(|| {
+                std::env::var("NVD_API_KEY")
+                    .ok()
+                    .map(|k| k.trim().to_string())
+                    .filter(|k| !k.is_empty())
+            });
 
         if let Some(key) = resolved_api_key {
             req = req.header("apiKey", key);

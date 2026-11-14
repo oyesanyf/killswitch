@@ -1,8 +1,11 @@
 //! Windows host kernel discovery using dynamic `ntdll!RtlGetVersion` and registry inspection.
 
+#[cfg(windows)]
 use crate::cpe::{canonicalize_windows_cpe, Cpe23};
 use crate::error::PatcherError;
-use crate::types::{HostKernelInfo, OsFamily};
+use crate::types::HostKernelInfo;
+#[cfg(windows)]
+use crate::types::OsFamily;
 
 #[cfg(windows)]
 #[repr(C)]
