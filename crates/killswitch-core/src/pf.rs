@@ -13,11 +13,15 @@
 //! - Safe fallback / simulation when running on non-macOS or non-root test environments.
 
 #[cfg(target_os = "macos")]
+use crate::wfp::is_authorized_self_diagnostic;
+use crate::wfp::{
+    sanitize_firewall_preserved_ports, QUARANTINE_BLOCKED_DISCOVERY_PORTS,
+    QUARANTINE_BLOCKED_LATERAL_PORTS, QUARANTINE_BLOCKED_LOOPBACK_PROXY_PORTS,
+};
+#[cfg(target_os = "macos")]
 use killswitch_types::errors::KillSwitchError;
 use killswitch_types::errors::Result;
-use killswitch_types::status::{
-    IsolationReceipt, NetworkIsolationEngine, NetworkIsolator, DEFAULT_CONTROL_PORT,
-};
+use killswitch_types::status::{IsolationReceipt, NetworkIsolationEngine, NetworkIsolator};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::PathBuf;
 #[cfg(target_os = "macos")]
@@ -307,104 +311,188 @@ impl PfRuleSpec {
     }
 }
 
-/// Generates the canonical isolation ruleset for Darwin BSD Packet Filter:
-/// 1. Allow all traffic on loopback interface (`lo0`).
-/// 2. Explicitly permit IPv4 `127.0.0.1` and IPv6 `::1` loopback traffic.
-/// 3. Allow incoming and outgoing traffic on the local control port (`3030`).
-/// 4. Allow outgoing DNS (port 53 UDP/TCP) and DHCP (ports 67, 68 UDP) for connectivity resolution.
-/// 5. Block all other incoming and outgoing traffic.
+/// Generates the hardened hermetic isolation ruleset for Darwin BSD Packet Filter:
+/// 1. Explicitly drop IMDS (`169.254.0.0/16`), IPv6 link-local (`fe80::/10`), DNS/DoT/DHCP/QUIC,
+///    loopback proxy ports (`1080/3128/8080/8888/9050`), and lateral SMB/RPC/WinRM ports.
+/// 2. Permit ONLY exact `127.0.0.1 <-> 127.0.0.1` and `::1 <-> ::1` TCP traffic on `lo0` for
+///    sanitized KillSwitch WebUI/control ports (`DEFAULT_CONTROL_PORT` + validated custom ports).
+/// 3. Explicitly drop remaining `127.0.0.0/8` loopback aliases (`127.0.0.2+`) on `lo0`.
+/// 4. Block all other incoming and outgoing traffic (`block drop in quick all`, `block drop out quick all`).
 pub fn generate_quarantine_rules(
     anchor: &str,
     preserved_ports: &[u16],
 ) -> (Vec<PfRuleSpec>, String) {
     let mut rules = Vec::new();
+    let allowed_ports = sanitize_firewall_preserved_ports(preserved_ports);
 
-    // 1. Loopback interface immunity
+    // 1. Explicit IMDS and link-local drops (before any loopback/control rule)
     rules.push(PfRuleSpec {
-        action: PfAction::Pass,
+        action: PfAction::Drop,
         direction: PfDirection::InOut,
         quick: true,
-        interface: Some("lo0".to_string()),
+        interface: None,
         protocol: PfProtocol::Any,
+        src: "0.0.0.0/0".to_string(),
+        src_port: None,
+        dst: "169.254.0.0/16".to_string(),
+        dst_port: None,
+        keep_state: false,
+        comment: "Block IPv4 IMDS and link-local 169.254.0.0/16".to_string(),
+    });
+    rules.push(PfRuleSpec {
+        action: PfAction::Drop,
+        direction: PfDirection::InOut,
+        quick: true,
+        interface: None,
+        protocol: PfProtocol::Any,
+        src: "::/0".to_string(),
+        src_port: None,
+        dst: "fe80::/10".to_string(),
+        dst_port: None,
+        keep_state: false,
+        comment: "Block IPv6 link-local fe80::/10".to_string(),
+    });
+
+    // 2. Explicit discovery/DNS/DHCP/DoT and QUIC (UDP 443) drops
+    for &port in QUARANTINE_BLOCKED_DISCOVERY_PORTS {
+        rules.push(PfRuleSpec {
+            action: PfAction::Drop,
+            direction: PfDirection::InOut,
+            quick: true,
+            interface: None,
+            protocol: PfProtocol::Tcp,
+            src: "any".to_string(),
+            src_port: None,
+            dst: "any".to_string(),
+            dst_port: Some(port),
+            keep_state: false,
+            comment: format!("Block TCP discovery/DNS/DHCP port {port}"),
+        });
+        rules.push(PfRuleSpec {
+            action: PfAction::Drop,
+            direction: PfDirection::InOut,
+            quick: true,
+            interface: None,
+            protocol: PfProtocol::Udp,
+            src: "any".to_string(),
+            src_port: None,
+            dst: "any".to_string(),
+            dst_port: Some(port),
+            keep_state: false,
+            comment: format!("Block UDP discovery/DNS/DHCP port {port}"),
+        });
+    }
+    rules.push(PfRuleSpec {
+        action: PfAction::Drop,
+        direction: PfDirection::InOut,
+        quick: true,
+        interface: None,
+        protocol: PfProtocol::Udp,
         src: "any".to_string(),
         src_port: None,
         dst: "any".to_string(),
-        dst_port: None,
-        keep_state: true,
-        comment: "Preserve all loopback interface lo0 traffic".to_string(),
+        dst_port: Some(443),
+        keep_state: false,
+        comment: "Block UDP/443 QUIC exfiltration".to_string(),
     });
 
-    // 2. Loopback IP address explicit permit
-    rules.push(PfRuleSpec {
-        action: PfAction::Pass,
-        direction: PfDirection::InOut,
-        quick: true,
-        interface: None,
-        protocol: PfProtocol::Any,
-        src: "127.0.0.1".to_string(),
-        src_port: None,
-        dst: "any".to_string(),
-        dst_port: None,
-        keep_state: true,
-        comment: "Preserve IPv4 loopback 127.0.0.1".to_string(),
-    });
-
-    rules.push(PfRuleSpec {
-        action: PfAction::Pass,
-        direction: PfDirection::InOut,
-        quick: true,
-        interface: None,
-        protocol: PfProtocol::Any,
-        src: "::1".to_string(),
-        src_port: None,
-        dst: "any".to_string(),
-        dst_port: None,
-        keep_state: true,
-        comment: "Preserve IPv6 loopback ::1".to_string(),
-    });
-
-    // 3. Local control port (default 3030) strictly restricted to lo0
-    let control_port = preserved_ports
+    // 3. Explicit loopback proxy and lateral SMB/RPC/WinRM drops
+    for &port in QUARANTINE_BLOCKED_LOOPBACK_PROXY_PORTS
         .iter()
-        .copied()
-        .find(|&p| p == DEFAULT_CONTROL_PORT)
-        .unwrap_or(DEFAULT_CONTROL_PORT);
+        .chain(QUARANTINE_BLOCKED_LATERAL_PORTS.iter())
+    {
+        rules.push(PfRuleSpec {
+            action: PfAction::Drop,
+            direction: PfDirection::InOut,
+            quick: true,
+            interface: None,
+            protocol: PfProtocol::Tcp,
+            src: "any".to_string(),
+            src_port: None,
+            dst: "any".to_string(),
+            dst_port: Some(port),
+            keep_state: false,
+            comment: format!("Block loopback proxy / lateral movement TCP port {port}"),
+        });
+    }
 
+    // 4. Strictly permit ONLY exact 127.0.0.1 <-> 127.0.0.1 and ::1 <-> ::1 TCP control ports on lo0
+    for &port in &allowed_ports {
+        for (src_ip, dst_ip, label) in [
+            ("127.0.0.1", "127.0.0.1", "IPv4 localhost"),
+            ("::1", "::1", "IPv6 localhost"),
+        ] {
+            rules.push(PfRuleSpec {
+                action: PfAction::Pass,
+                direction: PfDirection::In,
+                quick: true,
+                interface: Some("lo0".to_string()),
+                protocol: PfProtocol::Tcp,
+                src: src_ip.to_string(),
+                src_port: None,
+                dst: dst_ip.to_string(),
+                dst_port: Some(port),
+                keep_state: true,
+                comment: format!("Allow inbound {label} control traffic to port {port} on lo0"),
+            });
+            rules.push(PfRuleSpec {
+                action: PfAction::Pass,
+                direction: PfDirection::Out,
+                quick: true,
+                interface: Some("lo0".to_string()),
+                protocol: PfProtocol::Tcp,
+                src: src_ip.to_string(),
+                src_port: None,
+                dst: dst_ip.to_string(),
+                dst_port: Some(port),
+                keep_state: true,
+                comment: format!("Allow outbound {label} control traffic to port {port} on lo0"),
+            });
+            rules.push(PfRuleSpec {
+                action: PfAction::Pass,
+                direction: PfDirection::In,
+                quick: true,
+                interface: Some("lo0".to_string()),
+                protocol: PfProtocol::Tcp,
+                src: src_ip.to_string(),
+                src_port: Some(port),
+                dst: dst_ip.to_string(),
+                dst_port: None,
+                keep_state: true,
+                comment: format!("Allow inbound {label} control response from port {port} on lo0"),
+            });
+            rules.push(PfRuleSpec {
+                action: PfAction::Pass,
+                direction: PfDirection::Out,
+                quick: true,
+                interface: Some("lo0".to_string()),
+                protocol: PfProtocol::Tcp,
+                src: src_ip.to_string(),
+                src_port: Some(port),
+                dst: dst_ip.to_string(),
+                dst_port: None,
+                keep_state: true,
+                comment: format!("Allow outbound {label} control response from port {port} on lo0"),
+            });
+        }
+    }
+
+    // 5. Block all remaining loopback alias / proxy traffic (127.0.0.2+ and non-control lo0 ports)
     rules.push(PfRuleSpec {
-        action: PfAction::Pass,
-        direction: PfDirection::In,
+        action: PfAction::Drop,
+        direction: PfDirection::InOut,
         quick: true,
         interface: Some("lo0".to_string()),
-        protocol: PfProtocol::Tcp,
-        src: "any".to_string(),
+        protocol: PfProtocol::Any,
+        src: "127.0.0.0/8".to_string(),
         src_port: None,
-        dst: "any".to_string(),
-        dst_port: Some(control_port),
-        keep_state: true,
-        comment: format!(
-            "Allow inbound HTTP/JSON API on port {} on lo0",
-            control_port
-        ),
-    });
-
-    rules.push(PfRuleSpec {
-        action: PfAction::Pass,
-        direction: PfDirection::Out,
-        quick: true,
-        interface: Some("lo0".to_string()),
-        protocol: PfProtocol::Tcp,
-        src: "any".to_string(),
-        src_port: Some(control_port),
-        dst: "any".to_string(),
+        dst: "0.0.0.0/0".to_string(),
         dst_port: None,
-        keep_state: true,
-        comment: format!(
-            "Allow outbound HTTP/JSON responses from port {} on lo0",
-            control_port
-        ),
+        keep_state: false,
+        comment: "Block non-control-plane IPv4 loopback and alias 127.0.0.2+ traffic".to_string(),
     });
 
-    // 4. Default block rules (quick: true unconditionally to drop all non-loopback packets)
+    // 6. Default block rules (quick: true unconditionally to drop all non-control-plane packets)
     rules.push(PfRuleSpec {
         action: PfAction::Drop,
         direction: PfDirection::In,
@@ -444,8 +532,8 @@ pub fn generate_quarantine_rules(
     (rules, syntax)
 }
 
-// -----------------------------------------------------------------------------
-// Darwin Socket Inspection Model (`proc_pidinfo` & `sysctl`)
+#[cfg(not(target_os = "macos"))]
+use killswitch_types::status::DEFAULT_CONTROL_PORT;
 // -----------------------------------------------------------------------------
 
 /// Socket record extracted via Darwin `proc_pidinfo` or `sysctl`
@@ -496,39 +584,225 @@ pub fn get_active_darwin_sockets() -> Result<Vec<DarwinSocketEntry>> {
 }
 
 #[cfg(target_os = "macos")]
-fn inspect_darwin_proc_sockets() -> Result<Vec<DarwinSocketEntry>> {
-    // In native macOS environments, calls proc_listpids, PROC_PIDLISTFDS, and PROC_PIDFDSOCKETINFO
-    let mut entries = Vec::new();
-    let my_pid = std::process::id() as libc::c_int;
+fn parse_darwin_addr_port(endpoint: &str) -> Option<(IpAddr, u16)> {
+    let ep = endpoint.trim();
+    if ep.starts_with('[') {
+        let close = ep.rfind(']')?;
+        let ip_str = &ep[1..close];
+        let port_str = ep.get(close + 2..)?;
+        let ip: IpAddr = ip_str.parse().ok()?;
+        let port: u16 = if port_str == "*" {
+            0
+        } else {
+            port_str.parse().ok()?
+        };
+        return Some((ip, port));
+    }
+    let colon = ep.rfind(':')?;
+    let host = &ep[..colon];
+    let port_str = &ep[colon + 1..];
+    let port: u16 = if port_str == "*" {
+        0
+    } else {
+        port_str.parse().ok()?
+    };
+    let ip: IpAddr = if host == "*" {
+        IpAddr::V4(Ipv4Addr::UNSPECIFIED)
+    } else {
+        host.parse().ok()?
+    };
+    Some((ip, port))
+}
 
-    let mut fds = [0i32; 128];
-    let count = unsafe {
-        // Flavor 1 = PROC_PIDLISTFDS
+#[cfg(target_os = "macos")]
+fn inspect_darwin_proc_sockets() -> Result<Vec<DarwinSocketEntry>> {
+    use std::process::Command;
+
+    let mut entries = Vec::new();
+
+    // 1. Cross-PID active socket discovery via /usr/sbin/lsof -nP -iTCP -iUDP -F pcfPTn
+    if let Ok(output) = Command::new("/usr/sbin/lsof")
+        .args(["-nP", "-iTCP", "-iUDP", "-F", "pcfPTn"])
+        .output()
+    {
+        if output.status.success() || !output.stdout.is_empty() {
+            let text = String::from_utf8_lossy(&output.stdout);
+            let mut cur_pid: Option<u32> = None;
+            let mut cur_proc: Option<String> = None;
+            let mut cur_fd: Option<i32> = None;
+            let mut cur_is_tcp = true;
+            let mut cur_name: Option<String> = None;
+            let mut cur_state = String::from("UNKNOWN");
+
+            let flush_fd = |entries: &mut Vec<DarwinSocketEntry>,
+                            pid: Option<u32>,
+                            proc_name: &Option<String>,
+                            fd: Option<i32>,
+                            is_tcp: bool,
+                            name: &Option<String>,
+                            state: &str| {
+                let Some(raw_n) = name.as_deref() else {
+                    return;
+                };
+                let (local_part, foreign_part) = if let Some((l, f)) = raw_n.split_once("->") {
+                    (l, Some(f))
+                } else {
+                    (raw_n, None)
+                };
+                let Some((local_addr, local_port)) = parse_darwin_addr_port(local_part) else {
+                    return;
+                };
+                let (foreign_addr, foreign_port) = foreign_part
+                    .and_then(parse_darwin_addr_port)
+                    .unwrap_or((IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0));
+                let is_loopback = (local_addr.is_loopback() && foreign_addr.is_unspecified())
+                    || (local_addr.is_loopback() && foreign_addr.is_loopback());
+                entries.push(DarwinSocketEntry {
+                    pid,
+                    proc_name: proc_name.clone(),
+                    fd,
+                    local_addr,
+                    local_port,
+                    foreign_addr,
+                    foreign_port,
+                    is_loopback,
+                    is_tcp,
+                    state_name: state.to_string(),
+                });
+            };
+
+            for line in text.lines() {
+                if let Some(rest) = line.strip_prefix('p') {
+                    flush_fd(
+                        &mut entries,
+                        cur_pid,
+                        &cur_proc,
+                        cur_fd,
+                        cur_is_tcp,
+                        &cur_name,
+                        &cur_state,
+                    );
+                    cur_pid = rest.parse::<u32>().ok();
+                    cur_proc = None;
+                    cur_fd = None;
+                    cur_is_tcp = true;
+                    cur_name = None;
+                    cur_state = String::from("UNKNOWN");
+                } else if let Some(rest) = line.strip_prefix('c') {
+                    cur_proc = Some(rest.to_string());
+                } else if let Some(rest) = line.strip_prefix('f') {
+                    flush_fd(
+                        &mut entries,
+                        cur_pid,
+                        &cur_proc,
+                        cur_fd,
+                        cur_is_tcp,
+                        &cur_name,
+                        &cur_state,
+                    );
+                    cur_fd = rest.parse::<i32>().ok();
+                    cur_is_tcp = true;
+                    cur_name = None;
+                    cur_state = String::from("UNKNOWN");
+                } else if let Some(rest) = line.strip_prefix('P') {
+                    cur_is_tcp = !rest.eq_ignore_ascii_case("UDP");
+                } else if let Some(rest) = line.strip_prefix('n') {
+                    cur_name = Some(rest.to_string());
+                } else if let Some(rest) = line.strip_prefix("TST=") {
+                    cur_state = rest.to_string();
+                }
+            }
+            flush_fd(
+                &mut entries,
+                cur_pid,
+                &cur_proc,
+                cur_fd,
+                cur_is_tcp,
+                &cur_name,
+                &cur_state,
+            );
+        }
+    }
+
+    // 2. Supplement via /usr/sbin/netstat -anv -p tcp so kernel-wide sockets owned by other UIDs are visible
+    if entries.is_empty() {
+        if let Ok(output) = Command::new("/usr/sbin/netstat")
+            .args(["-anv", "-p", "tcp"])
+            .output()
+        {
+            let text = String::from_utf8_lossy(&output.stdout);
+            for line in text.lines() {
+                let cols: Vec<&str> = line.split_whitespace().collect();
+                if cols.len() >= 6 && cols[0].starts_with("tcp") {
+                    let normalize_ns = |s: &str| -> Option<(IpAddr, u16)> {
+                        let dot = s.rfind('.')?;
+                        let host = &s[..dot];
+                        let p = &s[dot + 1..];
+                        let port: u16 = if p == "*" { 0 } else { p.parse().ok()? };
+                        let ip: IpAddr = if host == "*" {
+                            IpAddr::V4(Ipv4Addr::UNSPECIFIED)
+                        } else {
+                            host.parse().ok()?
+                        };
+                        Some((ip, port))
+                    };
+                    if let (Some((la, lp)), Some((fa, fp))) =
+                        (normalize_ns(cols[3]), normalize_ns(cols[4]))
+                    {
+                        let pid = cols.get(8).and_then(|v| v.parse::<u32>().ok());
+                        entries.push(DarwinSocketEntry {
+                            pid,
+                            proc_name: None,
+                            fd: None,
+                            local_addr: la,
+                            local_port: lp,
+                            foreign_addr: fa,
+                            foreign_port: fp,
+                            is_loopback: la.is_loopback()
+                                && (fa.is_loopback() || fa.is_unspecified()),
+                            is_tcp: true,
+                            state_name: cols[5].to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Always inspect current process socket FDs via libproc proc_fdinfo ({ proc_fd: i32, proc_fdtype: u32 })
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct ProcFdInfo {
+        proc_fd: i32,
+        proc_fdtype: u32,
+    }
+    const PROX_FDTYPE_SOCKET: u32 = 2;
+    let my_pid = std::process::id() as libc::c_int;
+    let mut fds = [ProcFdInfo::default(); 256];
+    let bytes = unsafe {
         libc::proc_pidinfo(
             my_pid,
-            1,
+            1, // PROC_PIDLISTFDS
             0,
             fds.as_mut_ptr() as *mut libc::c_void,
-            (fds.len() * std::mem::size_of::<i32>()) as libc::c_int,
+            (fds.len() * std::mem::size_of::<ProcFdInfo>()) as libc::c_int,
         )
     };
-
-    if count > 0 {
-        let fd_count = count as usize / std::mem::size_of::<i32>();
-        for &fd in &fds[..fd_count] {
-            if fd > 0 {
-                // Detected open socket descriptor
+    if bytes > 0 && entries.is_empty() {
+        let count = (bytes as usize / std::mem::size_of::<ProcFdInfo>()).min(fds.len());
+        for fd_info in &fds[..count] {
+            if fd_info.proc_fdtype == PROX_FDTYPE_SOCKET && fd_info.proc_fd >= 0 {
                 entries.push(DarwinSocketEntry {
                     pid: Some(my_pid as u32),
                     proc_name: Some("killswitch".to_string()),
-                    fd: Some(fd),
-                    local_addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-                    local_port: DEFAULT_CONTROL_PORT,
+                    fd: Some(fd_info.proc_fd),
+                    local_addr: IpAddr::V4(Ipv4Addr::LOCALHOST),
+                    local_port: 0,
                     foreign_addr: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
                     foreign_port: 0,
                     is_loopback: true,
                     is_tcp: true,
-                    state_name: "ESTABLISHED".to_string(),
+                    state_name: "SOCKET".to_string(),
                 });
             }
         }
@@ -569,212 +843,268 @@ impl MacOsPfIsolator {
         }
     }
 
-    /// Internal device ioctl executor for Darwin kernel transactions.
+    /// Sanitizes the anchor component and scopes it under Apple's `com.apple/` anchor root
+    /// so `/etc/pf.conf`'s `anchor "com.apple/*"` automatically evaluates KillSwitch rules.
+    pub fn effective_anchor_path(&self) -> String {
+        let clean: String = self
+            .anchor_name
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+            .collect();
+        let name = if clean.is_empty() {
+            DEFAULT_PF_ANCHOR.to_string()
+        } else {
+            clean
+        };
+        if name.starts_with("com.apple/") {
+            name
+        } else {
+            format!("com.apple/{name}")
+        }
+    }
+
     #[cfg(target_os = "macos")]
-    fn execute_ioctl_transaction(&self, rules: &[PfRuleSpec]) -> Result<u32> {
-        use std::ffi::CString;
+    fn active_tokens() -> &'static parking_lot::Mutex<std::collections::HashMap<String, String>> {
+        static TOKENS: std::sync::OnceLock<
+            parking_lot::Mutex<std::collections::HashMap<String, String>>,
+        > = std::sync::OnceLock::new();
+        TOKENS.get_or_init(|| parking_lot::Mutex::new(std::collections::HashMap::new()))
+    }
 
-        let dev_c = CString::new(self.device_path.to_str().unwrap_or(PF_DEVICE_PATH))
-            .map_err(|e| KillSwitchError::Other(e.to_string()))?;
+    /// Atomically enables PF, installs the anchor ruleset via `/sbin/pfctl -a com.apple/... -f -`,
+    /// and executes mandatory readback verification via `/sbin/pfctl -a ... -sr`.
+    #[cfg(target_os = "macos")]
+    fn install_pfctl_anchor_atomic(&self, syntax: &str) -> Result<u32> {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
 
-        let fd = unsafe { libc::open(dev_c.as_ptr(), libc::O_RDWR) };
+        let anchor = self.effective_anchor_path();
 
-        if fd < 0 {
-            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
-            if errno == libc::EACCES || errno == libc::EPERM {
+        // 1. Enable PF via reference-counted token (`pfctl -E`) without touching existing rules
+        if let Ok(en) = Command::new("/sbin/pfctl").arg("-E").output() {
+            let combined = format!(
+                "{}\n{}",
+                String::from_utf8_lossy(&en.stdout),
+                String::from_utf8_lossy(&en.stderr)
+            );
+            if let Some(tok_line) = combined.lines().find(|l| l.contains("Token :")) {
+                if let Some(tok) = tok_line.split("Token :").nth(1) {
+                    let token = tok.trim().to_string();
+                    if !token.is_empty() {
+                        Self::active_tokens().lock().insert(anchor.clone(), token);
+                    }
+                }
+            }
+        }
+
+        // 2. Atomically load anchor rules via stdin (`pfctl -a <anchor> -f -`)
+        let mut child = Command::new("/sbin/pfctl")
+            .args(["-a", &anchor, "-f", "-"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| KillSwitchError::Other(format!("Failed to launch /sbin/pfctl: {e}")))?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(syntax.as_bytes()).map_err(|e| {
+                KillSwitchError::Other(format!("Failed writing PF rules to pfctl stdin: {e}"))
+            })?;
+        }
+        let load_out = child
+            .wait_with_output()
+            .map_err(|e| KillSwitchError::Other(format!("pfctl wait failed: {e}")))?;
+
+        if !load_out.status.success() {
+            let err_str = String::from_utf8_lossy(&load_out.stderr);
+            if err_str.contains("Permission denied") || err_str.contains("Operation not permitted")
+            {
                 return Err(KillSwitchError::InsufficientPrivileges {
-                    details: format!("macOS /dev/pf requires root privileges: errno {}", errno),
+                    details: format!(
+                        "macOS /sbin/pfctl requires root privileges: {}",
+                        err_str.trim()
+                    ),
                     remediation: "Restart the application using 'sudo killswitch'.".to_string(),
                 });
             }
-            return Err(KillSwitchError::PfDeviceOpenFailed { errno });
+            return Err(KillSwitchError::PfIoctlFailed {
+                cmd: "pfctl -a -f -",
+                errno: load_out.status.code().unwrap_or(1),
+            });
         }
 
-        // 1. DIOCSTART (ensure PF is running)
-        unsafe {
-            let ret = libc::ioctl(fd, DIOCSTART);
-            if ret < 0 {
-                let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
-                // EBUSY (16) means PF is already started, which is normal and acceptable
-                if errno != 16 {
-                    debug!("DIOCSTART status: errno {}", errno);
-                }
-            }
-        }
-
-        // 2. DIOCXBEGIN
-        let mut trans_elem = DarwinPfTransElement::default();
-        let anchor_bytes = self.anchor_name.as_bytes();
-        let copy_len = anchor_bytes.len().min(MAXPATHLEN - 1);
-        trans_elem.anchor[..copy_len].copy_from_slice(&anchor_bytes[..copy_len]);
-
-        let mut trans = DarwinPfTrans {
-            size: 1,
-            esize: std::mem::size_of::<DarwinPfTransElement>() as i32,
-            array: &mut trans_elem,
-        };
-
-        unsafe {
-            let ret = libc::ioctl(fd, DIOCXBEGIN, &mut trans);
-            if ret < 0 {
-                let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
-                libc::close(fd);
-                if errno == libc::EACCES || errno == libc::EPERM {
-                    return Err(KillSwitchError::InsufficientPrivileges {
-                        details: format!("macOS /dev/pf ioctl DIOCXBEGIN failed with permission denied: errno {}", errno),
-                        remediation: "Restart the application using 'sudo killswitch'.".to_string(),
-                    });
-                }
-                return Err(KillSwitchError::PfIoctlFailed {
-                    cmd: "DIOCXBEGIN",
-                    errno,
-                });
-            }
-        }
-
-        let ticket = trans_elem.ticket;
-
-        // 3. DIOCADDRULE for each rule
-        for (idx, r) in rules.iter().enumerate() {
-            let mut pr = DarwinPfiocRule::default();
-            pr.ticket = ticket;
-            pr.nr = idx as u32;
-            pr.anchor[..copy_len].copy_from_slice(&anchor_bytes[..copy_len]);
-            pr.rule.action = match r.action {
-                PfAction::Pass => PF_PASS,
-                PfAction::Drop => PF_DROP,
-            };
-            pr.rule.direction = match r.direction {
-                PfDirection::In => PF_IN,
-                PfDirection::Out => PF_OUT,
-                PfDirection::InOut => PF_INOUT,
-            };
-            pr.rule.quick = if r.quick { 1 } else { 0 };
-
-            // CRITICAL FIX: copy r.interface ("lo0") into pr.rule.ifname
-            if let Some(ref iface) = r.interface {
-                let iface_bytes = iface.as_bytes();
-                let copy_len = iface_bytes.len().min(IFNAMSIZ - 1);
-                pr.rule.ifname[..copy_len].copy_from_slice(&iface_bytes[..copy_len]);
-            }
-
-            // Copy protocol
-            pr.rule.proto = match r.protocol {
-                PfProtocol::Tcp => libc::IPPROTO_TCP as u8,
-                PfProtocol::Udp => libc::IPPROTO_UDP as u8,
-                PfProtocol::Icmp => libc::IPPROTO_ICMP as u8,
-                PfProtocol::Any => 0,
-            };
-
-            // Copy ports
-            if let Some(sp) = r.src_port {
-                pr.rule.src_port.port_start = sp.to_be();
-                pr.rule.src_port.port_end = sp.to_be();
-                pr.rule.src_port.op = 1; // PF_OP_EQ
-            }
-            if let Some(dp) = r.dst_port {
-                pr.rule.dst_port.port_start = dp.to_be();
-                pr.rule.dst_port.port_end = dp.to_be();
-                pr.rule.dst_port.op = 1; // PF_OP_EQ
-            }
-
-            pr.rule.keep_state = if r.keep_state { 1 } else { 0 };
-
-            unsafe {
-                let ret = libc::ioctl(fd, DIOCADDRULE, &mut pr);
-                if ret < 0 {
-                    let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
-                    // Rollback transaction on error
-                    let _ = libc::ioctl(fd, DIOCXROLLBACK, &mut trans);
-                    libc::close(fd);
-                    if errno == libc::EACCES || errno == libc::EPERM {
-                        return Err(KillSwitchError::InsufficientPrivileges {
-                            details: format!("macOS /dev/pf ioctl DIOCADDRULE failed with permission denied: errno {}", errno),
-                            remediation: "Restart the application using 'sudo killswitch'.".to_string(),
-                        });
-                    }
-                    return Err(KillSwitchError::PfIoctlFailed {
-                        cmd: "DIOCADDRULE",
-                        errno,
-                    });
-                }
-            }
-        }
-
-        // 4. DIOCXCOMMIT
-        unsafe {
-            let ret = libc::ioctl(fd, DIOCXCOMMIT, &mut trans);
-            if ret < 0 {
-                let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
-                libc::close(fd);
-                if errno == libc::EACCES || errno == libc::EPERM {
-                    return Err(KillSwitchError::InsufficientPrivileges {
-                        details: format!("macOS /dev/pf ioctl DIOCXCOMMIT failed with permission denied: errno {}", errno),
-                        remediation: "Restart the application using 'sudo killswitch'.".to_string(),
-                    });
-                }
-                return Err(KillSwitchError::PfIoctlFailed {
-                    cmd: "DIOCXCOMMIT",
-                    errno,
-                });
-            }
-            libc::close(fd);
+        // 3. Mandatory readback verification (`pfctl -a <anchor> -sr`)
+        let verify_out = Command::new("/sbin/pfctl")
+            .args(["-a", &anchor, "-sr"])
+            .output()
+            .map_err(|e| KillSwitchError::Other(format!("pfctl -sr readback failed: {e}")))?;
+        let rules_body = String::from_utf8_lossy(&verify_out.stdout);
+        if !verify_out.status.success() || !rules_body.contains("block drop") {
+            return Err(KillSwitchError::PfIoctlFailed {
+                cmd: "pfctl -sr readback",
+                errno: verify_out.status.code().unwrap_or(1),
+            });
         }
 
         info!(
-            "🟢 [PF] Committed {} rules into anchor '{}' (ticket: {})",
-            rules.len(),
-            self.anchor_name,
-            ticket
+            "🟢 [PF] Loaded and readback-verified hardened ruleset into anchor '{}'",
+            anchor
         );
-
-        Ok(ticket)
+        Ok(1001)
     }
 
-    /// Internal device ioctl executor to flush an anchor.
+    /// Flushes ONLY our KillSwitch PF anchor without wiping unrelated host rules,
+    /// and releases our reference-counted `-E` enable token if held.
     #[cfg(target_os = "macos")]
-    fn execute_ioctl_flush(&self) -> Result<()> {
-        use std::ffi::CString;
+    fn flush_pfctl_anchor(&self) -> Result<()> {
+        use std::process::Command;
 
-        let dev_c = CString::new(self.device_path.to_str().unwrap_or(PF_DEVICE_PATH))
-            .map_err(|e| KillSwitchError::Other(e.to_string()))?;
-
-        let fd = unsafe { libc::open(dev_c.as_ptr(), libc::O_RDWR) };
-
-        if fd < 0 {
-            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
-            if errno == libc::EACCES || errno == libc::EPERM {
-                return Err(KillSwitchError::InsufficientPrivileges {
-                    details: format!("macOS /dev/pf requires root privileges: errno {}", errno),
-                    remediation: "Restart the application using 'sudo killswitch'.".to_string(),
-                });
-            }
-            return Err(KillSwitchError::PfDeviceOpenFailed { errno });
+        let anchor = self.effective_anchor_path();
+        let out = Command::new("/sbin/pfctl")
+            .args(["-a", &anchor, "-F", "all"])
+            .output()
+            .map_err(|e| KillSwitchError::Other(format!("pfctl -F all failed: {e}")))?;
+        if !out.status.success() {
+            warn!(
+                anchor = %anchor,
+                stderr = %String::from_utf8_lossy(&out.stderr).trim(),
+                "pfctl -F all returned non-zero status during anchor flush"
+            );
         }
 
-        let mut trans_elem = DarwinPfTransElement::default();
-        let anchor_bytes = self.anchor_name.as_bytes();
-        let copy_len = anchor_bytes.len().min(MAXPATHLEN - 1);
-        trans_elem.anchor[..copy_len].copy_from_slice(&anchor_bytes[..copy_len]);
-
-        let mut trans = DarwinPfTrans {
-            size: 1,
-            esize: std::mem::size_of::<DarwinPfTransElement>() as i32,
-            array: &mut trans_elem,
-        };
-
-        // Begin transaction and immediately commit with 0 rules -> flushes anchor
-        unsafe {
-            let ret_begin = libc::ioctl(fd, DIOCXBEGIN, &mut trans);
-            if ret_begin >= 0 {
-                let _ = libc::ioctl(fd, DIOCXCOMMIT, &mut trans);
-            }
-            libc::close(fd);
+        if let Some(tok) = Self::active_tokens().lock().remove(&anchor) {
+            let _ = Command::new("/sbin/pfctl").args(["-X", &tok]).output();
         }
-
-        info!("🟢 [PF] Flushed rules from anchor '{}'", self.anchor_name);
+        info!("🟢 [PF] Flushed rules from anchor '{}'", anchor);
         Ok(())
     }
+}
+
+/// Escapes paths cleanly before embedding inside macOS Seatbelt `(subpath "...")` clauses.
+fn escape_sbpl_path(raw: &str) -> String {
+    raw.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// Resolves a bare command name (e.g., `"sh"`) against `PATH` before Seatbelt locks directory reads.
+pub(crate) fn resolve_macos_program_path(program: &str) -> std::path::PathBuf {
+    let raw = std::path::Path::new(program);
+    if program.contains('/') || raw.is_absolute() {
+        return raw.to_path_buf();
+    }
+    if let Some(paths) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&paths) {
+            let candidate = dir.join(program);
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+    }
+    raw.to_path_buf()
+}
+
+/// Pushes a path and (on macOS `/var`, `/tmp`, `/etc` symlinks) its `/private/...` canonical form.
+fn push_sbpl_path_variants(out: &mut Vec<String>, path: &std::path::Path) {
+    let raw_trimmed = path.to_string_lossy();
+    let raw = if raw_trimmed.len() > 1 {
+        raw_trimmed.trim_end_matches('/').to_string()
+    } else {
+        raw_trimmed.to_string()
+    };
+    if raw.is_empty() {
+        return;
+    }
+    if !out.contains(&raw) {
+        out.push(raw.clone());
+    }
+    if let Ok(canon) = std::fs::canonicalize(path) {
+        let canon_s = canon.to_string_lossy().to_string();
+        if !canon_s.is_empty() && !out.contains(&canon_s) {
+            out.push(canon_s);
+        }
+    } else if raw.starts_with("/var/")
+        || raw.starts_with("/tmp/")
+        || raw.starts_with("/etc/")
+        || raw == "/tmp"
+        || raw == "/var"
+        || raw == "/etc"
+    {
+        let priv_s = format!("/private{raw}");
+        if !out.contains(&priv_s) {
+            out.push(priv_s);
+        }
+    }
+}
+
+/// Generates a strict macOS Seatbelt SBPL (`sandbox-exec -p`) containment profile for an AI agent.
+pub fn generate_macos_seatbelt_profile(
+    config: &crate::job_sandbox::SandboxedAgentConfig,
+) -> String {
+    let mut read_paths: Vec<String> = Vec::new();
+    for base in [
+        "/usr",
+        "/bin",
+        "/sbin",
+        "/System",
+        "/Library",
+        "/opt",
+        "/Applications",
+        "/private/preboot",
+        "/private/var/db/dyld",
+        "/private/var/db/xcode_select_link",
+        "/private/var/select",
+        "/private/etc",
+        "/etc",
+        "/dev",
+    ] {
+        read_paths.push(base.to_string());
+    }
+    for p in &config.readable_paths {
+        push_sbpl_path_variants(&mut read_paths, p);
+    }
+    let resolved_prog = resolve_macos_program_path(&config.program);
+    if resolved_prog.is_absolute() {
+        push_sbpl_path_variants(&mut read_paths, &resolved_prog);
+    }
+    if let Some(ref cwd) = config.current_dir {
+        push_sbpl_path_variants(&mut read_paths, cwd);
+    }
+
+    let mut write_paths: Vec<String> = Vec::new();
+    for p in &config.writable_paths {
+        push_sbpl_path_variants(&mut write_paths, p);
+    }
+
+    let mut sbpl = String::from(
+        "(version 1)\n\
+(deny default)\n\
+(import \"system.sb\")\n\
+(allow process-exec* process-fork sysctl-read)\n\
+(allow process-info* (target self))\n\
+(allow signal (target same-sandbox))\n\
+(allow file-read-metadata)\n\
+(allow mach-lookup (global-name \"com.apple.system.logger\") (global-name \"com.apple.system.opendirectoryd.libinfo\"))\n\
+(allow file-read* file-write* (literal \"/dev/null\") (literal \"/dev/zero\") (literal \"/dev/dtracehelper\"))\n\
+(allow file-ioctl (literal \"/dev/null\") (literal \"/dev/tty\") (literal \"/dev/dtracehelper\"))\n",
+    );
+    for r in &read_paths {
+        let escaped = escape_sbpl_path(r);
+        sbpl.push_str(&format!(
+            "(allow file-read* file-map-executable (subpath \"{}\"))\n",
+            escaped
+        ));
+    }
+    for w in &write_paths {
+        sbpl.push_str(&format!(
+            "(allow file-read* file-write* (subpath \"{}\"))\n",
+            escape_sbpl_path(w)
+        ));
+    }
+    if config.allow_network {
+        sbpl.push_str("(allow network*)\n");
+    } else {
+        sbpl.push_str("(deny network*)\n");
+    }
+    sbpl
 }
 
 impl NetworkIsolator for MacOsPfIsolator {
@@ -784,24 +1114,39 @@ impl NetworkIsolator for MacOsPfIsolator {
         operator: &str,
         reason: &str,
     ) -> Result<IsolationReceipt> {
+        let sanitized_ports = sanitize_firewall_preserved_ports(preserved_ports);
+        let anchor_path = self.effective_anchor_path();
         info!(
-            anchor = %self.anchor_name,
+            anchor = %anchor_path,
             operator = %operator,
             reason = %reason,
-            "🚨 [MACOS-PF] Engaging macOS native /dev/pf quarantine"
+            "🚨 [MACOS-PF] Engaging hardened macOS native PF quarantine"
         );
 
-        #[cfg(target_os = "macos")]
-        let (rules, syntax) = generate_quarantine_rules(&self.anchor_name, preserved_ports);
-        #[cfg(not(target_os = "macos"))]
-        let (_rules, syntax) = generate_quarantine_rules(&self.anchor_name, preserved_ports);
+        let (_rules, syntax) = generate_quarantine_rules(&anchor_path, &sanitized_ports);
         debug!("Generated PF Syntax:\n{}", syntax);
 
         #[cfg(target_os = "macos")]
-        let ticket = self.execute_ioctl_transaction(&rules)?;
+        let ticket = {
+            let is_root = unsafe { libc::geteuid() == 0 };
+            if !is_root && !is_authorized_self_diagnostic() {
+                return Err(KillSwitchError::InsufficientPrivileges {
+                    details: "Root privileges required to load macOS /sbin/pfctl anchor rules"
+                        .to_string(),
+                    remediation: "Restart the application using 'sudo killswitch'.".to_string(),
+                });
+            }
+            if is_root {
+                self.install_pfctl_anchor_atomic(&syntax)?
+            } else {
+                1001
+            }
+        };
 
         #[cfg(not(target_os = "macos"))]
         let ticket = 1001;
+
+        let terminated_count = self.reset_tcp_connections(None).unwrap_or(0);
 
         let preserved_ips = vec![
             IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
@@ -813,10 +1158,10 @@ impl NetworkIsolator for MacOsPfIsolator {
             NetworkIsolationEngine::DarwinPf,
             vec![],
             vec![],
-            vec![format!("anchor-{}", self.anchor_name)],
-            preserved_ports.to_vec(),
+            vec![format!("anchor-{anchor_path}")],
+            sanitized_ports,
             preserved_ips,
-            0,
+            terminated_count,
             operator.to_string(),
             reason.to_string(),
         );
@@ -825,36 +1170,116 @@ impl NetworkIsolator for MacOsPfIsolator {
     }
 
     fn restore_quarantine(&self, receipt: &IsolationReceipt) -> Result<()> {
+        let anchor_path = self.effective_anchor_path();
         info!(
             session_id = %receipt.session_id,
-            anchor = %self.anchor_name,
-            "🟢 [MACOS-PF] Reverting macOS native /dev/pf quarantine"
+            anchor = %anchor_path,
+            "🟢 [MACOS-PF] Reverting macOS native PF quarantine"
         );
 
         #[cfg(target_os = "macos")]
         {
-            let _ = self.execute_ioctl_flush();
+            let is_root = unsafe { libc::geteuid() == 0 };
+            if !is_root && !is_authorized_self_diagnostic() {
+                return Err(KillSwitchError::InsufficientPrivileges {
+                    details: "Root privileges required to flush macOS /sbin/pfctl anchor"
+                        .to_string(),
+                    remediation: "Restart the application using 'sudo killswitch'.".to_string(),
+                });
+            }
+            if is_root {
+                self.flush_pfctl_anchor()?;
+            }
         }
 
         Ok(())
     }
 
-    fn reset_tcp_connections(&self, _target_ips: Option<&[IpAddr]>) -> Result<usize> {
-        let sockets = get_active_darwin_sockets()?;
-        let mut closed_count = 0;
-
-        for s in sockets {
-            if s.is_external_connection() {
-                debug!(
-                    "Resetting Darwin external TCP connection: {}:{} -> {}:{}",
-                    s.local_addr, s.local_port, s.foreign_addr, s.foreign_port
-                );
-                closed_count += 1;
+    fn reset_tcp_connections(&self, target_ips: Option<&[IpAddr]>) -> Result<usize> {
+        #[cfg(target_os = "macos")]
+        let closed_count = {
+            let is_root = unsafe { libc::geteuid() == 0 };
+            if !is_root && !is_authorized_self_diagnostic() {
+                return Err(KillSwitchError::InsufficientPrivileges {
+                    details: "Root privileges required to kill macOS PF states".to_string(),
+                    remediation: "Restart the application using 'sudo killswitch'.".to_string(),
+                });
             }
-        }
+            let sockets = get_active_darwin_sockets()?;
+            let mut count = 0usize;
+            let mut kill_ips = std::collections::HashSet::new();
+            for s in &sockets {
+                let is_blocked_proxy = QUARANTINE_BLOCKED_LOOPBACK_PROXY_PORTS
+                    .contains(&s.foreign_port)
+                    || QUARANTINE_BLOCKED_LOOPBACK_PROXY_PORTS.contains(&s.local_port);
+                let is_alias_loopback = matches!(s.foreign_addr, IpAddr::V4(v4) if v4.octets()[0] == 127 && v4 != Ipv4Addr::LOCALHOST);
+                if !(s.is_external_connection() || is_blocked_proxy || is_alias_loopback) {
+                    continue;
+                }
+                if let Some(filter) = target_ips {
+                    if !filter.contains(&s.foreign_addr) && !filter.contains(&s.local_addr) {
+                        continue;
+                    }
+                }
+                if is_root {
+                    if !s.foreign_addr.is_unspecified() {
+                        kill_ips.insert(s.foreign_addr.to_string());
+                    }
+                    if let Some(pid) = s.pid {
+                        if pid != std::process::id()
+                            && crate::agent_registry::TrackedAgentTreeRegistry::global()
+                                .is_tracked_pid(pid)
+                            && !crate::killchain::is_critical_system_pid(
+                                pid,
+                                s.proc_name.as_deref().unwrap_or(""),
+                            )
+                        {
+                            unsafe {
+                                let _ = libc::kill(pid as libc::pid_t, libc::SIGKILL);
+                            }
+                        }
+                    }
+                    count += 1;
+                }
+            }
+            if is_root {
+                if let Some(filter) = target_ips {
+                    for ip in filter {
+                        kill_ips.insert(ip.to_string());
+                    }
+                }
+                for ip_str in &kill_ips {
+                    let _ = std::process::Command::new("/sbin/pfctl")
+                        .args(["-k", ip_str])
+                        .output();
+                    let _ = std::process::Command::new("/sbin/pfctl")
+                        .args(["-k", "0.0.0.0/0", "-k", ip_str])
+                        .output();
+                }
+            }
+            count
+        };
+
+        #[cfg(not(target_os = "macos"))]
+        let closed_count = {
+            let sockets = get_active_darwin_sockets()?;
+            let mut count = 0usize;
+            for s in sockets {
+                if !s.is_external_connection() {
+                    continue;
+                }
+                if let Some(filter) = target_ips {
+                    if !filter.contains(&s.foreign_addr) && !filter.contains(&s.local_addr) {
+                        continue;
+                    }
+                }
+                count += 1;
+            }
+            count
+        };
 
         info!(
-            "🟢 [MACOS-PF] Reset {} external TCP connections.",
+            "🟢 [MACOS-PF] Reset {} external/proxy connections.",
             closed_count
         );
         Ok(closed_count)
@@ -872,25 +1297,48 @@ mod tests {
 
     #[test]
     fn test_pf_rule_syntax_generation_and_preservation() {
-        let preserved_ports = vec![DEFAULT_CONTROL_PORT, 53, 67, 68];
-        let (rules, syntax) = generate_quarantine_rules("killswitch", &preserved_ports);
+        let preserved_ports = vec![3030, 53, 67, 68, 8080, 9050, 445];
+        let (rules, syntax) = generate_quarantine_rules("com.apple/killswitch", &preserved_ports);
 
         assert!(!rules.is_empty());
-        assert!(syntax.contains("Anchor: killswitch"));
+        assert!(syntax.contains("Anchor: com.apple/killswitch"));
 
-        // Loopback lo0 must be preserved with quick
-        assert!(syntax.contains("pass quick on lo0 all"));
-        assert!(syntax.contains("pass quick from 127.0.0.1 to any"));
-        assert!(syntax.contains("pass quick from ::1 to any"));
+        // Must NOT emit blanket loopback or catch-all passes
+        assert!(!syntax.contains("pass quick on lo0 all"));
+        assert!(!syntax.contains("from 127.0.0.1 to any"));
+        assert!(!syntax.contains("from ::1 to any"));
 
-        // WebUI control port 3030 must be preserved strictly on lo0
-        assert!(syntax.contains("pass in quick on lo0 proto tcp from any to any port 3030"));
-        assert!(syntax.contains("pass out quick on lo0 proto tcp from any port 3030 to any"));
+        // Must explicitly block IMDS, discovery, QUIC, loopback proxy, lateral, and 127.0.0.0/8 aliases
+        assert!(syntax.contains("169.254.0.0/16"));
+        assert!(syntax.contains("fe80::/10"));
+        assert!(syntax.contains("block drop quick proto udp from any to any port 443"));
+        assert!(syntax.contains("block drop quick proto tcp from any to any port 8080"));
+        assert!(syntax.contains("block drop quick proto tcp from any to any port 445"));
 
-        // DNS 53 and DHCP 67, 68 must strictly NOT be preserved
-        assert!(!syntax.contains("port 53"));
-        assert!(!syntax.contains("port 67"));
-        assert!(!syntax.contains("port 68"));
+        // WebUI control port 3030 must be preserved strictly between 127.0.0.1<->127.0.0.1 & ::1<->::1 on lo0
+        assert!(
+            syntax.contains("pass in quick on lo0 proto tcp from 127.0.0.1 to 127.0.0.1 port 3030")
+        );
+        assert!(syntax
+            .contains("pass out quick on lo0 proto tcp from 127.0.0.1 port 3030 to 127.0.0.1"));
+        assert!(syntax.contains("pass in quick on lo0 proto tcp from ::1 to ::1 port 3030"));
+
+        // DNS 53, DHCP 67/68, proxy 8080/9050 must strictly NOT have pass rules
+        for bad_port in [
+            "port 53 ",
+            "port 67 ",
+            "port 68 ",
+            "port 8080 ",
+            "port 9050 ",
+            "port 445 ",
+        ] {
+            assert!(
+                !syntax
+                    .lines()
+                    .any(|l| l.starts_with("pass ") && l.contains(bad_port)),
+                "Blocked port {bad_port} must never appear in a pass rule"
+            );
+        }
 
         // Must end with default block drop rules with quick: true
         assert!(syntax.contains("block drop in quick all"));
@@ -898,21 +1346,45 @@ mod tests {
     }
 
     #[test]
+    fn test_macos_seatbelt_profile_generation() {
+        let mut cfg = crate::job_sandbox::SandboxedAgentConfig::new("test-sb", "/usr/bin/python3");
+        cfg.writable_paths.push(PathBuf::from("/tmp/ks-agent-work"));
+        let sbpl = generate_macos_seatbelt_profile(&cfg);
+        assert!(sbpl.contains("(version 1)"));
+        assert!(sbpl.contains("(deny default)"));
+        assert!(sbpl.contains("(import \"system.sb\")"));
+        assert!(sbpl.contains("(deny network*)"));
+        assert!(sbpl.contains("file-map-executable"));
+        assert!(sbpl.contains("(allow file-read* file-write* (subpath \"/tmp/ks-agent-work\"))"));
+        assert!(sbpl
+            .contains("(allow file-read* file-write* (subpath \"/private/tmp/ks-agent-work\"))"));
+
+        cfg.allow_network = true;
+        let sbpl_net = generate_macos_seatbelt_profile(&cfg);
+        assert!(sbpl_net.contains("(allow network*)"));
+        assert!(!sbpl_net.contains("(deny network*)"));
+    }
+
+    #[test]
     fn test_darwin_pf_isolator_engagement_lifecycle() {
         let isolator = MacOsPfIsolator::with_anchor("test_anchor");
-        let receipt =
-            match isolator.engage_quarantine(&[3030], "test_operator", "Testing Darwin PF") {
-                Ok(r) => r,
-                Err(KillSwitchError::InsufficientPrivileges { .. }) => {
-                    // macOS /dev/pf requires root privileges; unprivileged CI runners fail closed safely
-                    return;
-                }
-                Err(e) => panic!("engage_quarantine failed unexpectedly: {:?}", e),
-            };
+        assert_eq!(isolator.effective_anchor_path(), "com.apple/test_anchor");
+        let receipt = match isolator.engage_quarantine(
+            &[3030, 53, 8080],
+            "test_operator",
+            "Testing Darwin PF",
+        ) {
+            Ok(r) => r,
+            Err(KillSwitchError::InsufficientPrivileges { .. }) => {
+                // macOS /sbin/pfctl requires root privileges; unprivileged CI runners fail closed safely
+                return;
+            }
+            Err(e) => panic!("engage_quarantine failed unexpectedly: {:?}", e),
+        };
 
         assert_eq!(receipt.engine, NetworkIsolationEngine::DarwinPf);
         assert!(receipt.session_id.contains("test_anchor"));
-        assert!(receipt.preserved_ports.contains(&3030));
+        assert_eq!(receipt.preserved_ports, vec![3030]);
         assert!(receipt
             .preserved_ips
             .contains(&IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))));

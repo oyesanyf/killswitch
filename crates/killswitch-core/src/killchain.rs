@@ -278,7 +278,7 @@ impl KillChainHostManager {
         let mut network_receipts = Vec::new();
         let active_network_rules = Vec::new();
 
-        let mut preserved_ports = crate::wfp::discover_active_control_ports();
+        let mut preserved_ports = crate::wfp::discover_firewall_bound_control_ports();
         if !preserved_ports.contains(&DEFAULT_CONTROL_PORT) {
             preserved_ports.push(DEFAULT_CONTROL_PORT);
         }

@@ -4,6 +4,9 @@ use crate::client::KillSwitchClient;
 use crate::verify::SubsystemVerifier;
 use anyhow::{bail, Result};
 
+pub mod patch_kernel;
+pub use patch_kernel::handle_patch_kernel;
+
 pub async fn handle_status(client: &KillSwitchClient) -> Result<()> {
     let status = client.get_status().await?;
     println!("\n================================================================================");

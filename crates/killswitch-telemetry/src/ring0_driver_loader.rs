@@ -905,6 +905,10 @@ pub fn query_live_host_ring0_inventory() -> HostKernelDriverInventory {
         sha256_file_if_exists(win_inf);
     let (linux_ebpf_c_present, linux_ebpf_c_sha256) = sha256_file_if_exists(lin_bpf);
 
+    #[cfg_attr(
+        not(any(target_os = "windows", target_os = "linux")),
+        allow(unused_mut)
+    )]
     let mut detected_host_kernel_filters = Vec::new();
 
     #[cfg(target_os = "windows")]

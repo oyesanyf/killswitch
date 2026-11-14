@@ -358,14 +358,19 @@ impl TrackedAgentTreeRegistry {
                 self.cache_tainted_descendant(pid, parent_pid, &resolved_name, depth + 1);
                 return AgentLineageClass::ConfirmedThreatSubtree;
             }
-            if let Some(ancestor_taint) = self.tainted_descendants.get(&parent_pid) {
-                let anchor = ancestor_taint.root_pid;
+            // Drop the DashMap read guard immediately before cache_tainted_descendant() writes back
+            // into tainted_descendants, preventing same-shard RwLock self-deadlock on child chains.
+            let ancestor_taint_info = self
+                .tainted_descendants
+                .get(&parent_pid)
+                .map(|t| (t.root_pid, t.depth_from_root));
+            if let Some((anchor, anchor_depth)) = ancestor_taint_info {
                 if self.tracked_roots.contains_key(&anchor) {
                     self.cache_tainted_descendant(
                         pid,
                         anchor,
                         &resolved_name,
-                        ancestor_taint.depth_from_root + depth + 1,
+                        anchor_depth + depth + 1,
                     );
                     return AgentLineageClass::TaintedAgentDescendant;
                 }
@@ -374,7 +379,7 @@ impl TrackedAgentTreeRegistry {
                         pid,
                         anchor,
                         &resolved_name,
-                        ancestor_taint.depth_from_root + depth + 1,
+                        anchor_depth + depth + 1,
                     );
                     return AgentLineageClass::ConfirmedThreatSubtree;
                 }
@@ -907,5 +912,31 @@ mod tests {
         assert!(!reg.register_agent_root(std::process::id(), "self"));
         assert!(!reg.mark_confirmed_threat(std::process::id(), "self"));
         assert!(!reg.is_tracked_pid(std::process::id()));
+    }
+
+    #[test]
+    fn test_tainted_descendant_cache_propagation_no_same_shard_deadlock() {
+        let reg = TrackedAgentTreeRegistry::new();
+        let sys = System::new();
+        let root_pid = 940_000;
+        let tainted_parent = 940_001;
+        assert!(reg.register_agent_root(root_pid, "agent-root"));
+        assert!(reg.register_child(tainted_parent, root_pid));
+        assert_eq!(
+            reg.classify_pid_with_system(tainted_parent, Some("bash"), &[], &sys),
+            AgentLineageClass::TaintedAgentDescendant
+        );
+
+        // Pigeonhole principle: fan out >256 child PIDs from the same cached
+        // tainted parent via extra_edges so at least one child guarantees a
+        // DashMap shard collision with tainted_parent across <=64-CPU hosts.
+        for offset in 2u32..=320u32 {
+            let child_pid = root_pid + offset;
+            let edges = [(tainted_parent, child_pid)];
+            assert_eq!(
+                reg.classify_pid_with_system(child_pid, Some("sh"), &edges, &sys),
+                AgentLineageClass::TaintedAgentDescendant
+            );
+        }
     }
 }

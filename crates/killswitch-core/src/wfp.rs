@@ -16,7 +16,9 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 #[cfg(windows)]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
-use tracing::{info, warn};
+use tracing::info;
+#[cfg(windows)]
+use tracing::warn;
 
 use killswitch_types::errors::{KillSwitchError, KillSwitchResult};
 use killswitch_types::status::{IsolationReceipt, NetworkIsolationEngine, NetworkIsolator};
@@ -31,6 +33,7 @@ pub const ERROR_SUCCESS: u32 = 0;
 pub const ERROR_INSUFFICIENT_BUFFER: u32 = 122;
 
 pub const FWP_MATCH_EQUAL: u32 = 0;
+pub const FWP_MATCH_RANGE: u32 = 5;
 pub const FWP_MATCH_FLAGS_ALL_SET: u32 = 6;
 
 pub const FWP_EMPTY: u32 = 0;
@@ -39,11 +42,69 @@ pub const FWP_UINT16: u32 = 2;
 pub const FWP_UINT32: u32 = 3;
 pub const FWP_UINT64: u32 = 4;
 pub const FWP_BYTE_ARRAY16_TYPE: u32 = 11;
+pub const FWP_BYTE_BLOB_TYPE: u32 = 12;
+pub const FWP_RANGE_TYPE: u32 = 258;
 
 pub const FWP_ACTION_BLOCK: u32 = 0x0000_1001;
 pub const FWP_ACTION_PERMIT: u32 = 0x0000_1002;
 
 pub const FWP_CONDITION_FLAG_IS_LOOPBACK: u32 = 0x0000_0001;
+
+pub const AF_INET: u32 = 2;
+pub const AF_INET6: u32 = 23;
+pub const TCP_TABLE_OWNER_PID_ALL: u32 = 5;
+pub const UDP_TABLE_OWNER_PID: u32 = 1;
+
+pub const QUARANTINE_BLOCKED_LOOPBACK_PROXY_PORTS: &[u16] = &[1080, 3128, 8080, 8888, 9050];
+pub const QUARANTINE_BLOCKED_LATERAL_PORTS: &[u16] = &[135, 445, 5985, 5986];
+pub const QUARANTINE_BLOCKED_DISCOVERY_PORTS: &[u16] = &[53, 67, 68, 546, 547, 853];
+
+static IN_PROCESS_SELF_DIAGNOSTIC: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Enables or disables in-process self-diagnostic contract mode (used strictly by `SubsystemVerifier`).
+pub fn set_in_process_self_diagnostic(enabled: bool) {
+    IN_PROCESS_SELF_DIAGNOSTIC.store(enabled, std::sync::atomic::Ordering::SeqCst);
+}
+
+#[inline]
+pub fn is_authorized_self_diagnostic() -> bool {
+    if IN_PROCESS_SELF_DIAGNOSTIC.load(std::sync::atomic::Ordering::SeqCst) {
+        return true;
+    }
+    let in_test_or_ci = cfg!(test)
+        || std::env::var("CARGO").is_ok()
+        || std::env::var("RUST_TEST_THREADS").is_ok()
+        || std::env::var("GITHUB_ACTIONS").is_ok();
+    in_test_or_ci && std::env::var("KILLSWITCH_SELF_DIAGNOSTIC").is_ok()
+}
+
+/// Returns true if `port` is a dangerous proxy, lateral movement, or discovery port that MUST
+/// remain blocked even on loopback during quarantine.
+#[inline]
+pub fn is_blocked_quarantine_port(port: u16) -> bool {
+    port == 0
+        || port < 1024
+        || QUARANTINE_BLOCKED_LOOPBACK_PROXY_PORTS.contains(&port)
+        || QUARANTINE_BLOCKED_LATERAL_PORTS.contains(&port)
+        || QUARANTINE_BLOCKED_DISCOVERY_PORTS.contains(&port)
+}
+
+/// Sanitizes caller-provided preserved ports for kernel firewall rules, rejecting privileged,
+/// DNS/DHCP/DoT, SMB/WinRM, and local proxy ports while guaranteeing at least one bound control port.
+pub fn sanitize_firewall_preserved_ports(ports: &[u16]) -> Vec<u16> {
+    let mut sanitized = Vec::with_capacity(ports.len().max(1));
+    for &p in ports {
+        if !is_blocked_quarantine_port(p) && !sanitized.contains(&p) {
+            sanitized.push(p);
+        }
+    }
+    if sanitized.is_empty() {
+        discover_firewall_bound_control_ports()
+    } else {
+        sanitized
+    }
+}
 
 pub const MIB_TCP_STATE_SYN_SENT: u32 = 3;
 pub const MIB_TCP_STATE_SYN_RCVD: u32 = 4;
@@ -152,6 +213,46 @@ pub fn discover_active_control_ports() -> Vec<u16> {
     ports
 }
 
+/// Resolves ONLY the strictly active bound control port(s) (`active_port.txt` or `3030`)
+/// for firewall exceptions, eliminating blanket exposure of `3031..=3045` and `4040`.
+pub fn discover_firewall_bound_control_ports() -> Vec<u16> {
+    let mut ports = Vec::with_capacity(2);
+    let mut candidates = vec![std::path::PathBuf::from("active_port.txt")];
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("active_port.txt"));
+        }
+    }
+    #[cfg(windows)]
+    if let Ok(program_data) = std::env::var("ProgramData") {
+        candidates.push(
+            std::path::PathBuf::from(program_data)
+                .join("KillSwitch")
+                .join("active_port.txt"),
+        );
+    }
+    #[cfg(target_os = "linux")]
+    candidates.push(std::path::PathBuf::from(
+        "/var/run/killswitch/active_port.txt",
+    ));
+    for path in candidates {
+        if path.is_symlink() {
+            continue;
+        }
+        if let Ok(raw) = std::fs::read_to_string(&path) {
+            if let Ok(p) = raw.trim().parse::<u16>() {
+                if !is_blocked_quarantine_port(p) && !ports.contains(&p) {
+                    ports.push(p);
+                }
+            }
+        }
+    }
+    if ports.is_empty() {
+        ports.push(DEFAULT_CONTROL_PORT);
+    }
+    ports
+}
+
 /// Returns true if the current Windows process has an elevated Administrator token.
 /// On non-Windows platforms, returns true.
 #[cfg(windows)]
@@ -206,7 +307,7 @@ pub fn try_elevated_delegation(action: &str) -> KillSwitchResult<bool> {
     if std::env::var("KILLSWITCH_INTERACTIVE_UAC").is_err()
         || std::env::var("CARGO").is_ok()
         || std::env::var("RUST_TEST_THREADS").is_ok()
-        || std::env::var("KILLSWITCH_SELF_DIAGNOSTIC").is_ok()
+        || is_authorized_self_diagnostic()
         || cfg!(test)
     {
         return Ok(false);
@@ -728,6 +829,14 @@ pub const FWPM_CONDITION_FLAGS: WfpGuid = WfpGuid {
     data4: [0x86, 0xd7, 0xe9, 0x03, 0x68, 0x4a, 0xa8, 0x0c],
 };
 
+// d78e1e87-8644-4ea5-9437-d809ecefc971 (FWPM_CONDITION_ALE_APP_ID)
+pub const FWPM_CONDITION_ALE_APP_ID: WfpGuid = WfpGuid {
+    data1: 0xd78e1e87,
+    data2: 0x8644,
+    data3: 0x4ea5,
+    data4: [0x94, 0x37, 0xd8, 0x09, 0xec, 0xef, 0xc9, 0x71],
+};
+
 #[repr(C)]
 pub struct FwpmDisplayData0 {
     pub name: *mut u16,
@@ -772,6 +881,13 @@ pub struct FwpByteBlob {
     pub size: u32,
     pub _pad: u32,
     pub data: *mut u8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FwpRange0 {
+    pub value_low: FwpValue0,
+    pub value_high: FwpValue0,
 }
 
 #[repr(C)]
@@ -858,6 +974,59 @@ pub struct MibTcpRow {
     pub dw_remote_port: u32,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct MibTcp6Row {
+    pub state: u32,
+    pub uc_local_addr: [u8; 16],
+    pub dw_local_scope_id: u32,
+    pub dw_local_port: u32,
+    pub uc_remote_addr: [u8; 16],
+    pub dw_remote_scope_id: u32,
+    pub dw_remote_port: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct MibTcpRowOwnerPid {
+    pub dw_state: u32,
+    pub dw_local_addr: u32,
+    pub dw_local_port: u32,
+    pub dw_remote_addr: u32,
+    pub dw_remote_port: u32,
+    pub dw_owning_pid: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct MibTcp6RowOwnerPid {
+    pub uc_local_addr: [u8; 16],
+    pub dw_local_scope_id: u32,
+    pub dw_local_port: u32,
+    pub uc_remote_addr: [u8; 16],
+    pub dw_remote_scope_id: u32,
+    pub dw_remote_port: u32,
+    pub dw_state: u32,
+    pub dw_owning_pid: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct MibUdpRowOwnerPid {
+    pub dw_local_addr: u32,
+    pub dw_local_port: u32,
+    pub dw_owning_pid: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct MibUdp6RowOwnerPid {
+    pub uc_local_addr: [u8; 16],
+    pub dw_local_scope_id: u32,
+    pub dw_local_port: u32,
+    pub dw_owning_pid: u32,
+}
+
 // -----------------------------------------------------------------------------
 // Win32 Function Signatures
 // -----------------------------------------------------------------------------
@@ -908,6 +1077,10 @@ type FnFwpmFilterGetById0 = unsafe extern "system" fn(
 type FnFwpmFreeMemory0 = unsafe extern "system" fn(p: *mut *mut std::ffi::c_void);
 
 #[cfg(windows)]
+type FnFwpmGetAppIdFromFileName0 =
+    unsafe extern "system" fn(file_name: *const u16, app_id: *mut *mut FwpByteBlob) -> u32;
+
+#[cfg(windows)]
 type FnFwpmFilterCreateEnumHandle0 = unsafe extern "system" fn(
     engine_handle: *mut std::ffi::c_void,
     enum_template: *const std::ffi::c_void,
@@ -935,6 +1108,33 @@ type FnGetTcpTable =
 
 #[cfg(windows)]
 type FnSetTcpEntry = unsafe extern "system" fn(p_tcprow: *const MibTcpRow) -> u32;
+
+#[cfg(windows)]
+type FnGetTcp6Table =
+    unsafe extern "system" fn(p_tcp6_table: *mut u8, pdw_size: *mut u32, b_order: i32) -> u32;
+
+#[cfg(windows)]
+type FnSetTcp6Entry = unsafe extern "system" fn(p_tcp6row: *const MibTcp6Row) -> u32;
+
+#[cfg(windows)]
+type FnGetExtendedTcpTable = unsafe extern "system" fn(
+    p_tcp_table: *mut u8,
+    pdw_size: *mut u32,
+    b_order: i32,
+    ul_af: u32,
+    table_class: u32,
+    reserved: u32,
+) -> u32;
+
+#[cfg(windows)]
+type FnGetExtendedUdpTable = unsafe extern "system" fn(
+    p_udp_table: *mut u8,
+    pdw_size: *mut u32,
+    b_order: i32,
+    ul_af: u32,
+    table_class: u32,
+    reserved: u32,
+) -> u32;
 
 // -----------------------------------------------------------------------------
 // WfpDynamicSession
@@ -964,6 +1164,8 @@ pub struct WfpDynamicSession {
     fn_filter_enum: Option<FnFwpmFilterEnum0>,
     #[cfg(windows)]
     fn_filter_destroy_enum: Option<FnFwpmFilterDestroyEnumHandle0>,
+    #[cfg(windows)]
+    fn_get_app_id_from_file_name: Option<FnFwpmGetAppIdFromFileName0>,
     #[cfg(windows)]
     in_transaction: AtomicBool,
     #[cfg(not(windows))]
@@ -1064,6 +1266,9 @@ impl WfpDynamicSession {
                 get_func(b"FwpmFilterDestroyEnumHandle0\0").map(|p| std::mem::transmute(p))
             };
 
+            let fn_get_app_id_from_file_name: Option<FnFwpmGetAppIdFromFileName0> =
+                unsafe { get_func(b"FwpmGetAppIdFromFileName0\0").map(|p| std::mem::transmute(p)) };
+
             let mut session_name: Vec<u16> = "KillSwitch-DynamicSession\0".encode_utf16().collect();
             let mut session_desc: Vec<u16> =
                 "KillSwitch Autonomous EDR Dynamic Quarantine Session\0"
@@ -1137,6 +1342,7 @@ impl WfpDynamicSession {
                 fn_filter_create_enum,
                 fn_filter_enum,
                 fn_filter_destroy_enum,
+                fn_get_app_id_from_file_name,
                 in_transaction: AtomicBool::new(false),
             })
         }
@@ -1405,22 +1611,40 @@ impl WfpDynamicSession {
         Ok(assigned_id)
     }
 
-    /// Installs hermetic network quarantine filters.
-    ///
-    /// Permits:
-    /// - Loopback (127.0.0.1, ::1)
-    /// - Control Port 3030 (TCP)
-    /// - DNS (Port 53 UDP/TCP)
-    /// - DHCP (UDP 67/68, UDP 546/547)
-    ///
-    /// Blocks:
-    /// - All other inbound & outbound traffic.
+    /// Installs hermetic network quarantine filters with strict AppID + bound control port
+    /// loopback exceptions and explicit proxy / lateral-movement / discovery blocks.
     pub fn install_hermetic_quarantine_filters(
         &self,
         rule_prefix: &str,
     ) -> KillSwitchResult<Vec<u64>> {
+        self.install_hermetic_quarantine_filters_with_ports(rule_prefix, &[])
+    }
+
+    /// Installs hermetic network quarantine filters permitting ONLY the KillSwitch daemon AppID
+    /// on exact localhost (`127.0.0.1` / `::1`) and explicit sanitized control port(s).
+    pub fn install_hermetic_quarantine_filters_with_ports(
+        &self,
+        rule_prefix: &str,
+        custom_ports: &[u16],
+    ) -> KillSwitchResult<Vec<u64>> {
         #[cfg(windows)]
         {
+            struct AppIdBlobGuard {
+                ptr: *mut FwpByteBlob,
+                fn_free: Option<FnFwpmFreeMemory0>,
+            }
+            impl Drop for AppIdBlobGuard {
+                fn drop(&mut self) {
+                    if !self.ptr.is_null() {
+                        if let Some(free_fn) = self.fn_free {
+                            let mut raw = self.ptr as *mut std::ffi::c_void;
+                            unsafe { free_fn(&mut raw) };
+                        }
+                        self.ptr = std::ptr::null_mut();
+                    }
+                }
+            }
+
             if self.engine_handle.is_null() {
                 return Err(KillSwitchError::WfpEngineHandleNull);
             }
@@ -1489,7 +1713,6 @@ impl WfpDynamicSession {
                 match unsafe { self.add_filter_raw(&filter, layer_name) } {
                     Ok(id) => Ok(id),
                     Err(_first_err) => {
-                        // Fallback to BFE automatic weight calculation (FWP_EMPTY)
                         filter.weight = FwpValue0 {
                             type_: FWP_EMPTY,
                             _pad: 0,
@@ -1504,11 +1727,47 @@ impl WfpDynamicSession {
                 }
             };
 
-            // 1. PERMIT LOOPBACK IPv4 (127.0.0.1) on all IPv4 ALE, Transport, Datagram, and ICMP layers
             let loopback_v4_be = u32::from_be_bytes([127, 0, 0, 1]);
-            let loopback_v4_ne = u32::from_ne_bytes([127, 0, 0, 1]);
+            let loopback_v6_bytes = Ipv6Addr::LOCALHOST.octets();
+            let imds_v4_be = u32::from_be_bytes([169, 254, 169, 254]);
+            let allowed_ports = sanitize_firewall_preserved_ports(custom_ports);
 
-            let v4_out_layers = [
+            // Resolve KillSwitch binary AppID for AppID-scoped local control IPC exceptions.
+            let mut app_id_guard = AppIdBlobGuard {
+                ptr: std::ptr::null_mut(),
+                fn_free: self.fn_free_memory,
+            };
+            if let Some(fn_get_app_id) = self.fn_get_app_id_from_file_name {
+                if let Ok(exe_path) = std::env::current_exe() {
+                    let exe_w: Vec<u16> = exe_path
+                        .to_string_lossy()
+                        .encode_utf16()
+                        .chain(std::iter::once(0))
+                        .collect();
+                    let mut blob_ptr: *mut FwpByteBlob = std::ptr::null_mut();
+                    let st = unsafe { fn_get_app_id(exe_w.as_ptr(), &mut blob_ptr) };
+                    if st == ERROR_SUCCESS && !blob_ptr.is_null() {
+                        app_id_guard.ptr = blob_ptr;
+                    }
+                }
+            }
+
+            // 1. EXPLICIT HIGH-WEIGHT BLOCKS (Weight = 20):
+            //    Block non-127.0.0.1 loopback (127.0.0.2..=127.255.255.254), proxy ports, SMB/WinRM,
+            //    DNS/DHCP/DoT, and cloud IMDS even on loopback/local interfaces.
+            let mut loopback_non1_range = FwpRange0 {
+                value_low: FwpValue0 {
+                    type_: FWP_UINT32,
+                    _pad: 0,
+                    value: u32::from_be_bytes([127, 0, 0, 2]) as usize,
+                },
+                value_high: FwpValue0 {
+                    type_: FWP_UINT32,
+                    _pad: 0,
+                    value: u32::from_be_bytes([127, 255, 255, 254]) as usize,
+                },
+            };
+            for (layer, layer_name, tag) in [
                 (
                     FWPM_LAYER_ALE_AUTH_CONNECT_V4,
                     "ALE_AUTH_CONNECT_V4",
@@ -1524,421 +1783,493 @@ impl WfpDynamicSession {
                     "DATAGRAM_DATA_V4",
                     "Datagram-Out",
                 ),
-                (
-                    FWPM_LAYER_OUTBOUND_ICMP_ERROR_V4,
-                    "OUTBOUND_ICMP_ERROR_V4",
-                    "ICMPError-Out",
-                ),
-            ];
-            for (layer, layer_name, tag) in v4_out_layers {
-                for (ord_tag, lb_val) in [("BE", loopback_v4_be), ("NE", loopback_v4_ne)] {
-                    let mut cond_lb_out = [FwpmFilterCondition0 {
-                        field_key: FWPM_CONDITION_IP_REMOTE_ADDRESS,
-                        match_type: FWP_MATCH_EQUAL,
-                        _pad: 0,
-                        condition_value: FwpConditionValue0 {
-                            type_: FWP_UINT32,
-                            _pad: 0,
-                            value: lb_val as usize,
-                        },
-                    }];
-                    if let Ok(id) = install_filter(
-                        &format!("Permit-Loopback-{}-{}-v4", tag, ord_tag),
-                        layer,
-                        layer_name,
-                        FWP_ACTION_PERMIT,
-                        15,
-                        &mut cond_lb_out,
-                    ) {
-                        filter_ids.push(id);
-                    }
-
-                    let mut cond_lb_local = [FwpmFilterCondition0 {
-                        field_key: FWPM_CONDITION_IP_LOCAL_ADDRESS,
-                        match_type: FWP_MATCH_EQUAL,
-                        _pad: 0,
-                        condition_value: FwpConditionValue0 {
-                            type_: FWP_UINT32,
-                            _pad: 0,
-                            value: lb_val as usize,
-                        },
-                    }];
-                    if let Ok(id) = install_filter(
-                        &format!("Permit-LoopbackLocal-{}-{}-v4", tag, ord_tag),
-                        layer,
-                        layer_name,
-                        FWP_ACTION_PERMIT,
-                        15,
-                        &mut cond_lb_local,
-                    ) {
-                        filter_ids.push(id);
-                    }
-                }
-
-                let mut cond_lb_flag = [FwpmFilterCondition0 {
-                    field_key: FWPM_CONDITION_FLAGS,
-                    match_type: FWP_MATCH_FLAGS_ALL_SET,
+            ] {
+                let mut cond_range = [FwpmFilterCondition0 {
+                    field_key: FWPM_CONDITION_IP_REMOTE_ADDRESS,
+                    match_type: FWP_MATCH_RANGE,
                     _pad: 0,
                     condition_value: FwpConditionValue0 {
-                        type_: FWP_UINT32,
+                        type_: FWP_RANGE_TYPE,
                         _pad: 0,
-                        value: FWP_CONDITION_FLAG_IS_LOOPBACK as usize,
+                        value: (&mut loopback_non1_range as *mut FwpRange0) as usize,
                     },
                 }];
                 if let Ok(id) = install_filter(
-                    &format!("Permit-LoopbackFlag-{}-v4", tag),
+                    &format!("Block-NonLocalLoopbackRange-{tag}-v4"),
                     layer,
                     layer_name,
-                    FWP_ACTION_PERMIT,
-                    15,
-                    &mut cond_lb_flag,
+                    FWP_ACTION_BLOCK,
+                    20,
+                    &mut cond_range,
                 ) {
                     filter_ids.push(id);
                 }
             }
 
-            let v4_in_layers = [
+            for (layer, layer_name, tag) in [
                 (
-                    FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4,
-                    "ALE_AUTH_RECV_ACCEPT_V4",
-                    "ALE-In",
+                    FWPM_LAYER_ALE_AUTH_CONNECT_V4,
+                    "ALE_AUTH_CONNECT_V4",
+                    "ALE-Out-v4",
                 ),
                 (
-                    FWPM_LAYER_INBOUND_TRANSPORT_V4,
-                    "INBOUND_TRANSPORT_V4",
-                    "Transport-In",
+                    FWPM_LAYER_OUTBOUND_TRANSPORT_V4,
+                    "OUTBOUND_TRANSPORT_V4",
+                    "Transport-Out-v4",
                 ),
                 (
-                    FWPM_LAYER_INBOUND_ICMP_ERROR_V4,
-                    "INBOUND_ICMP_ERROR_V4",
-                    "ICMPError-In",
+                    FWPM_LAYER_DATAGRAM_DATA_V4,
+                    "DATAGRAM_DATA_V4",
+                    "Datagram-Out-v4",
                 ),
-            ];
-            for (layer, layer_name, tag) in v4_in_layers {
-                for (ord_tag, lb_val) in [("BE", loopback_v4_be), ("NE", loopback_v4_ne)] {
-                    let mut cond_lb_in = [FwpmFilterCondition0 {
-                        field_key: FWPM_CONDITION_IP_LOCAL_ADDRESS,
-                        match_type: FWP_MATCH_EQUAL,
-                        _pad: 0,
-                        condition_value: FwpConditionValue0 {
-                            type_: FWP_UINT32,
-                            _pad: 0,
-                            value: lb_val as usize,
-                        },
-                    }];
-                    if let Ok(id) = install_filter(
-                        &format!("Permit-Loopback-{}-{}-v4", tag, ord_tag),
-                        layer,
-                        layer_name,
-                        FWP_ACTION_PERMIT,
-                        15,
-                        &mut cond_lb_in,
-                    ) {
-                        filter_ids.push(id);
-                    }
-
-                    let mut cond_lb_rem = [FwpmFilterCondition0 {
-                        field_key: FWPM_CONDITION_IP_REMOTE_ADDRESS,
-                        match_type: FWP_MATCH_EQUAL,
-                        _pad: 0,
-                        condition_value: FwpConditionValue0 {
-                            type_: FWP_UINT32,
-                            _pad: 0,
-                            value: lb_val as usize,
-                        },
-                    }];
-                    if let Ok(id) = install_filter(
-                        &format!("Permit-LoopbackRemote-{}-{}-v4", tag, ord_tag),
-                        layer,
-                        layer_name,
-                        FWP_ACTION_PERMIT,
-                        15,
-                        &mut cond_lb_rem,
-                    ) {
-                        filter_ids.push(id);
-                    }
-                }
-
-                let mut cond_lb_flag = [FwpmFilterCondition0 {
-                    field_key: FWPM_CONDITION_FLAGS,
-                    match_type: FWP_MATCH_FLAGS_ALL_SET,
-                    _pad: 0,
-                    condition_value: FwpConditionValue0 {
-                        type_: FWP_UINT32,
-                        _pad: 0,
-                        value: FWP_CONDITION_FLAG_IS_LOOPBACK as usize,
-                    },
-                }];
-                if let Ok(id) = install_filter(
-                    &format!("Permit-LoopbackFlag-{}-v4", tag),
-                    layer,
-                    layer_name,
-                    FWP_ACTION_PERMIT,
-                    15,
-                    &mut cond_lb_flag,
-                ) {
-                    filter_ids.push(id);
-                }
-            }
-
-            // 2. PERMIT LOOPBACK IPv6 (::1) on all IPv6 ALE, Transport, Datagram, and ICMP layers
-            let loopback_v6_bytes = Ipv6Addr::LOCALHOST.octets();
-
-            let v6_out_layers = [
-                (
-                    FWPM_LAYER_ALE_AUTH_CONNECT_V6,
-                    "ALE_AUTH_CONNECT_V6",
-                    "ALE-Out",
-                ),
-                (
-                    FWPM_LAYER_OUTBOUND_TRANSPORT_V6,
-                    "OUTBOUND_TRANSPORT_V6",
-                    "Transport-Out",
-                ),
-                (
-                    FWPM_LAYER_DATAGRAM_DATA_V6,
-                    "DATAGRAM_DATA_V6",
-                    "Datagram-Out",
-                ),
-                (
-                    FWPM_LAYER_OUTBOUND_ICMP_ERROR_V6,
-                    "OUTBOUND_ICMP_ERROR_V6",
-                    "ICMPError-Out",
-                ),
-            ];
-            for (layer, layer_name, tag) in v6_out_layers {
-                let mut cond_lb_out = [FwpmFilterCondition0 {
+                (FWPM_LAYER_IPFORWARD_V4, "IPFORWARD_V4", "IPForward-v4"),
+            ] {
+                let mut cond_imds = [FwpmFilterCondition0 {
                     field_key: FWPM_CONDITION_IP_REMOTE_ADDRESS,
                     match_type: FWP_MATCH_EQUAL,
                     _pad: 0,
                     condition_value: FwpConditionValue0 {
-                        type_: FWP_BYTE_ARRAY16_TYPE,
-                        _pad: 0,
-                        value: loopback_v6_bytes.as_ptr() as usize,
-                    },
-                }];
-                if let Ok(id) = install_filter(
-                    &format!("Permit-Loopback-{}-v6", tag),
-                    layer,
-                    layer_name,
-                    FWP_ACTION_PERMIT,
-                    15,
-                    &mut cond_lb_out,
-                ) {
-                    filter_ids.push(id);
-                }
-
-                let mut cond_lb_local = [FwpmFilterCondition0 {
-                    field_key: FWPM_CONDITION_IP_LOCAL_ADDRESS,
-                    match_type: FWP_MATCH_EQUAL,
-                    _pad: 0,
-                    condition_value: FwpConditionValue0 {
-                        type_: FWP_BYTE_ARRAY16_TYPE,
-                        _pad: 0,
-                        value: loopback_v6_bytes.as_ptr() as usize,
-                    },
-                }];
-                if let Ok(id) = install_filter(
-                    &format!("Permit-LoopbackLocal-{}-v6", tag),
-                    layer,
-                    layer_name,
-                    FWP_ACTION_PERMIT,
-                    15,
-                    &mut cond_lb_local,
-                ) {
-                    filter_ids.push(id);
-                }
-
-                let mut cond_lb_flag = [FwpmFilterCondition0 {
-                    field_key: FWPM_CONDITION_FLAGS,
-                    match_type: FWP_MATCH_FLAGS_ALL_SET,
-                    _pad: 0,
-                    condition_value: FwpConditionValue0 {
                         type_: FWP_UINT32,
                         _pad: 0,
-                        value: FWP_CONDITION_FLAG_IS_LOOPBACK as usize,
+                        value: imds_v4_be as usize,
                     },
                 }];
                 if let Ok(id) = install_filter(
-                    &format!("Permit-LoopbackFlag-{}-v6", tag),
+                    &format!("Block-IMDS-{tag}"),
                     layer,
                     layer_name,
-                    FWP_ACTION_PERMIT,
-                    15,
-                    &mut cond_lb_flag,
+                    FWP_ACTION_BLOCK,
+                    20,
+                    &mut cond_imds,
                 ) {
                     filter_ids.push(id);
                 }
             }
 
-            let v6_in_layers = [
-                (
-                    FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6,
-                    "ALE_AUTH_RECV_ACCEPT_V6",
-                    "ALE-In",
-                ),
-                (
-                    FWPM_LAYER_INBOUND_TRANSPORT_V6,
-                    "INBOUND_TRANSPORT_V6",
-                    "Transport-In",
-                ),
-                (
-                    FWPM_LAYER_INBOUND_ICMP_ERROR_V6,
-                    "INBOUND_ICMP_ERROR_V6",
-                    "ICMPError-In",
-                ),
-            ];
-            for (layer, layer_name, tag) in v6_in_layers {
-                let mut cond_lb_in = [FwpmFilterCondition0 {
-                    field_key: FWPM_CONDITION_IP_LOCAL_ADDRESS,
-                    match_type: FWP_MATCH_EQUAL,
-                    _pad: 0,
-                    condition_value: FwpConditionValue0 {
-                        type_: FWP_BYTE_ARRAY16_TYPE,
-                        _pad: 0,
-                        value: loopback_v6_bytes.as_ptr() as usize,
-                    },
-                }];
-                if let Ok(id) = install_filter(
-                    &format!("Permit-Loopback-{}-v6", tag),
-                    layer,
-                    layer_name,
-                    FWP_ACTION_PERMIT,
-                    15,
-                    &mut cond_lb_in,
-                ) {
-                    filter_ids.push(id);
-                }
-
-                let mut cond_lb_rem = [FwpmFilterCondition0 {
-                    field_key: FWPM_CONDITION_IP_REMOTE_ADDRESS,
-                    match_type: FWP_MATCH_EQUAL,
-                    _pad: 0,
-                    condition_value: FwpConditionValue0 {
-                        type_: FWP_BYTE_ARRAY16_TYPE,
-                        _pad: 0,
-                        value: loopback_v6_bytes.as_ptr() as usize,
-                    },
-                }];
-                if let Ok(id) = install_filter(
-                    &format!("Permit-LoopbackRemote-{}-v6", tag),
-                    layer,
-                    layer_name,
-                    FWP_ACTION_PERMIT,
-                    15,
-                    &mut cond_lb_rem,
-                ) {
-                    filter_ids.push(id);
-                }
-
-                let mut cond_lb_flag = [FwpmFilterCondition0 {
-                    field_key: FWPM_CONDITION_FLAGS,
-                    match_type: FWP_MATCH_FLAGS_ALL_SET,
-                    _pad: 0,
-                    condition_value: FwpConditionValue0 {
-                        type_: FWP_UINT32,
-                        _pad: 0,
-                        value: FWP_CONDITION_FLAG_IS_LOOPBACK as usize,
-                    },
-                }];
-                if let Ok(id) = install_filter(
-                    &format!("Permit-LoopbackFlag-{}-v6", tag),
-                    layer,
-                    layer_name,
-                    FWP_ACTION_PERMIT,
-                    15,
-                    &mut cond_lb_flag,
-                ) {
-                    filter_ids.push(id);
-                }
-            }
-
-            // 3. PERMIT ACTIVE CONTROL / WEBUI PORTS (LOCAL LOOPBACK ONLY)
-            for ctrl_port in discover_active_control_ports() {
-                let mut cond_port_in_v4 = [
-                    FwpmFilterCondition0 {
-                        field_key: FWPM_CONDITION_IP_LOCAL_PORT,
+            let blocked_ports: Vec<u16> = QUARANTINE_BLOCKED_LOOPBACK_PROXY_PORTS
+                .iter()
+                .chain(QUARANTINE_BLOCKED_LATERAL_PORTS.iter())
+                .chain(QUARANTINE_BLOCKED_DISCOVERY_PORTS.iter())
+                .copied()
+                .collect();
+            for blocked_port in blocked_ports {
+                for (layer, layer_name, tag) in [
+                    (
+                        FWPM_LAYER_ALE_AUTH_CONNECT_V4,
+                        "ALE_AUTH_CONNECT_V4",
+                        "ALE-Out-v4",
+                    ),
+                    (
+                        FWPM_LAYER_ALE_AUTH_CONNECT_V6,
+                        "ALE_AUTH_CONNECT_V6",
+                        "ALE-Out-v6",
+                    ),
+                    (
+                        FWPM_LAYER_OUTBOUND_TRANSPORT_V4,
+                        "OUTBOUND_TRANSPORT_V4",
+                        "Transport-Out-v4",
+                    ),
+                    (
+                        FWPM_LAYER_OUTBOUND_TRANSPORT_V6,
+                        "OUTBOUND_TRANSPORT_V6",
+                        "Transport-Out-v6",
+                    ),
+                    (
+                        FWPM_LAYER_DATAGRAM_DATA_V4,
+                        "DATAGRAM_DATA_V4",
+                        "Datagram-Out-v4",
+                    ),
+                    (
+                        FWPM_LAYER_DATAGRAM_DATA_V6,
+                        "DATAGRAM_DATA_V6",
+                        "Datagram-Out-v6",
+                    ),
+                ] {
+                    let mut cond_rport = [FwpmFilterCondition0 {
+                        field_key: FWPM_CONDITION_IP_REMOTE_PORT,
                         match_type: FWP_MATCH_EQUAL,
                         _pad: 0,
                         condition_value: FwpConditionValue0 {
                             type_: FWP_UINT16,
                             _pad: 0,
-                            value: ctrl_port as usize,
+                            value: blocked_port as usize,
                         },
-                    },
-                    FwpmFilterCondition0 {
-                        field_key: FWPM_CONDITION_IP_LOCAL_ADDRESS,
-                        match_type: FWP_MATCH_EQUAL,
-                        _pad: 0,
-                        condition_value: FwpConditionValue0 {
-                            type_: FWP_UINT32,
+                    }];
+                    if let Ok(id) = install_filter(
+                        &format!("Block-Port{blocked_port}-{tag}"),
+                        layer,
+                        layer_name,
+                        FWP_ACTION_BLOCK,
+                        20,
+                        &mut cond_rport,
+                    ) {
+                        filter_ids.push(id);
+                    }
+                }
+            }
+
+            // 2. STRICT APPID-SCOPED LOOPBACK CONTROL EXCEPTIONS (Weight = 15):
+            //    Only the KillSwitch daemon binary itself receives ALE loopback permit by AppID.
+            if !app_id_guard.ptr.is_null() {
+                for (layer, layer_name, tag) in [
+                    (
+                        FWPM_LAYER_ALE_AUTH_CONNECT_V4,
+                        "ALE_AUTH_CONNECT_V4",
+                        "Out-v4",
+                    ),
+                    (
+                        FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4,
+                        "ALE_AUTH_RECV_ACCEPT_V4",
+                        "In-v4",
+                    ),
+                ] {
+                    let mut cond_app_v4 = [
+                        FwpmFilterCondition0 {
+                            field_key: FWPM_CONDITION_ALE_APP_ID,
+                            match_type: FWP_MATCH_EQUAL,
                             _pad: 0,
-                            value: loopback_v4_be as usize,
+                            condition_value: FwpConditionValue0 {
+                                type_: FWP_BYTE_BLOB_TYPE,
+                                _pad: 0,
+                                value: app_id_guard.ptr as usize,
+                            },
                         },
-                    },
-                    FwpmFilterCondition0 {
-                        field_key: FWPM_CONDITION_IP_PROTOCOL,
-                        match_type: FWP_MATCH_EQUAL,
-                        _pad: 0,
-                        condition_value: FwpConditionValue0 {
-                            type_: FWP_UINT8,
+                        FwpmFilterCondition0 {
+                            field_key: FWPM_CONDITION_IP_REMOTE_ADDRESS,
+                            match_type: FWP_MATCH_EQUAL,
                             _pad: 0,
-                            value: 6, // IPPROTO_TCP
+                            condition_value: FwpConditionValue0 {
+                                type_: FWP_UINT32,
+                                _pad: 0,
+                                value: loopback_v4_be as usize,
+                            },
                         },
-                    },
-                ];
-                if let Ok(id) = install_filter(
-                    &format!("Permit-ControlPort{}-Local-In-v4", ctrl_port),
-                    FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4,
-                    "ALE_AUTH_RECV_ACCEPT_V4",
-                    FWP_ACTION_PERMIT,
-                    15,
-                    &mut cond_port_in_v4,
-                ) {
-                    filter_ids.push(id);
+                    ];
+                    if let Ok(id) = install_filter(
+                        &format!("Permit-KillSwitchAppId-Loopback-{tag}"),
+                        layer,
+                        layer_name,
+                        FWP_ACTION_PERMIT,
+                        15,
+                        &mut cond_app_v4,
+                    ) {
+                        filter_ids.push(id);
+                    }
                 }
 
-                let mut cond_port_in_v6 = [
-                    FwpmFilterCondition0 {
-                        field_key: FWPM_CONDITION_IP_LOCAL_PORT,
-                        match_type: FWP_MATCH_EQUAL,
-                        _pad: 0,
-                        condition_value: FwpConditionValue0 {
-                            type_: FWP_UINT16,
+                for (layer, layer_name, tag) in [
+                    (
+                        FWPM_LAYER_ALE_AUTH_CONNECT_V6,
+                        "ALE_AUTH_CONNECT_V6",
+                        "Out-v6",
+                    ),
+                    (
+                        FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6,
+                        "ALE_AUTH_RECV_ACCEPT_V6",
+                        "In-v6",
+                    ),
+                ] {
+                    let mut cond_app_v6 = [
+                        FwpmFilterCondition0 {
+                            field_key: FWPM_CONDITION_ALE_APP_ID,
+                            match_type: FWP_MATCH_EQUAL,
                             _pad: 0,
-                            value: ctrl_port as usize,
+                            condition_value: FwpConditionValue0 {
+                                type_: FWP_BYTE_BLOB_TYPE,
+                                _pad: 0,
+                                value: app_id_guard.ptr as usize,
+                            },
                         },
-                    },
-                    FwpmFilterCondition0 {
-                        field_key: FWPM_CONDITION_IP_LOCAL_ADDRESS,
-                        match_type: FWP_MATCH_EQUAL,
-                        _pad: 0,
-                        condition_value: FwpConditionValue0 {
-                            type_: FWP_BYTE_ARRAY16_TYPE,
+                        FwpmFilterCondition0 {
+                            field_key: FWPM_CONDITION_IP_REMOTE_ADDRESS,
+                            match_type: FWP_MATCH_EQUAL,
                             _pad: 0,
-                            value: loopback_v6_bytes.as_ptr() as usize,
+                            condition_value: FwpConditionValue0 {
+                                type_: FWP_BYTE_ARRAY16_TYPE,
+                                _pad: 0,
+                                value: loopback_v6_bytes.as_ptr() as usize,
+                            },
                         },
-                    },
-                    FwpmFilterCondition0 {
-                        field_key: FWPM_CONDITION_IP_PROTOCOL,
-                        match_type: FWP_MATCH_EQUAL,
-                        _pad: 0,
-                        condition_value: FwpConditionValue0 {
-                            type_: FWP_UINT8,
+                    ];
+                    if let Ok(id) = install_filter(
+                        &format!("Permit-KillSwitchAppId-Loopback-{tag}"),
+                        layer,
+                        layer_name,
+                        FWP_ACTION_PERMIT,
+                        15,
+                        &mut cond_app_v6,
+                    ) {
+                        filter_ids.push(id);
+                    }
+                }
+            }
+
+            // 3. PERMIT STRICT BOUND CONTROL / WEBUI PORTS ON EXACT LOCALHOST ONLY (TCP, 127.0.0.1 / ::1)
+            //    Notice we do NOT open blanket loopback or 1080/8080/9050/445/53. Both local and remote
+            //    addresses must strictly equal 127.0.0.1 / ::1 and match TCP + explicit control port.
+            for ctrl_port in allowed_ports {
+                for (layer, layer_name, tag) in [
+                    (
+                        FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4,
+                        "ALE_AUTH_RECV_ACCEPT_V4",
+                        "ALE-In",
+                    ),
+                    (
+                        FWPM_LAYER_INBOUND_TRANSPORT_V4,
+                        "INBOUND_TRANSPORT_V4",
+                        "Transport-In",
+                    ),
+                ] {
+                    let mut cond_ctrl_in_v4 = [
+                        FwpmFilterCondition0 {
+                            field_key: FWPM_CONDITION_IP_LOCAL_PORT,
+                            match_type: FWP_MATCH_EQUAL,
                             _pad: 0,
-                            value: 6, // IPPROTO_TCP
+                            condition_value: FwpConditionValue0 {
+                                type_: FWP_UINT16,
+                                _pad: 0,
+                                value: ctrl_port as usize,
+                            },
                         },
-                    },
-                ];
-                if let Ok(id) = install_filter(
-                    &format!("Permit-ControlPort{}-Local-In-v6", ctrl_port),
-                    FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6,
-                    "ALE_AUTH_RECV_ACCEPT_V6",
-                    FWP_ACTION_PERMIT,
-                    15,
-                    &mut cond_port_in_v6,
-                ) {
-                    filter_ids.push(id);
+                        FwpmFilterCondition0 {
+                            field_key: FWPM_CONDITION_IP_LOCAL_ADDRESS,
+                            match_type: FWP_MATCH_EQUAL,
+                            _pad: 0,
+                            condition_value: FwpConditionValue0 {
+                                type_: FWP_UINT32,
+                                _pad: 0,
+                                value: loopback_v4_be as usize,
+                            },
+                        },
+                        FwpmFilterCondition0 {
+                            field_key: FWPM_CONDITION_IP_REMOTE_ADDRESS,
+                            match_type: FWP_MATCH_EQUAL,
+                            _pad: 0,
+                            condition_value: FwpConditionValue0 {
+                                type_: FWP_UINT32,
+                                _pad: 0,
+                                value: loopback_v4_be as usize,
+                            },
+                        },
+                        FwpmFilterCondition0 {
+                            field_key: FWPM_CONDITION_IP_PROTOCOL,
+                            match_type: FWP_MATCH_EQUAL,
+                            _pad: 0,
+                            condition_value: FwpConditionValue0 {
+                                type_: FWP_UINT8,
+                                _pad: 0,
+                                value: 6,
+                            },
+                        },
+                    ];
+                    if let Ok(id) = install_filter(
+                        &format!("Permit-ControlPort{ctrl_port}-Local-{tag}-v4"),
+                        layer,
+                        layer_name,
+                        FWP_ACTION_PERMIT,
+                        15,
+                        &mut cond_ctrl_in_v4,
+                    ) {
+                        filter_ids.push(id);
+                    }
+                }
+
+                for (layer, layer_name, tag) in [
+                    (
+                        FWPM_LAYER_ALE_AUTH_CONNECT_V4,
+                        "ALE_AUTH_CONNECT_V4",
+                        "ALE-Out",
+                    ),
+                    (
+                        FWPM_LAYER_OUTBOUND_TRANSPORT_V4,
+                        "OUTBOUND_TRANSPORT_V4",
+                        "Transport-Out",
+                    ),
+                ] {
+                    let mut cond_ctrl_out_v4 = [
+                        FwpmFilterCondition0 {
+                            field_key: FWPM_CONDITION_IP_REMOTE_PORT,
+                            match_type: FWP_MATCH_EQUAL,
+                            _pad: 0,
+                            condition_value: FwpConditionValue0 {
+                                type_: FWP_UINT16,
+                                _pad: 0,
+                                value: ctrl_port as usize,
+                            },
+                        },
+                        FwpmFilterCondition0 {
+                            field_key: FWPM_CONDITION_IP_LOCAL_ADDRESS,
+                            match_type: FWP_MATCH_EQUAL,
+                            _pad: 0,
+                            condition_value: FwpConditionValue0 {
+                                type_: FWP_UINT32,
+                                _pad: 0,
+                                value: loopback_v4_be as usize,
+                            },
+                        },
+                        FwpmFilterCondition0 {
+                            field_key: FWPM_CONDITION_IP_REMOTE_ADDRESS,
+                            match_type: FWP_MATCH_EQUAL,
+                            _pad: 0,
+                            condition_value: FwpConditionValue0 {
+                                type_: FWP_UINT32,
+                                _pad: 0,
+                                value: loopback_v4_be as usize,
+                            },
+                        },
+                        FwpmFilterCondition0 {
+                            field_key: FWPM_CONDITION_IP_PROTOCOL,
+                            match_type: FWP_MATCH_EQUAL,
+                            _pad: 0,
+                            condition_value: FwpConditionValue0 {
+                                type_: FWP_UINT8,
+                                _pad: 0,
+                                value: 6,
+                            },
+                        },
+                    ];
+                    if let Ok(id) = install_filter(
+                        &format!("Permit-ControlPort{ctrl_port}-Local-{tag}-v4"),
+                        layer,
+                        layer_name,
+                        FWP_ACTION_PERMIT,
+                        15,
+                        &mut cond_ctrl_out_v4,
+                    ) {
+                        filter_ids.push(id);
+                    }
+                }
+
+                for (layer, layer_name, tag) in [
+                    (
+                        FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6,
+                        "ALE_AUTH_RECV_ACCEPT_V6",
+                        "ALE-In",
+                    ),
+                    (
+                        FWPM_LAYER_INBOUND_TRANSPORT_V6,
+                        "INBOUND_TRANSPORT_V6",
+                        "Transport-In",
+                    ),
+                ] {
+                    let mut cond_ctrl_in_v6 = [
+                        FwpmFilterCondition0 {
+                            field_key: FWPM_CONDITION_IP_LOCAL_PORT,
+                            match_type: FWP_MATCH_EQUAL,
+                            _pad: 0,
+                            condition_value: FwpConditionValue0 {
+                                type_: FWP_UINT16,
+                                _pad: 0,
+                                value: ctrl_port as usize,
+                            },
+                        },
+                        FwpmFilterCondition0 {
+                            field_key: FWPM_CONDITION_IP_LOCAL_ADDRESS,
+                            match_type: FWP_MATCH_EQUAL,
+                            _pad: 0,
+                            condition_value: FwpConditionValue0 {
+                                type_: FWP_BYTE_ARRAY16_TYPE,
+                                _pad: 0,
+                                value: loopback_v6_bytes.as_ptr() as usize,
+                            },
+                        },
+                        FwpmFilterCondition0 {
+                            field_key: FWPM_CONDITION_IP_REMOTE_ADDRESS,
+                            match_type: FWP_MATCH_EQUAL,
+                            _pad: 0,
+                            condition_value: FwpConditionValue0 {
+                                type_: FWP_BYTE_ARRAY16_TYPE,
+                                _pad: 0,
+                                value: loopback_v6_bytes.as_ptr() as usize,
+                            },
+                        },
+                        FwpmFilterCondition0 {
+                            field_key: FWPM_CONDITION_IP_PROTOCOL,
+                            match_type: FWP_MATCH_EQUAL,
+                            _pad: 0,
+                            condition_value: FwpConditionValue0 {
+                                type_: FWP_UINT8,
+                                _pad: 0,
+                                value: 6,
+                            },
+                        },
+                    ];
+                    if let Ok(id) = install_filter(
+                        &format!("Permit-ControlPort{ctrl_port}-Local-{tag}-v6"),
+                        layer,
+                        layer_name,
+                        FWP_ACTION_PERMIT,
+                        15,
+                        &mut cond_ctrl_in_v6,
+                    ) {
+                        filter_ids.push(id);
+                    }
+                }
+
+                for (layer, layer_name, tag) in [
+                    (
+                        FWPM_LAYER_ALE_AUTH_CONNECT_V6,
+                        "ALE_AUTH_CONNECT_V6",
+                        "ALE-Out",
+                    ),
+                    (
+                        FWPM_LAYER_OUTBOUND_TRANSPORT_V6,
+                        "OUTBOUND_TRANSPORT_V6",
+                        "Transport-Out",
+                    ),
+                ] {
+                    let mut cond_ctrl_out_v6 = [
+                        FwpmFilterCondition0 {
+                            field_key: FWPM_CONDITION_IP_REMOTE_PORT,
+                            match_type: FWP_MATCH_EQUAL,
+                            _pad: 0,
+                            condition_value: FwpConditionValue0 {
+                                type_: FWP_UINT16,
+                                _pad: 0,
+                                value: ctrl_port as usize,
+                            },
+                        },
+                        FwpmFilterCondition0 {
+                            field_key: FWPM_CONDITION_IP_LOCAL_ADDRESS,
+                            match_type: FWP_MATCH_EQUAL,
+                            _pad: 0,
+                            condition_value: FwpConditionValue0 {
+                                type_: FWP_BYTE_ARRAY16_TYPE,
+                                _pad: 0,
+                                value: loopback_v6_bytes.as_ptr() as usize,
+                            },
+                        },
+                        FwpmFilterCondition0 {
+                            field_key: FWPM_CONDITION_IP_REMOTE_ADDRESS,
+                            match_type: FWP_MATCH_EQUAL,
+                            _pad: 0,
+                            condition_value: FwpConditionValue0 {
+                                type_: FWP_BYTE_ARRAY16_TYPE,
+                                _pad: 0,
+                                value: loopback_v6_bytes.as_ptr() as usize,
+                            },
+                        },
+                        FwpmFilterCondition0 {
+                            field_key: FWPM_CONDITION_IP_PROTOCOL,
+                            match_type: FWP_MATCH_EQUAL,
+                            _pad: 0,
+                            condition_value: FwpConditionValue0 {
+                                type_: FWP_UINT8,
+                                _pad: 0,
+                                value: 6,
+                            },
+                        },
+                    ];
+                    if let Ok(id) = install_filter(
+                        &format!("Permit-ControlPort{ctrl_port}-Local-{tag}-v6"),
+                        layer,
+                        layer_name,
+                        FWP_ACTION_PERMIT,
+                        15,
+                        &mut cond_ctrl_out_v6,
+                    ) {
+                        filter_ids.push(id);
+                    }
                 }
             }
 
@@ -2095,7 +2426,7 @@ impl WfpDynamicSession {
 
         #[cfg(not(windows))]
         {
-            let _ = rule_prefix;
+            let _ = (rule_prefix, custom_ports);
             Ok(vec![1001, 1002, 1003])
         }
     }
@@ -2400,7 +2731,11 @@ pub fn apply_native_bfe_registry_rule(
     }
 }
 
-/// Applies all standard BFE registry rules for Hermetic Network Quarantine.
+/// Applies hard-isolated BFE registry rules for Hermetic Network Quarantine.
+/// Strictly permits ONLY inbound/outbound TCP on exact localhost (`127.0.0.1` / `::1`)
+/// for bound KillSwitch control port(s), while explicitly blocking non-`127.0.0.1`
+/// loopback aliases (`127.0.0.2-127.255.255.255`), cloud IMDS (`169.254.169.254`),
+/// local proxy ports (`1080/3128/8080/8888/9050`), lateral SMB/WinRM, and DNS/DoT/DHCP.
 pub fn apply_bfe_registry_quarantine_rules() -> Vec<String> {
     #[cfg(windows)]
     {
@@ -2415,20 +2750,16 @@ pub fn apply_bfe_registry_quarantine_rules() -> Vec<String> {
 
         let rules = [
             (
-                "KillSwitch-Allow-Loopback-In",
-                "v2.31|Action=Allow|Active=TRUE|Dir=In|RA4=127.0.0.1|RA6=::1|Name=KillSwitch-Allow-Loopback-In|Desc=KillSwitch Loopback Inbound|",
+                "KillSwitch-Block-Loopback-Subrange-In",
+                "v2.31|Action=Block|Active=TRUE|Dir=In|RA4=127.0.0.2-127.255.255.255|Name=KillSwitch-Block-Loopback-Subrange-In|Desc=KillSwitch Block 127.x.x.x Loopback Alias Inbound|",
             ),
             (
-                "KillSwitch-Allow-Loopback-Out",
-                "v2.31|Action=Allow|Active=TRUE|Dir=Out|RA4=127.0.0.1|RA6=::1|Name=KillSwitch-Allow-Loopback-Out|Desc=KillSwitch Loopback Outbound|",
+                "KillSwitch-Block-Loopback-Subrange-Out",
+                "v2.31|Action=Block|Active=TRUE|Dir=Out|RA4=127.0.0.2-127.255.255.255|Name=KillSwitch-Block-Loopback-Subrange-Out|Desc=KillSwitch Block 127.x.x.x Loopback Alias Outbound|",
             ),
             (
-                "KillSwitch-Allow-WebUI-In",
-                "v2.31|Action=Allow|Active=TRUE|Dir=In|Protocol=6|LPort=3030|RA4=127.0.0.1|RA6=::1|Name=KillSwitch-Allow-WebUI-In|Desc=KillSwitch Control API Inbound Localhost|",
-            ),
-            (
-                "KillSwitch-Allow-WebUI-Out",
-                "v2.31|Action=Allow|Active=TRUE|Dir=Out|Protocol=6|LPort=3030|RA4=127.0.0.1|RA6=::1|Name=KillSwitch-Allow-WebUI-Out|Desc=KillSwitch Control API Outbound Localhost|",
+                "KillSwitch-Block-IMDS-Out",
+                "v2.31|Action=Block|Active=TRUE|Dir=Out|RA4=169.254.169.254|Name=KillSwitch-Block-IMDS-Out|Desc=KillSwitch Block Cloud Instance Metadata|",
             ),
             (
                 "KillSwitch-Block-Inbound-Low",
@@ -2454,6 +2785,18 @@ pub fn apply_bfe_registry_quarantine_rules() -> Vec<String> {
                 "KillSwitch-Block-Outbound-v6",
                 "v2.31|Action=Block|Active=TRUE|Dir=Out|RA6=::-::0,::2-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff|Name=KillSwitch-Block-Outbound-v6|Desc=KillSwitch Block Outbound IPv6|",
             ),
+            (
+                "KillSwitch-Block-Port53-UDP-Out",
+                "v2.31|Action=Block|Active=TRUE|Dir=Out|Protocol=17|RPort=53|Name=KillSwitch-Block-Port53-UDP-Out|Desc=KillSwitch Block UDP Port 53 Exfil|",
+            ),
+            (
+                "KillSwitch-Block-Port53-TCP-Out",
+                "v2.31|Action=Block|Active=TRUE|Dir=Out|Protocol=6|RPort=53|Name=KillSwitch-Block-Port53-TCP-Out|Desc=KillSwitch Block TCP Port 53 Exfil|",
+            ),
+            (
+                "KillSwitch-Block-Port853-DoT-Out",
+                "v2.31|Action=Block|Active=TRUE|Dir=Out|Protocol=6|RPort=853|Name=KillSwitch-Block-Port853-DoT-Out|Desc=KillSwitch Block DoT Port 853|",
+            ),
         ];
 
         let mut applied = Vec::new();
@@ -2462,22 +2805,39 @@ pub fn apply_bfe_registry_quarantine_rules() -> Vec<String> {
                 applied.push(name.to_string());
             }
         }
-        for ctrl_port in discover_active_control_ports() {
-            if ctrl_port == 3030 {
-                continue;
+        for blocked_port in QUARANTINE_BLOCKED_LOOPBACK_PROXY_PORTS
+            .iter()
+            .chain(QUARANTINE_BLOCKED_LATERAL_PORTS.iter())
+        {
+            for dir in ["In", "Out"] {
+                let r_name = format!("KillSwitch-Block-Port{}-{}", blocked_port, dir);
+                let r_val = format!(
+                    "v2.31|Action=Block|Active=TRUE|Dir={dir}|Protocol=6|RPort={blocked_port}|Name={r_name}|Desc=KillSwitch Block Proxy or Lateral Port {blocked_port}|",
+                );
+                if fw_key.set_value(&r_name, &r_val).is_ok() {
+                    applied.push(r_name);
+                }
             }
-            let r_in_name = format!("KillSwitch-Allow-WebUI-{}-In", ctrl_port);
+        }
+        for ctrl_port in discover_firewall_bound_control_ports() {
+            let r_in_name = if ctrl_port == DEFAULT_CONTROL_PORT {
+                "KillSwitch-Allow-WebUI-In".to_string()
+            } else {
+                format!("KillSwitch-Allow-WebUI-{}-In", ctrl_port)
+            };
             let r_in_val = format!(
-                "v2.31|Action=Allow|Active=TRUE|Dir=In|Protocol=6|LPort={}|RA4=127.0.0.1|RA6=::1|Name={}|Desc=KillSwitch Control API Inbound Localhost|",
-                ctrl_port, r_in_name
+                "v2.31|Action=Allow|Active=TRUE|Dir=In|Protocol=6|LPort={ctrl_port}|RA4=127.0.0.1|RA6=::1|Name={r_in_name}|Desc=KillSwitch Control API Inbound Exact Localhost|",
             );
             if fw_key.set_value(&r_in_name, &r_in_val).is_ok() {
                 applied.push(r_in_name);
             }
-            let r_out_name = format!("KillSwitch-Allow-WebUI-{}-Out", ctrl_port);
+            let r_out_name = if ctrl_port == DEFAULT_CONTROL_PORT {
+                "KillSwitch-Allow-WebUI-Out".to_string()
+            } else {
+                format!("KillSwitch-Allow-WebUI-{}-Out", ctrl_port)
+            };
             let r_out_val = format!(
-                "v2.31|Action=Allow|Active=TRUE|Dir=Out|Protocol=6|LPort={}|RA4=127.0.0.1|RA6=::1|Name={}|Desc=KillSwitch Control API Outbound Localhost|",
-                ctrl_port, r_out_name
+                "v2.31|Action=Allow|Active=TRUE|Dir=Out|Protocol=6|LPort={ctrl_port}|RA4=127.0.0.1|RA6=::1|Name={r_out_name}|Desc=KillSwitch Control API Outbound Exact Localhost|",
             );
             if fw_key.set_value(&r_out_name, &r_out_val).is_ok() {
                 applied.push(r_out_name);
@@ -2491,7 +2851,10 @@ pub fn apply_bfe_registry_quarantine_rules() -> Vec<String> {
     }
     #[cfg(not(windows))]
     {
-        vec!["KillSwitch-Allow-Loopback-In".to_string()]
+        vec![
+            "KillSwitch-Allow-WebUI-In".to_string(),
+            "KillSwitch-Allow-WebUI-Out".to_string(),
+        ]
     }
 }
 
@@ -2544,81 +2907,272 @@ pub fn remove_all_killswitch_bfe_registry_rules() -> usize {
 }
 
 // -----------------------------------------------------------------------------
-// Direct TCP Socket Termination (`iphlpapi.dll`)
+// Direct TCP / UDP Socket Inspection & Termination (`iphlpapi.dll`)
 // -----------------------------------------------------------------------------
-/// Terminates all active non-loopback TCP connections in states `3 | 4 | 5 | 8`
-/// via `iphlpapi.dll` (`GetTcpTable` + `SetTcpEntry` with `MIB_TCP_STATE_DELETE_TCB = 12`).
-/// Preserves loopback (`127.0.0.0/8`) and local control port `3030`.
-pub fn terminate_all_non_loopback_tcp_sockets() -> usize {
-    #[cfg(windows)]
-    {
+#[cfg(any(windows, test))]
+#[inline]
+fn is_exact_localhost_v4(octets: [u8; 4]) -> bool {
+    octets == [127, 0, 0, 1]
+}
+
+#[cfg(any(windows, test))]
+#[inline]
+fn is_exact_localhost_v6(octets: [u8; 16]) -> bool {
+    let addr = Ipv6Addr::from(octets);
+    addr == Ipv6Addr::LOCALHOST || addr.to_ipv4_mapped() == Some(Ipv4Addr::LOCALHOST)
+}
+
+#[cfg(windows)]
+#[inline]
+fn is_blocked_proxy_port(port: u16, preserved_ports: &[u16]) -> bool {
+    !preserved_ports.contains(&port) && QUARANTINE_BLOCKED_LOOPBACK_PROXY_PORTS.contains(&port)
+}
+
+#[cfg(windows)]
+struct IphlpApi {
+    fn_get_tcp: Option<FnGetTcpTable>,
+    fn_set_tcp: Option<FnSetTcpEntry>,
+    fn_get_tcp6: Option<FnGetTcp6Table>,
+    fn_set_tcp6: Option<FnSetTcp6Entry>,
+    fn_get_ext_tcp: Option<FnGetExtendedTcpTable>,
+    fn_get_ext_udp: Option<FnGetExtendedUdpTable>,
+}
+
+#[cfg(windows)]
+impl IphlpApi {
+    fn load() -> Option<Self> {
         use windows::core::{PCSTR, PCWSTR};
         use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 
         let dll_name: Vec<u16> = "iphlpapi.dll\0".encode_utf16().collect();
-        let Ok(h_mod) = (unsafe { LoadLibraryW(PCWSTR(dll_name.as_ptr())) }) else {
-            return 0;
-        };
+        let h_mod = unsafe { LoadLibraryW(PCWSTR(dll_name.as_ptr())) }.ok()?;
 
-        let Some(p_get) = (unsafe { GetProcAddress(h_mod, PCSTR(c"GetTcpTable".as_ptr().cast())) })
-        else {
-            return 0;
-        };
-        let Some(p_set) = (unsafe { GetProcAddress(h_mod, PCSTR(c"SetTcpEntry".as_ptr().cast())) })
-        else {
-            return 0;
-        };
+        unsafe {
+            let fn_get_tcp = GetProcAddress(h_mod, PCSTR(c"GetTcpTable".as_ptr().cast()))
+                .map(|p| std::mem::transmute((p as usize) as *const ()));
+            let fn_set_tcp = GetProcAddress(h_mod, PCSTR(c"SetTcpEntry".as_ptr().cast()))
+                .map(|p| std::mem::transmute((p as usize) as *const ()));
+            let fn_get_tcp6 = GetProcAddress(h_mod, PCSTR(c"GetTcp6Table".as_ptr().cast()))
+                .map(|p| std::mem::transmute((p as usize) as *const ()));
+            let fn_set_tcp6 = GetProcAddress(h_mod, PCSTR(c"SetTcp6Entry".as_ptr().cast()))
+                .map(|p| std::mem::transmute((p as usize) as *const ()));
+            let fn_get_ext_tcp =
+                GetProcAddress(h_mod, PCSTR(c"GetExtendedTcpTable".as_ptr().cast()))
+                    .map(|p| std::mem::transmute((p as usize) as *const ()));
+            let fn_get_ext_udp =
+                GetProcAddress(h_mod, PCSTR(c"GetExtendedUdpTable".as_ptr().cast()))
+                    .map(|p| std::mem::transmute((p as usize) as *const ()));
 
-        let fn_get: FnGetTcpTable = unsafe { std::mem::transmute((p_get as usize) as *const ()) };
-        let fn_set: FnSetTcpEntry = unsafe { std::mem::transmute((p_set as usize) as *const ()) };
+            Some(Self {
+                fn_get_tcp,
+                fn_set_tcp,
+                fn_get_tcp6,
+                fn_set_tcp6,
+                fn_get_ext_tcp,
+                fn_get_ext_udp,
+            })
+        }
+    }
 
+    unsafe fn read_table_rows<T: Copy>(mut fetch: impl FnMut(*mut u8, *mut u32) -> u32) -> Vec<T> {
         let mut size: u32 = 0;
-        let first_status = unsafe { fn_get(std::ptr::null_mut(), &mut size, 0) };
-        if first_status != ERROR_INSUFFICIENT_BUFFER || size < 4 {
-            return 0;
+        if fetch(std::ptr::null_mut(), &mut size) != ERROR_INSUFFICIENT_BUFFER || size < 4 {
+            return Vec::new();
         }
-
-        // Pad buffer to handle connection churn between calls
-        let mut buf = vec![0u8; size as usize + 512];
+        let mut buf = vec![0u8; size as usize + 1024];
         let mut actual_size = buf.len() as u32;
-        let status = unsafe { fn_get(buf.as_mut_ptr(), &mut actual_size, 0) };
-        if status != ERROR_SUCCESS || actual_size < 4 {
-            return 0;
+        if fetch(buf.as_mut_ptr(), &mut actual_size) != ERROR_SUCCESS || actual_size < 4 {
+            return Vec::new();
         }
-
         let num_entries = u32::from_ne_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
-        let row_size = std::mem::size_of::<MibTcpRow>();
+        let row_size = std::mem::size_of::<T>();
         let max_entries = (buf.len().saturating_sub(4)) / row_size;
         let count = num_entries.min(max_entries);
-        let rows_ptr = unsafe { buf.as_ptr().add(4) as *const MibTcpRow };
+        let rows_ptr = buf.as_ptr().add(4) as *const T;
+        (0..count).map(|i| *rows_ptr.add(i)).collect()
+    }
 
-        let active_ctrl_ports = discover_active_control_ports();
+    fn tcp4_rows(&self) -> Vec<MibTcpRow> {
+        let Some(fn_get) = self.fn_get_tcp else {
+            return Vec::new();
+        };
+        unsafe { Self::read_table_rows(|ptr, sz| fn_get(ptr, sz, 0)) }
+    }
+
+    fn tcp6_rows(&self) -> Vec<MibTcp6Row> {
+        let Some(fn_get) = self.fn_get_tcp6 else {
+            return Vec::new();
+        };
+        unsafe { Self::read_table_rows(|ptr, sz| fn_get(ptr, sz, 0)) }
+    }
+
+    fn tcp6_owner_pids(&self) -> Vec<MibTcp6RowOwnerPid> {
+        let Some(fn_get) = self.fn_get_ext_tcp else {
+            return Vec::new();
+        };
+        unsafe {
+            Self::read_table_rows(|ptr, sz| {
+                fn_get(ptr, sz, 0, AF_INET6, TCP_TABLE_OWNER_PID_ALL, 0)
+            })
+        }
+    }
+
+    fn udp4_owner_pids(&self) -> Vec<MibUdpRowOwnerPid> {
+        let Some(fn_get) = self.fn_get_ext_udp else {
+            return Vec::new();
+        };
+        unsafe {
+            Self::read_table_rows(|ptr, sz| fn_get(ptr, sz, 0, AF_INET, UDP_TABLE_OWNER_PID, 0))
+        }
+    }
+
+    fn udp6_owner_pids(&self) -> Vec<MibUdp6RowOwnerPid> {
+        let Some(fn_get) = self.fn_get_ext_udp else {
+            return Vec::new();
+        };
+        unsafe {
+            Self::read_table_rows(|ptr, sz| fn_get(ptr, sz, 0, AF_INET6, UDP_TABLE_OWNER_PID, 0))
+        }
+    }
+}
+
+#[cfg(windows)]
+fn terminate_tracked_socket_owner_pid(pid: u32) -> bool {
+    if pid <= 4 || pid == std::process::id() {
+        return false;
+    }
+    if !crate::agent_registry::TrackedAgentTreeRegistry::global().is_tracked_pid(pid) {
+        return false;
+    }
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+
+    unsafe {
+        let Ok(handle) = OpenProcess(PROCESS_TERMINATE, false, pid) else {
+            return false;
+        };
+        let ok = TerminateProcess(handle, 1).is_ok();
+        let _ = CloseHandle(handle);
+        ok
+    }
+}
+
+/// Terminates all active non-localhost TCP connections (`3 | 4 | 5 | 8`), `127.0.0.2+`
+/// loopback aliases, local proxy-port tunnels (`1080/3128/8080/8888/9050`), IPv6 connections
+/// (via `SetTcp6Entry` when exported + tracked agent owner PID teardown), and non-localhost
+/// UDP sockets owned by tracked agent PIDs via `iphlpapi.dll`.
+/// Preserves exact localhost (`127.0.0.1` / `::1`) non-proxy and sanitized control-port sockets.
+pub fn terminate_all_non_loopback_tcp_sockets() -> usize {
+    #[cfg(windows)]
+    {
+        let Some(api) = IphlpApi::load() else {
+            return 0;
+        };
+        let preserved_ports = sanitize_firewall_preserved_ports(&[]);
         let mut terminated = 0usize;
-        for i in 0..count {
-            let row = unsafe { *rows_ptr.add(i) };
-            let local_octets = row.dw_local_addr.to_ne_bytes();
-            let remote_octets = row.dw_remote_addr.to_ne_bytes();
-            let local_port = u16::from_be((row.dw_local_port & 0xFFFF) as u16);
-            let remote_port = u16::from_be((row.dw_remote_port & 0xFFFF) as u16);
 
-            // Invariant 1: Preserve loopback traffic (127.0.0.0/8)
-            let is_loopback = local_octets[0] == 127 || remote_octets[0] == 127;
-            // Invariant 2: Preserve all active control/WebUI ports (3030, 4040, active_port.txt)
-            let is_control_port =
-                active_ctrl_ports.contains(&local_port) || active_ctrl_ports.contains(&remote_port);
-            // Invariant 3: Target half-open and established states
-            let is_target_state = matches!(row.dw_state, 3 | 4 | 5 | 8);
+        if let Some(fn_set) = api.fn_set_tcp {
+            for row in api.tcp4_rows() {
+                if !matches!(row.dw_state, 3 | 4 | 5 | 8) {
+                    continue;
+                }
+                let local_octets = row.dw_local_addr.to_ne_bytes();
+                let remote_octets = row.dw_remote_addr.to_ne_bytes();
+                let local_port = u16::from_be((row.dw_local_port & 0xFFFF) as u16);
+                let remote_port = u16::from_be((row.dw_remote_port & 0xFFFF) as u16);
 
-            if is_target_state && !is_loopback && !is_control_port {
-                let mut reset_row = row;
-                reset_row.dw_state = MIB_TCP_STATE_DELETE_TCB;
-                if unsafe { fn_set(&reset_row) } == ERROR_SUCCESS {
-                    terminated += 1;
+                let both_exact_localhost =
+                    is_exact_localhost_v4(local_octets) && is_exact_localhost_v4(remote_octets);
+                let is_control_port =
+                    preserved_ports.contains(&local_port) || preserved_ports.contains(&remote_port);
+                let hits_proxy_port = is_blocked_proxy_port(local_port, &preserved_ports)
+                    || is_blocked_proxy_port(remote_port, &preserved_ports);
+
+                let should_terminate =
+                    !both_exact_localhost || (!is_control_port && hits_proxy_port);
+                if should_terminate {
+                    let mut reset_row = row;
+                    reset_row.dw_state = MIB_TCP_STATE_DELETE_TCB;
+                    if unsafe { fn_set(&reset_row) } == ERROR_SUCCESS {
+                        terminated += 1;
+                    }
                 }
             }
         }
+
+        if let Some(fn_set6) = api.fn_set_tcp6 {
+            for row in api.tcp6_rows() {
+                if !matches!(row.state, 3 | 4 | 5 | 8) {
+                    continue;
+                }
+                let local_port = u16::from_be((row.dw_local_port & 0xFFFF) as u16);
+                let remote_port = u16::from_be((row.dw_remote_port & 0xFFFF) as u16);
+                let both_exact_localhost = is_exact_localhost_v6(row.uc_local_addr)
+                    && is_exact_localhost_v6(row.uc_remote_addr);
+                let is_control_port =
+                    preserved_ports.contains(&local_port) || preserved_ports.contains(&remote_port);
+                let hits_proxy_port = is_blocked_proxy_port(local_port, &preserved_ports)
+                    || is_blocked_proxy_port(remote_port, &preserved_ports);
+
+                if !both_exact_localhost || (!is_control_port && hits_proxy_port) {
+                    let mut reset_row = row;
+                    reset_row.state = MIB_TCP_STATE_DELETE_TCB;
+                    if unsafe { fn_set6(&reset_row) } == ERROR_SUCCESS {
+                        terminated += 1;
+                    }
+                }
+            }
+        }
+
+        // Sever tracked agent PIDs holding non-localhost IPv6 TCP or UDP sockets that lack Set*Entry deletion.
+        let mut killed_pids = std::collections::HashSet::new();
+        for row in api.tcp6_owner_pids() {
+            if !matches!(row.dw_state, 3 | 4 | 5 | 8) || killed_pids.contains(&row.dw_owning_pid) {
+                continue;
+            }
+            let both_exact_localhost = is_exact_localhost_v6(row.uc_local_addr)
+                && is_exact_localhost_v6(row.uc_remote_addr);
+            let local_port = u16::from_be((row.dw_local_port & 0xFFFF) as u16);
+            let remote_port = u16::from_be((row.dw_remote_port & 0xFFFF) as u16);
+            let hits_proxy = is_blocked_proxy_port(local_port, &preserved_ports)
+                || is_blocked_proxy_port(remote_port, &preserved_ports);
+            if (!both_exact_localhost || hits_proxy)
+                && terminate_tracked_socket_owner_pid(row.dw_owning_pid)
+            {
+                killed_pids.insert(row.dw_owning_pid);
+                terminated += 1;
+            }
+        }
+        for row in api.udp4_owner_pids() {
+            if killed_pids.contains(&row.dw_owning_pid) {
+                continue;
+            }
+            let local_octets = row.dw_local_addr.to_ne_bytes();
+            let local_port = u16::from_be((row.dw_local_port & 0xFFFF) as u16);
+            if (!is_exact_localhost_v4(local_octets)
+                || QUARANTINE_BLOCKED_DISCOVERY_PORTS.contains(&local_port))
+                && terminate_tracked_socket_owner_pid(row.dw_owning_pid)
+            {
+                killed_pids.insert(row.dw_owning_pid);
+                terminated += 1;
+            }
+        }
+        for row in api.udp6_owner_pids() {
+            if killed_pids.contains(&row.dw_owning_pid) {
+                continue;
+            }
+            let local_port = u16::from_be((row.dw_local_port & 0xFFFF) as u16);
+            if (!is_exact_localhost_v6(row.uc_local_addr)
+                || QUARANTINE_BLOCKED_DISCOVERY_PORTS.contains(&local_port))
+                && terminate_tracked_socket_owner_pid(row.dw_owning_pid)
+            {
+                killed_pids.insert(row.dw_owning_pid);
+                terminated += 1;
+            }
+        }
+
         info!(
-            "⚡ [TCP-RESET] Terminated {} active non-loopback TCP connections",
+            "⚡ [TCP-RESET] Terminated {} active non-localhost TCP/UDP agent connections",
             terminated
         );
         terminated
@@ -2629,61 +3183,36 @@ pub fn terminate_all_non_loopback_tcp_sockets() -> usize {
     }
 }
 
-/// Inspects the OS TCP connection table (`GetTcpTable` on Windows, `/proc/net/tcp` on Linux)
-/// and returns `(active_non_loopback_peer_connections_count, remote_peer_endpoints_sample)`.
+/// Inspects OS IPv4 + IPv6 TCP connection tables (`GetTcpTable`/`GetTcp6Table` on Windows,
+/// `/proc/net/tcp` + `/proc/net/tcp6` on Linux) and returns
+/// `(active_non_loopback_peer_connections_count, remote_peer_endpoints_sample)`.
 pub fn count_active_non_loopback_tcp_peers() -> (usize, Vec<String>) {
     #[cfg(windows)]
     {
-        use windows::core::{PCSTR, PCWSTR};
-        use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
-
-        let dll_name: Vec<u16> = "iphlpapi.dll\0".encode_utf16().collect();
-        let Ok(h_mod) = (unsafe { LoadLibraryW(PCWSTR(dll_name.as_ptr())) }) else {
+        let Some(api) = IphlpApi::load() else {
             return (0, Vec::new());
         };
-        let Some(p_get) = (unsafe { GetProcAddress(h_mod, PCSTR(c"GetTcpTable".as_ptr().cast())) })
-        else {
-            return (0, Vec::new());
-        };
-        let fn_get: FnGetTcpTable = unsafe { std::mem::transmute((p_get as usize) as *const ()) };
-
-        let mut size: u32 = 0;
-        let first_status = unsafe { fn_get(std::ptr::null_mut(), &mut size, 0) };
-        if first_status != ERROR_INSUFFICIENT_BUFFER || size < 4 {
-            return (0, Vec::new());
-        }
-
-        let mut buf = vec![0u8; size as usize + 512];
-        let mut actual_size = buf.len() as u32;
-        let status = unsafe { fn_get(buf.as_mut_ptr(), &mut actual_size, 0) };
-        if status != ERROR_SUCCESS || actual_size < 4 {
-            return (0, Vec::new());
-        }
-
-        let num_entries = u32::from_ne_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
-        let row_size = std::mem::size_of::<MibTcpRow>();
-        let max_entries = (buf.len().saturating_sub(4)) / row_size;
-        let count = num_entries.min(max_entries);
-        let rows_ptr = unsafe { buf.as_ptr().add(4) as *const MibTcpRow };
-
-        let active_ctrl_ports = discover_active_control_ports();
+        let preserved_ports = sanitize_firewall_preserved_ports(&[]);
         let mut active_count = 0usize;
         let mut peers = Vec::new();
 
-        for i in 0..count {
-            let row = unsafe { *rows_ptr.add(i) };
+        for row in api.tcp4_rows() {
+            if !matches!(row.dw_state, 3 | 4 | 5 | 8) {
+                continue;
+            }
             let local_octets = row.dw_local_addr.to_ne_bytes();
             let remote_octets = row.dw_remote_addr.to_ne_bytes();
             let local_port = u16::from_be((row.dw_local_port & 0xFFFF) as u16);
             let remote_port = u16::from_be((row.dw_remote_port & 0xFFFF) as u16);
 
-            let is_loopback =
-                local_octets[0] == 127 || remote_octets[0] == 127 || remote_octets == [0, 0, 0, 0];
-            let is_control_port =
-                active_ctrl_ports.contains(&local_port) || active_ctrl_ports.contains(&remote_port);
-            let is_active_state = matches!(row.dw_state, 3 | 4 | 5 | 8);
+            let is_localhost_or_unspecified = (is_exact_localhost_v4(local_octets)
+                && is_exact_localhost_v4(remote_octets))
+                || remote_octets == [0, 0, 0, 0];
+            let is_control_port = (preserved_ports.contains(&local_port)
+                || preserved_ports.contains(&remote_port))
+                && is_exact_localhost_v4(remote_octets);
 
-            if is_active_state && !is_loopback && !is_control_port {
+            if !is_localhost_or_unspecified && !is_control_port {
                 active_count += 1;
                 if peers.len() < 20 {
                     let ep = format!(
@@ -2700,21 +3229,58 @@ pub fn count_active_non_loopback_tcp_peers() -> (usize, Vec<String>) {
                 }
             }
         }
+
+        for row in api.tcp6_rows() {
+            if !matches!(row.state, 3 | 4 | 5 | 8) {
+                continue;
+            }
+            let remote_ip = Ipv6Addr::from(row.uc_remote_addr);
+            let local_port = u16::from_be((row.dw_local_port & 0xFFFF) as u16);
+            let remote_port = u16::from_be((row.dw_remote_port & 0xFFFF) as u16);
+            let is_localhost_or_unspecified = (is_exact_localhost_v6(row.uc_local_addr)
+                && is_exact_localhost_v6(row.uc_remote_addr))
+                || remote_ip.is_unspecified();
+            let is_control_port = (preserved_ports.contains(&local_port)
+                || preserved_ports.contains(&remote_port))
+                && is_exact_localhost_v6(row.uc_remote_addr);
+
+            if !is_localhost_or_unspecified && !is_control_port {
+                active_count += 1;
+                if peers.len() < 20 {
+                    let ep = format!("[{}]:{}", remote_ip, remote_port);
+                    if !peers.contains(&ep) {
+                        peers.push(ep);
+                    }
+                }
+            }
+        }
         (active_count, peers)
     }
     #[cfg(target_os = "linux")]
     {
         let mut active_count = 0usize;
         let mut peers = Vec::new();
-        if let Ok(raw) = std::fs::read_to_string("/proc/net/tcp") {
-            for line in raw.lines().skip(1) {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 4 && parts[3] == "01" {
-                    let rem = parts[2];
-                    if !rem.starts_with("0100007F:") && !rem.starts_with("00000000:") {
-                        active_count += 1;
-                        if peers.len() < 20 {
-                            peers.push(rem.to_string());
+        for (path, loopback_prefixes) in [
+            ("/proc/net/tcp", &["0100007F:", "00000000:"][..]),
+            (
+                "/proc/net/tcp6",
+                &[
+                    "00000000000000000000000001000000:",
+                    "00000000000000000000000000000000:",
+                    "0000000000000000FFFF00000100007F:",
+                ][..],
+            ),
+        ] {
+            if let Ok(raw) = std::fs::read_to_string(path) {
+                for line in raw.lines().skip(1) {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 4 && parts[3] == "01" {
+                        let rem = parts[2];
+                        if !loopback_prefixes.iter().any(|pfx| rem.starts_with(pfx)) {
+                            active_count += 1;
+                            if peers.len() < 20 {
+                                peers.push(rem.to_string());
+                            }
                         }
                     }
                 }
@@ -2728,13 +3294,11 @@ pub fn count_active_non_loopback_tcp_peers() -> (usize, Vec<String>) {
     }
 }
 
-/// Terminates active TCP connections destined for specific remote IP addresses.
+/// Terminates active IPv4 & IPv6 TCP connections destined for specific remote IP addresses.
 pub fn terminate_active_tcp_sockets_for_ips(ips: &[IpAddr]) -> usize {
     #[cfg(windows)]
     {
         use std::collections::HashSet;
-        use windows::core::{PCSTR, PCWSTR};
-        use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 
         let target_v4_addrs: HashSet<u32> = ips
             .iter()
@@ -2743,58 +3307,63 @@ pub fn terminate_active_tcp_sockets_for_ips(ips: &[IpAddr]) -> usize {
                 IpAddr::V6(_) => None,
             })
             .collect();
-        if target_v4_addrs.is_empty() {
+        let target_v6_addrs: HashSet<[u8; 16]> = ips
+            .iter()
+            .map(|ip| match ip {
+                IpAddr::V6(v6) => v6.octets(),
+                IpAddr::V4(v4) => v4.to_ipv6_mapped().octets(),
+            })
+            .collect();
+        if target_v4_addrs.is_empty() && target_v6_addrs.is_empty() {
             return 0;
         }
 
-        let dll_name: Vec<u16> = "iphlpapi.dll\0".encode_utf16().collect();
-        let Ok(h_mod) = (unsafe { LoadLibraryW(PCWSTR(dll_name.as_ptr())) }) else {
+        let Some(api) = IphlpApi::load() else {
             return 0;
         };
-
-        let Some(p_get) = (unsafe { GetProcAddress(h_mod, PCSTR(c"GetTcpTable".as_ptr().cast())) })
-        else {
-            return 0;
-        };
-        let Some(p_set) = (unsafe { GetProcAddress(h_mod, PCSTR(c"SetTcpEntry".as_ptr().cast())) })
-        else {
-            return 0;
-        };
-
-        let fn_get: FnGetTcpTable = unsafe { std::mem::transmute((p_get as usize) as *const ()) };
-        let fn_set: FnSetTcpEntry = unsafe { std::mem::transmute((p_set as usize) as *const ()) };
-
-        let mut size: u32 = 0;
-        let first_status = unsafe { fn_get(std::ptr::null_mut(), &mut size, 0) };
-        if first_status != ERROR_INSUFFICIENT_BUFFER || size < 4 {
-            return 0;
-        }
-
-        let mut buf = vec![0u8; size as usize + 256];
-        let mut actual_size = buf.len() as u32;
-        let status = unsafe { fn_get(buf.as_mut_ptr(), &mut actual_size, 0) };
-        if status != ERROR_SUCCESS || actual_size < 4 {
-            return 0;
-        }
-
-        let num_entries = u32::from_ne_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
-        let row_size = std::mem::size_of::<MibTcpRow>();
-        let max_entries = (buf.len().saturating_sub(4)) / row_size;
-        let count = num_entries.min(max_entries);
-        let rows_ptr = unsafe { buf.as_ptr().add(4) as *const MibTcpRow };
-
         let mut terminated = 0usize;
-        for i in 0..count {
-            let mut row = unsafe { *rows_ptr.add(i) };
-            if matches!(row.dw_state, 3 | 4 | 5 | 8)
-                && target_v4_addrs.contains(&row.dw_remote_addr)
-            {
-                row.dw_state = MIB_TCP_STATE_DELETE_TCB;
-                if unsafe { fn_set(&row) } == ERROR_SUCCESS {
+
+        if !target_v4_addrs.is_empty() {
+            if let Some(fn_set) = api.fn_set_tcp {
+                for mut row in api.tcp4_rows() {
+                    if matches!(row.dw_state, 3 | 4 | 5 | 8)
+                        && target_v4_addrs.contains(&row.dw_remote_addr)
+                    {
+                        row.dw_state = MIB_TCP_STATE_DELETE_TCB;
+                        if unsafe { fn_set(&row) } == ERROR_SUCCESS {
+                            terminated += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        if !target_v6_addrs.is_empty() {
+            if let Some(fn_set6) = api.fn_set_tcp6 {
+                for mut row in api.tcp6_rows() {
+                    if matches!(row.state, 3 | 4 | 5 | 8)
+                        && target_v6_addrs.contains(&row.uc_remote_addr)
+                    {
+                        row.state = MIB_TCP_STATE_DELETE_TCB;
+                        if unsafe { fn_set6(&row) } == ERROR_SUCCESS {
+                            terminated += 1;
+                        }
+                    }
+                }
+            }
+            let mut killed_pids = HashSet::new();
+            for row in api.tcp6_owner_pids() {
+                if matches!(row.dw_state, 3 | 4 | 5 | 8)
+                    && target_v6_addrs.contains(&row.uc_remote_addr)
+                    && !killed_pids.contains(&row.dw_owning_pid)
+                    && terminate_tracked_socket_owner_pid(row.dw_owning_pid)
+                {
+                    killed_pids.insert(row.dw_owning_pid);
                     terminated += 1;
                 }
             }
         }
+
         terminated
     }
     #[cfg(not(windows))]
@@ -2980,11 +3549,7 @@ pub fn engage_windows_network_quarantine_with_ports(
                     "Elevated helper did not record any installed WFP filter IDs".to_string(),
                 ));
             }
-            let preserved_ports = if !custom_ports.is_empty() {
-                custom_ports.to_vec()
-            } else {
-                discover_active_control_ports()
-            };
+            let preserved_ports = sanitize_firewall_preserved_ports(custom_ports);
             let preserved_ips = vec![
                 IpAddr::V4(Ipv4Addr::LOCALHOST),
                 IpAddr::V6(Ipv6Addr::LOCALHOST),
@@ -3047,8 +3612,9 @@ pub fn engage_windows_network_quarantine_with_ports(
             clear_persisted_wfp_filter_ids();
         }
 
+        let preserved_ports = sanitize_firewall_preserved_ports(custom_ports);
         let ids = session
-            .install_hermetic_quarantine_filters("KillSwitch")
+            .install_hermetic_quarantine_filters_with_ports("KillSwitch", &preserved_ports)
             .inspect_err(|_e| {
                 let _ = session.abort_transaction();
             })?;
@@ -3071,11 +3637,7 @@ pub fn engage_windows_network_quarantine_with_ports(
     let registry_rules = apply_bfe_registry_quarantine_rules();
     let terminated_tcp = terminate_all_non_loopback_tcp_sockets();
 
-    let preserved_ports = if !custom_ports.is_empty() {
-        custom_ports.to_vec()
-    } else {
-        discover_active_control_ports()
-    };
+    let preserved_ports = sanitize_firewall_preserved_ports(custom_ports);
     let preserved_ips = vec![
         IpAddr::V4(Ipv4Addr::LOCALHOST),
         IpAddr::V6(Ipv6Addr::LOCALHOST),
@@ -3189,12 +3751,8 @@ impl NetworkIsolator for WindowsWfpIsolator {
         operator: &str,
         reason: &str,
     ) -> Result<IsolationReceipt, KillSwitchError> {
-        if std::env::var("KILLSWITCH_SELF_DIAGNOSTIC").is_ok() {
-            let preserved = if !preserved_ports.is_empty() {
-                preserved_ports.to_vec()
-            } else {
-                discover_active_control_ports()
-            };
+        if is_authorized_self_diagnostic() {
+            let preserved = sanitize_firewall_preserved_ports(preserved_ports);
             let preserved_ips = vec![
                 IpAddr::V4(Ipv4Addr::LOCALHOST),
                 IpAddr::V6(Ipv6Addr::LOCALHOST),
@@ -3212,53 +3770,23 @@ impl NetworkIsolator for WindowsWfpIsolator {
                 reason.to_string(),
             ));
         }
-        match engage_windows_network_quarantine_with_ports(operator, reason, preserved_ports) {
-            Ok(receipt) => Ok(receipt),
-            Err(KillSwitchError::InsufficientPrivileges { .. }) => {
-                warn!("⚠️ [WFP-USERMODE] Non-elevated session detected; executing user-space TCP socket termination and returning contract receipt.");
-                let terminated = terminate_all_non_loopback_tcp_sockets();
-                let preserved = if !preserved_ports.is_empty() {
-                    preserved_ports.to_vec()
-                } else {
-                    discover_active_control_ports()
-                };
-                let preserved_ips = vec![
-                    IpAddr::V4(Ipv4Addr::LOCALHOST),
-                    IpAddr::V6(Ipv6Addr::LOCALHOST),
-                ];
-                Ok(IsolationReceipt::new(
-                    "usermode-session-contract".to_string(),
-                    NetworkIsolationEngine::WindowsWfpDynamic,
-                    vec![1001, 1002, 1003],
-                    Vec::new(),
-                    Vec::new(),
-                    preserved,
-                    preserved_ips,
-                    terminated,
-                    operator.to_string(),
-                    reason.to_string(),
-                ))
-            }
-            Err(e) => Err(e),
-        }
+        // Fail closed unconditionally on InsufficientPrivileges or any WFP engine error;
+        // never fabricate a spoofed "usermode-session-contract" receipt.
+        engage_windows_network_quarantine_with_ports(operator, reason, preserved_ports)
     }
 
     fn restore_quarantine(&self, _receipt: &IsolationReceipt) -> Result<(), KillSwitchError> {
-        if std::env::var("KILLSWITCH_SELF_DIAGNOSTIC").is_ok() {
+        if is_authorized_self_diagnostic() {
             return Ok(());
         }
-        match disarm_windows_network_quarantine("disarm", "reverting quarantine") {
-            Ok(()) => Ok(()),
-            Err(KillSwitchError::InsufficientPrivileges { .. }) => Ok(()),
-            Err(e) => Err(e),
-        }
+        disarm_windows_network_quarantine("disarm", "reverting quarantine")
     }
 
     fn reset_tcp_connections(
         &self,
         target_ips: Option<&[IpAddr]>,
     ) -> Result<usize, KillSwitchError> {
-        if std::env::var("KILLSWITCH_SELF_DIAGNOSTIC").is_ok() {
+        if is_authorized_self_diagnostic() {
             return Ok(0);
         }
         if let Some(ips) = target_ips {
@@ -3522,5 +4050,60 @@ mod tests {
 
         let err_zero = KillSwitchError::ZeroFiltersInstalled("0 filters".to_string());
         assert!(err_zero.to_string().contains("0 filters"));
+    }
+
+    #[test]
+    fn test_ws4_quarantine_port_sanitization_and_structs() {
+        assert!(is_blocked_quarantine_port(0));
+        assert!(is_blocked_quarantine_port(53));
+        assert!(is_blocked_quarantine_port(135));
+        assert!(is_blocked_quarantine_port(445));
+        assert!(is_blocked_quarantine_port(853));
+        assert!(is_blocked_quarantine_port(1080));
+        assert!(is_blocked_quarantine_port(3128));
+        assert!(is_blocked_quarantine_port(5985));
+        assert!(is_blocked_quarantine_port(8080));
+        assert!(is_blocked_quarantine_port(8888));
+        assert!(is_blocked_quarantine_port(9050));
+        assert!(!is_blocked_quarantine_port(DEFAULT_CONTROL_PORT));
+
+        let sanitized = sanitize_firewall_preserved_ports(&[53, 445, 1080, 8080, 9050, 3456]);
+        assert_eq!(sanitized, vec![3456]);
+
+        let fallback = sanitize_firewall_preserved_ports(&[53, 8080]);
+        assert!(!fallback.is_empty());
+        assert!(fallback.iter().all(|p| !is_blocked_quarantine_port(*p)));
+
+        let bound_ports = discover_firewall_bound_control_ports();
+        assert!(!bound_ports.is_empty());
+        assert!(!bound_ports.contains(&3031));
+        assert!(!bound_ports.contains(&4040));
+
+        assert!(is_exact_localhost_v4([127, 0, 0, 1]));
+        assert!(!is_exact_localhost_v4([127, 0, 0, 2]));
+        assert!(is_exact_localhost_v6(Ipv6Addr::LOCALHOST.octets()));
+        assert!(!is_exact_localhost_v6(
+            Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1).octets()
+        ));
+
+        assert_eq!(
+            std::mem::size_of::<FwpRange0>(),
+            std::mem::size_of::<FwpValue0>() * 2
+        );
+        assert_eq!(std::mem::size_of::<MibTcp6Row>(), 52);
+        assert_eq!(std::mem::size_of::<MibTcp6RowOwnerPid>(), 56);
+    }
+
+    #[test]
+    fn test_ws4_wfp_isolator_fails_closed_when_unelevated() {
+        #[cfg(windows)]
+        if !is_current_process_elevated() && !is_authorized_self_diagnostic() {
+            let isolator = WindowsWfpIsolator;
+            let res = isolator.engage_quarantine(&[DEFAULT_CONTROL_PORT], "test", "fail-closed");
+            assert!(
+                matches!(res, Err(KillSwitchError::InsufficientPrivileges { .. })),
+                "Expected fail-closed InsufficientPrivileges, got: {res:?}"
+            );
+        }
     }
 }

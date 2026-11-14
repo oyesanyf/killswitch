@@ -24,4 +24,7 @@ data/
 logs/
 config/
 
-
+# Local environment and secret files (Zero secret leakage invariant)
+.env
+.env.*
+!.env.example

@@ -230,6 +230,7 @@ fn test_empirical_linux_proc_net_tcp_and_tcp6_parser_stress() {
 #[test]
 fn test_empirical_macos_darwin_socket_structures() {
     // 1. Verify get_active_darwin_sockets does not crash and returns valid sockets
+    let _probe_listener = std::net::TcpListener::bind("127.0.0.1:0").ok();
     let darwin_res = get_active_darwin_sockets();
     assert!(darwin_res.is_ok(), "Darwin socket query must succeed");
     let sockets = darwin_res.unwrap();

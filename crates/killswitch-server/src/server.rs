@@ -129,6 +129,16 @@ impl Default for CageKeyManifestResolver {
     }
 }
 
+/// Summary of the latest background OS kernel vulnerability scan.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct KernelScanSummary {
+    pub scanned_at: chrono::DateTime<chrono::Utc>,
+    pub host_kernel: killswitch_kernel_patcher::HostKernelInfo,
+    pub vulnerability_count: usize,
+    pub cisa_kev_count: usize,
+    pub vulnerabilities: Vec<killswitch_kernel_patcher::KernelVulnerability>,
+}
+
 /// Configuration for local Axum HTTP control server.
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
@@ -137,6 +147,8 @@ pub struct ServerConfig {
     pub max_body_bytes: usize,
     pub request_timeout_secs: u64,
     pub open_browser: bool,
+    pub kernel_scan_interval_secs: u64,
+    pub enable_kernel_scan: bool,
 }
 
 impl Default for ServerConfig {
@@ -147,6 +159,8 @@ impl Default for ServerConfig {
             max_body_bytes: 2 * 1024 * 1024, // 2 MB
             request_timeout_secs: 30,
             open_browser: false,
+            kernel_scan_interval_secs: 3600,
+            enable_kernel_scan: true,
         }
     }
 }
@@ -169,6 +183,7 @@ pub struct ServerState {
     pub active_bound_port: Arc<std::sync::atomic::AtomicU16>,
     pub fprime_supervisor: Arc<killswitch_core::fprime::FPrimeSupervisor>,
     pub config: ServerConfig,
+    pub latest_kernel_scan: Arc<RwLock<Option<KernelScanSummary>>>,
 
     // --- CAGE Substrate Integration State ---
     pub signing_key: Arc<SigningKey>,
@@ -301,6 +316,7 @@ impl ServerState {
             active_bound_port: Arc::new(std::sync::atomic::AtomicU16::new(3030)),
             fprime_supervisor: Arc::new(killswitch_core::fprime::FPrimeSupervisor::new()),
             config: ServerConfig::default(),
+            latest_kernel_scan: Arc::new(RwLock::new(None)),
 
             signing_key,
             ed25519_kid,
@@ -646,6 +662,12 @@ impl KillSwitchServer {
             }
         });
 
+        // Spawn periodic OS Kernel Vulnerability & CISA KEV Scanner loop
+        let patcher_state = Arc::clone(&self.state);
+        let patcher_handle = tokio::spawn(async move {
+            run_periodic_kernel_scanner(patcher_state).await;
+        });
+
         // Re-enforce unexpired leases from journal fail-closed on startup
         let _ = self
             .state
@@ -664,6 +686,7 @@ impl KillSwitchServer {
         .map_err(|e| ServerError::Internal(format!("Server error: {}", e)))?;
 
         sentinel_handle.abort();
+        patcher_handle.abort();
 
         let _ = std::fs::remove_file("active_port.txt");
         if let Ok(exe) = std::env::current_exe() {
@@ -727,4 +750,168 @@ pub fn open_browser_cross_platform(url: &str) {
             }
         }
     });
+}
+
+/// Executes a single OS kernel vulnerability scan cycle against NVD API 2.0 / CISA KEV.
+/// Returns the number of vulnerabilities detected, or PatcherError on failure.
+pub async fn run_periodic_kernel_scan_cycle(
+    state: &ServerState,
+) -> Result<usize, killswitch_kernel_patcher::PatcherError> {
+    // 1. Detect host platform and kernel release version (offloaded to avoid blocking worker thread)
+    let host_kernel =
+        tokio::task::spawn_blocking(killswitch_kernel_patcher::HostKernelInfo::detect_host_kernel)
+            .await
+            .map_err(|e| {
+                killswitch_kernel_patcher::PatcherError::DetectionFailed(e.to_string())
+            })??;
+
+    tracing::info!(
+        "🛡️ [KERNEL-SCANNER] Detected host OS: {} | Kernel: {} | CPE: {}",
+        host_kernel.os_family,
+        host_kernel.kernel_release,
+        host_kernel.cpe23
+    );
+
+    // 2. Resolve NVD_API_KEY strictly from runtime environment variable
+    // Invariant: Zero leakage into CLI args, process tables, or persistent configs
+    let api_key = std::env::var("NVD_API_KEY").ok().and_then(|k| {
+        let trimmed = k.trim().to_string();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    });
+
+    if api_key.is_some() {
+        tracing::info!(
+            "🔑 [KERNEL-SCANNER] Using authenticated NVD API 2.0 key for elevated rate limits"
+        );
+    } else {
+        tracing::debug!(
+            "ℹ️ [KERNEL-SCANNER] No NVD_API_KEY detected in environment; using public rate limits"
+        );
+    }
+
+    // 3. Configure ScanOptions
+    let options = killswitch_kernel_patcher::ScanOptions {
+        cpe: Some(host_kernel.cpe23.clone()),
+        min_cvss_score: None,
+        kev_only: false,
+        api_key,
+        timeout_secs: 30,
+    };
+
+    // 4. Execute scan via KernelPatcher
+    let patcher = killswitch_kernel_patcher::KernelPatcher::new();
+    let findings = patcher.scan_kernel_vulnerabilities(&options).await?;
+
+    let kev_count = findings.iter().filter(|v| v.is_cisa_kev).count();
+    let total_count = findings.len();
+
+    if total_count == 0 {
+        tracing::info!(
+            "🛡️ [KERNEL-SCANNER] Kernel vulnerability scan complete: 0 vulnerabilities found for host CPE {}",
+            host_kernel.cpe23
+        );
+    } else {
+        tracing::warn!(
+            "⚠️ [KERNEL-SCANNER] Kernel vulnerability scan complete: {} vulnerabilities found ({} CISA KEV) for host CPE {}",
+            total_count,
+            kev_count,
+            host_kernel.cpe23
+        );
+
+        for finding in findings.iter().take(5) {
+            if finding.is_cisa_kev {
+                tracing::warn!(
+                    "🚨 [KERNEL-SCANNER] CISA KEV: {} (CVSS {:?}): {}",
+                    finding.cve_id,
+                    finding.cvss_v31_score,
+                    finding.description
+                );
+            } else {
+                tracing::info!(
+                    "ℹ️ [KERNEL-SCANNER] Vulnerability: {} (CVSS {:?}): {}",
+                    finding.cve_id,
+                    finding.cvss_v31_score,
+                    finding.description
+                );
+            }
+        }
+    }
+
+    // 5. Update cached scan summary in ServerState
+    let summary = KernelScanSummary {
+        scanned_at: chrono::Utc::now(),
+        host_kernel,
+        vulnerability_count: total_count,
+        cisa_kev_count: kev_count,
+        vulnerabilities: findings,
+    };
+    *state.latest_kernel_scan.write().await = Some(summary);
+
+    Ok(total_count)
+}
+
+/// Background loop executing periodic kernel vulnerability scans.
+pub async fn run_periodic_kernel_scanner(state: Arc<ServerState>) {
+    let interval_secs = std::env::var("KILLSWITCH_KERNEL_SCAN_INTERVAL_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(state.config.kernel_scan_interval_secs)
+        .max(10); // Minimum clamp 10s
+
+    let enabled =
+        std::env::var("KILLSWITCH_DISABLE_KERNEL_SCAN").is_err() && state.config.enable_kernel_scan;
+
+    if !enabled {
+        tracing::info!(
+            "ℹ️ [KERNEL-SCANNER] Periodic kernel vulnerability scanning disabled by config/env"
+        );
+        return;
+    }
+
+    tracing::info!(
+        "🛡️ [KERNEL-SCANNER] Starting periodic kernel vulnerability scanner (interval: {}s)",
+        interval_secs
+    );
+
+    // Initial delay before first scan so server startup completes swiftly without blocking
+    let initial_delay_secs = std::env::var("KILLSWITCH_KERNEL_SCAN_INITIAL_DELAY_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(5);
+
+    tokio::time::sleep(tokio::time::Duration::from_secs(initial_delay_secs)).await;
+
+    let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(interval_secs));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    loop {
+        tracing::debug!(
+            "🛡️ [KERNEL-SCANNER] Initiating periodic kernel vulnerability scan cycle..."
+        );
+        match run_periodic_kernel_scan_cycle(&state).await {
+            Ok(count) => {
+                tracing::debug!(
+                    "🛡️ [KERNEL-SCANNER] Scan cycle finished: {} findings",
+                    count
+                );
+            }
+            Err(killswitch_kernel_patcher::PatcherError::RateLimited) => {
+                tracing::warn!(
+                    "⚠️ [KERNEL-SCANNER] NVD API rate-limit reached; skipping until next scheduled cycle"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "⚠️ [KERNEL-SCANNER] Periodic kernel vulnerability scan cycle encountered error: {}",
+                    e
+                );
+            }
+        }
+
+        interval.tick().await;
+    }
 }
